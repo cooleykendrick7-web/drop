@@ -82,6 +82,10 @@ def init_db():
         message TEXT NOT NULL,
         status TEXT NOT NULL DEFAULT 'open',
         created_at TEXT NOT NULL)""")
+    # migration: tips (added 2026-10-08)
+    cols = [r[1] for r in c.execute("PRAGMA table_info(orders)").fetchall()]
+    if "tip" not in cols:
+        c.execute("ALTER TABLE orders ADD COLUMN tip REAL DEFAULT 0")
     defaults = {
         "delivery_fee": "3.99",
         "pin": "1234",
@@ -267,19 +271,23 @@ async def create_order(req: Request):
                        "price": mi["price"], "qty": qty, "line": line})
     food_total = round(food_total, 2)
     fee = round(float(get_setting("delivery_fee")), 2)
-    total = round(food_total + fee, 2)
+    try:
+        tip = round(max(0.0, min(100.0, float(body.get("tip", 0)))), 2)
+    except (TypeError, ValueError):
+        tip = 0.0
+    total = round(food_total + fee + tip, 2)
     cur = conn.execute(
         """INSERT INTO orders(restaurant_id, items_json, customer_name, phone, address,
-                              notes, food_total, delivery_fee, total, status,
+                              notes, food_total, delivery_fee, tip, total, status,
                               stripe_status, created_at, updated_at)
-           VALUES(?,?,?,?,?,?,?,?,?,'placed','pending',?,?)""",
+           VALUES(?,?,?,?,?,?,?,?,?,?,'placed','pending',?,?)""",
         (rid, json.dumps(priced), name, phone, address, notes,
-         food_total, fee, total, now_iso(), now_iso()))
+         food_total, fee, tip, total, now_iso(), now_iso()))
     oid = cur.lastrowid
     conn.commit()
     conn.close()
     return {"order_id": oid, "food_total": food_total, "delivery_fee": fee,
-            "total": total, "stripe_live": STRIPE_LIVE}
+            "tip": tip, "total": total, "stripe_live": STRIPE_LIVE}
 
 
 @app.post("/api/checkout")
@@ -296,9 +304,7 @@ async def checkout(req: Request):
         return {"already_paid": True, "track_url": f"/track.html?id={oid}"}
     if STRIPE_LIVE:
         base = str(req.base_url).rstrip("/")
-        session = stripe.checkout.Session.create(
-            mode="payment",
-            line_items=[{
+        line_items = [{
                 "price_data": {
                     "currency": "usd",
                     "product_data": {"name": f"Drop order #{oid} — food"},
@@ -312,7 +318,19 @@ async def checkout(req: Request):
                     "unit_amount": int(round(o["delivery_fee"] * 100)),
                 },
                 "quantity": 1,
-            }],
+            }]
+        if (o["tip"] or 0) > 0:
+            line_items.append({
+                "price_data": {
+                    "currency": "usd",
+                    "product_data": {"name": "Tip for your driver"},
+                    "unit_amount": int(round(o["tip"] * 100)),
+                },
+                "quantity": 1,
+            })
+        session = stripe.checkout.Session.create(
+            mode="payment",
+            line_items=line_items,
             success_url=f"{base}/pay/success?session_id={{CHECKOUT_SESSION_ID}}",
             cancel_url=f"{base}/checkout.html?order_id={oid}&cancelled=1",
             metadata={"drop_order_id": str(oid)},
@@ -381,7 +399,7 @@ def public_order(oid: int):
     return {
         "id": od["id"], "restaurant": rest["name"] if rest else "",
         "items": od["items"], "food_total": od["food_total"],
-        "delivery_fee": od["delivery_fee"], "total": od["total"],
+        "delivery_fee": od["delivery_fee"], "tip": od.get("tip", 0), "total": od["total"],
         "status": od["status"], "status_label": od["status_label"],
         "paid": od["stripe_status"] == "paid", "created_at": od["created_at"],
     }
@@ -429,19 +447,22 @@ def op_earnings(x_pin: str = Header(default="")):
     check_pin(x_pin)
     conn = db()
     rows = conn.execute(
-        """SELECT id, delivery_fee, total, created_at FROM orders
+        """SELECT id, delivery_fee, tip, total, created_at FROM orders
            WHERE stripe_status='paid' AND status != 'cancelled'""").fetchall()
     total_fees = round(sum(r["delivery_fee"] for r in rows), 2)
+    total_tips = round(sum((r["tip"] or 0) for r in rows), 2)
     total_sales = round(sum(r["total"] for r in rows), 2)
     by_day = {}
     for r in rows:
         day = r["created_at"][:10]
-        d = by_day.setdefault(day, {"orders": 0, "fees": 0.0, "sales": 0.0})
+        d = by_day.setdefault(day, {"orders": 0, "fees": 0.0, "tips": 0.0, "sales": 0.0})
         d["orders"] += 1
         d["fees"] = round(d["fees"] + r["delivery_fee"], 2)
+        d["tips"] = round(d["tips"] + (r["tip"] or 0), 2)
         d["sales"] = round(d["sales"] + r["total"], 2)
     conn.close()
-    return {"orders": len(rows), "total_fees": total_fees,
+    return {"orders": len(rows), "total_fees": total_fees, "total_tips": total_tips,
+            "total_earned": round(total_fees + total_tips, 2),
             "total_sales": total_sales, "by_day": by_day}
 
 
