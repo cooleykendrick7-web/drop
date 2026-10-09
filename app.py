@@ -1086,6 +1086,18 @@ def tpage():
         return f.read()
 
 
+@app.get("/login.html", response_class=HTMLResponse)
+def loginpage():
+    with open(os.path.join(BASE, "static", "login.html")) as f:
+        return f.read()
+
+
+@app.get("/account.html", response_class=HTMLResponse)
+def acctpage():
+    with open(os.path.join(BASE, "static", "account.html")) as f:
+        return f.read()
+
+
 @app.get("/dash", response_class=HTMLResponse)
 @app.get("/dash.html", response_class=HTMLResponse)
 def dpage():
