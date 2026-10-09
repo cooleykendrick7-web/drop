@@ -106,6 +106,8 @@ def init_db():
     if "eta" not in rcols:
         c.execute("ALTER TABLE restaurants ADD COLUMN eta TEXT DEFAULT ''")
     c.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('min_order', '10.00')")
+    c.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('accepting_orders', '1')")
+    c.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('mins_per_delivery', '18')")
     defaults = {
         "delivery_fee": "3.99",
         "pin": "1234",
@@ -259,6 +261,8 @@ def list_restaurants():
 async def create_order(req: Request):
     """Create an order (unpaid). Server prices everything from the DB."""
     body = await req.json()
+    if get_setting("accepting_orders") == "0":
+        raise HTTPException(400, "We're at capacity right now — please check back soon")
     rid = body.get("restaurant_id")
     items = body.get("items", [])
     cust = body.get("customer", {})
@@ -433,6 +437,11 @@ def public_order(oid: int):
         raise HTTPException(404, "Order not found")
     rest = conn.execute("SELECT name FROM restaurants WHERE id=?",
                         (o["restaurant_id"],)).fetchone()
+    pos = 0
+    if o["status"] not in ("delivered", "cancelled"):
+        pos = conn.execute(
+            "SELECT COUNT(*) c FROM orders WHERE status NOT IN ('delivered','cancelled') AND id <= ?",
+            (oid,)).fetchone()["c"]
     conn.close()
     od = order_dict(o)
     return {
@@ -440,7 +449,7 @@ def public_order(oid: int):
         "items": od["items"], "food_total": od["food_total"],
         "delivery_fee": od["delivery_fee"], "tip": od.get("tip", 0),
         "discount": od.get("discount", 0), "promo_code": od.get("promo_code", ""),
-        "total": od["total"],
+        "total": od["total"], "queue_position": pos,
         "status": od["status"], "status_label": od["status_label"],
         "paid": od["stripe_status"] == "paid", "created_at": od["created_at"],
     }
@@ -476,11 +485,19 @@ async def op_set_status(oid: int, req: Request, x_pin: str = Header(default=""))
     if not o:
         conn.close()
         raise HTTPException(404, "Order not found")
-    conn.execute("UPDATE orders SET status=?, updated_at=? WHERE id=?",
-                 (status, now_iso(), oid))
+    refunded = False
+    new_stripe_status = o["stripe_status"]
+    if status == "cancelled":
+        refunded = refund_order(o)
+        if refunded:
+            new_stripe_status = "refunded"
+        if o["promo_code"]:
+            conn.execute("UPDATE promo_codes SET uses=MAX(0,uses-1) WHERE code=?", (o["promo_code"],))
+    conn.execute("UPDATE orders SET status=?, stripe_status=?, updated_at=? WHERE id=?",
+                 (status, new_stripe_status, now_iso(), oid))
     conn.commit()
     conn.close()
-    return {"ok": True, "status": status, "label": STATUS_LABELS[status]}
+    return {"ok": True, "status": status, "label": STATUS_LABELS[status], "refunded": refunded}
 
 
 @app.get("/api/operator/earnings")
@@ -512,6 +529,8 @@ def op_get_settings(x_pin: str = Header(default="")):
     check_pin(x_pin)
     return {"delivery_fee": float(get_setting("delivery_fee")),
             "min_order": float(get_setting("min_order") or 10),
+            "accepting_orders": get_setting("accepting_orders") != "0",
+            "mins_per_delivery": int(get_setting("mins_per_delivery") or 18),
             "pin": get_setting("pin"),
             "ntfy_topic": get_setting("ntfy_topic"),
             "tagline": get_setting("tagline")}
@@ -534,6 +553,14 @@ async def op_put_settings(req: Request, x_pin: str = Header(default="")):
             raise HTTPException(400, "Min order must be 0–200")
         set_setting("min_order", str(mo))
         out["min_order"] = mo
+    if "accepting_orders" in body:
+        ao = "1" if body["accepting_orders"] else "0"
+        set_setting("accepting_orders", ao)
+        out["accepting_orders"] = ao == "1"
+    if "mins_per_delivery" in body:
+        mpd = max(5, min(120, int(body["mins_per_delivery"])))
+        set_setting("mins_per_delivery", str(mpd))
+        out["mins_per_delivery"] = mpd
     if "pin" in body:
         pin = str(body["pin"]).strip()
         if not (pin.isdigit() and 4 <= len(pin) <= 8):
@@ -647,6 +674,60 @@ def op_delete_promo(pid: int, x_pin: str = Header(default="")):
     conn.commit()
     conn.close()
     return {"ok": True}
+
+
+# ---------------- queue ----------------
+def refund_order(o):
+    """Best-effort Stripe refund for a paid order. Returns True if refunded."""
+    if not STRIPE_LIVE or o["stripe_status"] != "paid" or not o["stripe_payment_id"]:
+        return False
+    try:
+        sess = stripe.checkout.Session.retrieve(o["stripe_payment_id"])
+        pi = sess.get("payment_intent")
+        if pi:
+            stripe.Refund.create(payment_intent=pi)
+            return True
+    except Exception:
+        pass
+    return False
+
+
+@app.get("/api/queue")
+def queue_status():
+    conn = db()
+    n = conn.execute(
+        "SELECT COUNT(*) c FROM orders WHERE status NOT IN ('delivered','cancelled')"
+    ).fetchone()["c"]
+    conn.close()
+    accepting = get_setting("accepting_orders") != "0"
+    try:
+        mins = max(5, min(120, int(get_setting("mins_per_delivery") or 18)))
+    except (TypeError, ValueError):
+        mins = 18
+    return {"active": n, "accepting": accepting,
+            "estimated_mins": (n * mins + 25) if accepting else 0}
+
+
+@app.post("/api/orders/{oid}/cancel")
+def customer_cancel(oid: int):
+    """Customer cancels their own order (before pickup). Auto-refunds if paid."""
+    conn = db()
+    o = conn.execute("SELECT * FROM orders WHERE id=?", (oid,)).fetchone()
+    if not o:
+        conn.close()
+        raise HTTPException(404, "Order not found")
+    if o["status"] not in ("placed", "confirmed"):
+        conn.close()
+        raise HTTPException(400, "Too late to cancel — your food is already on the way")
+    refunded = refund_order(o)
+    conn.execute(
+        "UPDATE orders SET status='cancelled', stripe_status=?, updated_at=? WHERE id=?",
+        ("refunded" if refunded else o["stripe_status"], now_iso(), oid))
+    if o["promo_code"]:
+        conn.execute("UPDATE promo_codes SET uses=MAX(0,uses-1) WHERE code=?", (o["promo_code"],))
+    conn.commit()
+    conn.close()
+    return {"ok": True, "refunded": refunded}
 
 
 # ---------------- support tickets ----------------
