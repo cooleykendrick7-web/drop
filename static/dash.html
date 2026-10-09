@@ -20,6 +20,7 @@
     <button class="on" data-t="orders">Orders</button>
     <button data-t="earn">Earnings</button>
     <button data-t="menu">Menu</button>
+    <button data-t="promo">Promos</button>
     <button data-t="sup">Support <span id="tixbadge"></span></button>
     <button data-t="set">Settings</button>
   </div>
@@ -43,13 +44,26 @@
       <button class="btn" id="addrest">Add</button></div>
   </div>
 
+  <div class="tab" id="t-promo">
+    <div class="card"><h3>Create promo code</h3>
+      <div class="row"><input id="pcode" placeholder="CODE (e.g. WELCOME5)" style="text-transform:uppercase">
+      <select id="pkind" style="max-width:110px"><option value="fixed">$ off</option><option value="percent">% off</option></select></div>
+      <div class="row"><input id="pvalue" placeholder="Value (5 or 10)" inputmode="decimal">
+      <input id="pmin" placeholder="Min order $ (0=none)" inputmode="decimal"></div>
+      <div class="row"><input id="pmax" placeholder="Max uses (0=unlimited)" inputmode="numeric">
+      <button class="btn small" id="pcreate" style="width:auto;padding:10px 20px">Create</button></div>
+      <p class="small" id="pmsg"></p></div>
+    <div id="plist"></div>
+  </div>
+
   <div class="tab" id="t-sup">
     <div id="tixlist"></div>
   </div>
 
   <div class="tab" id="t-set">
     <div class="card"><h3>Delivery fee ($)</h3>
-      <input id="sfee" inputmode="decimal"><h3>Change PIN</h3>
+      <input id="sfee" inputmode="decimal"><h3>Minimum food order ($)</h3>
+      <input id="smin" inputmode="decimal" placeholder="10.00"><h3>Change PIN</h3>
       <input id="spin" inputmode="numeric" placeholder="4–8 digits"><h3>ntfy push topic</h3>
       <input id="stopic" placeholder="secret-topic-name">
       <button class="btn" id="saveset">Save settings</button>
@@ -81,7 +95,7 @@ document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
   b.classList.add('on'); $('t-'+b.dataset.t).classList.add('on');
-  if(b.dataset.t==='earn') loadEarn(); if(b.dataset.t==='menu') loadMenu(); if(b.dataset.t==='set') loadSet(); if(b.dataset.t==='sup') loadTix();
+  if(b.dataset.t==='earn') loadEarn(); if(b.dataset.t==='menu') loadMenu(); if(b.dataset.t==='set') loadSet(); if(b.dataset.t==='sup') loadTix(); if(b.dataset.t==='promo') loadPromos();
 });
 
 $('gobtn').onclick=async()=>{
@@ -114,7 +128,7 @@ async function loadOrders(first){
       <p><b>${o.customer_name}</b> · <a href="tel:${o.phone}">${o.phone}</a><br>
       📍 ${o.address}${o.notes?`<br>📝 ${o.notes}`:''}</p>
       ${o.items.map(i=>`<div class="row small"><span>${i.qty}× ${i.name}</span><span>$${i.line.toFixed(2)}</span></div>`).join('')}
-      <div class="row"><span class="small">Food $${o.food_total.toFixed(2)} + fee $${o.delivery_fee.toFixed(2)}${o.tip?` + tip $${o.tip.toFixed(2)}`:''}</span><b>$${o.total.toFixed(2)}</b></div>
+      <div class="row"><span class="small">Food $${o.food_total.toFixed(2)} + fee $${o.delivery_fee.toFixed(2)}${o.tip?` + tip $${o.tip.toFixed(2)}`:''}${o.discount?` − disc $${o.discount.toFixed(2)}`:''}</span><b>$${o.total.toFixed(2)}</b></div>
       <div class="small">${o.paid?'💰 Paid ✓':'⚠️ NOT PAID'} · ${new Date(o.created_at).toLocaleString()}</div>
       <div style="margin-top:8px">
         ${NEXT[o.status]?`<button class="btn small" onclick="setStatus(${o.id},'${NEXT[o.status]}')">${NEXTLBL[NEXT[o.status]]}</button>`:''}
@@ -143,6 +157,9 @@ async function loadMenu(){
       <span><button class="btn small ${x.open?'ghost':''}" onclick="toggleR(${x.id},${x.open?0:1})">${x.open?'Close':'Open'}</button>
       <button class="btn small ghost" onclick="delR(${x.id})">✕</button></span></div>
       <span class="small">${x.cuisine}${x.sample?' · SAMPLE':''}</span>
+      <div class="row" style="margin-top:6px"><span class="small">⏱️ ETA:</span>
+        <input id="eta-${x.id}" value="${(x.eta||'').replace(/"/g,'&quot;')}" placeholder="25–35 min" style="flex:1;margin:0 6px;max-width:140px">
+        <button class="btn small ghost" onclick="saveEta(${x.id})">Save</button></div>
       ${x.menu.map(m=>`<div class="row"><span class="small">${m.available?'':'🚫 '}${m.name} — $${m.price.toFixed(2)}</span>
         <span><button class="btn small ghost" onclick="toggleM(${m.id},${m.available?0:1})">${m.available?'Hide':'Show'}</button>
         <button class="btn small ghost" onclick="delM(${m.id})">✕</button></span></div>`).join('')}
@@ -158,6 +175,8 @@ async function addM(rid){const n=$('mi-n-'+rid).value.trim(),p=parseFloat($('mi-
   await fetch('/api/operator/menu-items',{method:'POST',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({restaurant_id:rid,name:n,price:p})});loadMenu();}
 async function toggleM(id,a){await fetch('/api/operator/menu-items/'+id,{method:'PUT',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({available:!!a})});loadMenu();}
 async function delM(id){await fetch('/api/operator/menu-items/'+id,{method:'DELETE',headers:H()});loadMenu();}
+async function saveEta(id){const v=$('eta-'+id).value.trim();
+  await fetch('/api/operator/restaurants/'+id,{method:'PUT',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({eta:v})});}
 $('addrest').onclick=async()=>{
   const n=$('nname').value.trim(); if(!n){alert('Name required');return;}
   await fetch('/api/operator/restaurants',{method:'POST',headers:{...H(),'Content-Type':'application/json'},
@@ -166,15 +185,36 @@ $('addrest').onclick=async()=>{
 };
 async function loadSet(){
   const s=await (await fetch('/api/operator/settings',{headers:H()})).json();
-  $('sfee').value=s.delivery_fee;$('stopic').value=s.ntfy_topic||'';
+  $('sfee').value=s.delivery_fee;$('smin').value=s.min_order;$('stopic').value=s.ntfy_topic||'';
 }
 $('saveset').onclick=async()=>{
-  const body={delivery_fee:parseFloat($('sfee').value),ntfy_topic:$('stopic').value.trim()};
+  const body={delivery_fee:parseFloat($('sfee').value),min_order:parseFloat($('smin').value)||0,ntfy_topic:$('stopic').value.trim()};
   if($('spin').value.trim()) body.pin=$('spin').value.trim();
   const r=await fetch('/api/operator/settings',{method:'PUT',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify(body)});
   const j=await r.json();
   if(r.ok){$('setmsg').textContent='Saved ✓';if(body.pin)PIN=body.pin,sessionStorage.setItem('droppin',PIN);$('spin').value='';}
   else $('setmsg').textContent='Error: '+(j.detail||'save failed');
+};
+async function loadPromos(){
+  const p=await (await fetch('/api/operator/promos',{headers:H()})).json();
+  $('plist').innerHTML=p.map(x=>`
+    <div class="card"><div class="row"><b>${x.code}</b>
+      <span class="badge ${x.active?'open':'closed'}">${x.active?'ACTIVE':'OFF'}</span></div>
+      <p class="small">${x.kind==='percent'?x.value+'% off':'$'+x.value.toFixed(2)+' off'}
+        ${x.min_order>0?` · min $${x.min_order.toFixed(2)}`:''} · used ${x.uses}${x.max_uses>0?'/'+x.max_uses:''}</p>
+      <div><button class="btn small ghost" onclick="togglePromo(${x.id},${x.active?0:1})">${x.active?'Pause':'Resume'}</button>
+      <button class="btn small ghost" onclick="delPromo(${x.id})">✕</button></div>
+    </div>`).join('')||'<p class="small">No promo codes yet — create one above.</p>';
+}
+async function togglePromo(id,a){await fetch('/api/operator/promos/'+id,{method:'PUT',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({active:!!a})});loadPromos();}
+async function delPromo(id){if(confirm('Delete this promo code?')){await fetch('/api/operator/promos/'+id,{method:'DELETE',headers:H()});loadPromos();}}
+$('pcreate').onclick=async()=>{
+  const body={code:$('pcode').value,kind:$('pkind').value,value:parseFloat($('pvalue').value),
+    min_order:parseFloat($('pmin').value)||0,max_uses:parseInt($('pmax').value)||0};
+  const r=await fetch('/api/operator/promos',{method:'POST',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const j=await r.json();
+  if(r.ok){$('pmsg').textContent='Created ✓';$('pcode').value='';$('pvalue').value='';$('pmin').value='';$('pmax').value='';loadPromos();}
+  else $('pmsg').textContent='Error: '+(j.detail||'create failed');
 };
 setInterval(()=>{if(PIN) loadOrders();},5000);
 async function loadTix(){

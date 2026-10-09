@@ -10,6 +10,14 @@
 <div id="dev"></div>
 <div id="summary" class="card"></div>
 <div class="card">
+  <label>Promo code</label>
+  <div style="display:flex;gap:8px">
+    <input id="promo" placeholder="Enter code" style="margin:0;text-transform:uppercase">
+    <button class="btn small" id="applypromo" style="width:auto;padding:10px 18px">Apply</button>
+  </div>
+  <p class="small" id="promomsg" style="margin:6px 0 0"></p>
+</div>
+<div class="card">
   <label>Tip your driver <span class="small">(100% goes to Ken)</span></label>
   <div id="tips" style="display:flex;gap:8px;flex-wrap:wrap;margin:6px 0">
     <button class="btn small ghost tipbtn" data-t="0">$0</button>
@@ -29,12 +37,35 @@
 <p class="small" id="msg"></p>
 <script>
 const rid = new URLSearchParams(location.search).get('rid');
-let fee=3.99, live=false, cart={}, menu=[], tip=2;
+let fee=3.99, minOrder=10, live=false, cart={}, menu=[], tip=2, promo={code:'',discount:0};
 function getTip(){
   const c=parseFloat(document.getElementById('customtip').value);
   if(c>0) return Math.min(100,Math.round(c*100)/100);
   return tip;
 }
+function foodTotal(){
+  let food=0;
+  for(const [id,q] of Object.entries(cart)){
+    const m=menu.find(x=>x.id==id); if(m) food+=m.price*q;
+  }
+  return Math.round(food*100)/100;
+}
+document.getElementById('applypromo').onclick=async()=>{
+  const code=document.getElementById('promo').value.trim();
+  const msg=document.getElementById('promomsg');
+  if(!code){msg.textContent='';return;}
+  const r=await (await fetch('/api/promo/validate',{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({code,subtotal:foodTotal()})})).json();
+  if(r.valid){
+    promo={code:r.code,discount:r.discount};
+    msg.innerHTML=`<span style="color:var(--ok)">✓ ${r.code} applied: -$${r.discount.toFixed(2)}</span>`;
+  }else{
+    promo={code:'',discount:0};
+    msg.innerHTML=`<span style="color:#ff6b6b">${r.message}</span>`;
+  }
+  drawSummary();
+};
 document.querySelectorAll('.tipbtn').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.tipbtn').forEach(x=>{x.classList.remove('on');x.classList.add('ghost');});
   b.classList.add('on');b.classList.remove('ghost');
@@ -54,17 +85,20 @@ function drawSummary(){
     const m=menu.find(x=>x.id==id); if(!m) continue;
     food+=m.price*q; rows+=`<div class="row"><span>${q}× ${m.name}</span><span>$${(m.price*q).toFixed(2)}</span></div>`;
   }
+  // re-check promo against current cart (items may have changed)
   document.getElementById('summary').innerHTML = rows +
     `<div class="row"><span>Delivery fee</span><span>$${fee.toFixed(2)}</span></div>
      <div class="row"><span>Driver tip</span><span>$${t.toFixed(2)}</span></div>
-     <div class="row total"><span>Total</span><span>$${(food+fee+t).toFixed(2)}</span></div>`;
+     ${promo.discount>0?`<div class="row" style="color:var(--ok)"><span>Discount (${promo.code})</span><span>-$${promo.discount.toFixed(2)}</span></div>`:''}
+     <div class="row total"><span>Total</span><span>$${(food+fee+t-promo.discount).toFixed(2)}</span></div>
+     ${food<minOrder?`<p class="small" style="color:#ff6b6b">Minimum order is $${minOrder.toFixed(2)} of food — add $${(minOrder-food).toFixed(2)} more.</p>`:''}`;
   window._food=food;
 }
 async function load(){
   if(new URLSearchParams(location.search).get('cancelled'))
     document.getElementById('msg').textContent='Payment was cancelled — your order is saved, you can try again.';
   const cfg = await (await fetch('/api/config')).json();
-  fee=cfg.delivery_fee; live=cfg.stripe_live;
+  fee=cfg.delivery_fee; minOrder=cfg.min_order||10; live=cfg.stripe_live;
   if(!live) document.getElementById('dev').innerHTML='<div class="devbanner">🚧 TEST MODE — no real card is charged. Hit "Place order" then the test-pay button.</div>';
   cart = JSON.parse(localStorage.getItem('dropcart_'+rid)||'{}');
   const r = await (await fetch('/api/restaurants')).json();
@@ -83,11 +117,13 @@ document.getElementById('pay').onclick = async ()=>{
         notes=document.getElementById('notes').value.trim();
   const msg=document.getElementById('msg');
   if(!name||!phone||!address){ msg.textContent='Please fill in name, phone, and address.'; return; }
+  if(foodTotal()<minOrder){ msg.textContent=`Minimum food order is $${minOrder.toFixed(2)} — add a little more!`; return; }
   msg.textContent='Placing your order…';
   const items=Object.entries(cart).map(([id,q])=>({menu_item_id:+id,qty:q}));
   const o = await (await fetch('/api/orders',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({restaurant_id:+rid,items,tip:getTip(),customer:{name,phone,address,notes}})})).json();
+    body:JSON.stringify({restaurant_id:+rid,items,tip:getTip(),promo_code:promo.code,customer:{name,phone,address,notes}})})).json();
   if(o.order_id===undefined){ msg.textContent='Error: '+(o.detail||'could not place order'); return; }
+  try{localStorage.setItem('droplast',JSON.stringify({rid:+rid,items:cart,at:Date.now()}));}catch(e){}
   localStorage.removeItem('dropcart_'+rid);
   const c = await (await fetch('/api/checkout',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({order_id:o.order_id})})).json();

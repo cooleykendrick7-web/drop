@@ -23,6 +23,7 @@ async function poll(){
     o.items.map(i=>`<div class="row"><span>${i.qty}× ${i.name}</span><span>$${i.line.toFixed(2)}</span></div>`).join('')+
     `<div class="row"><span>Delivery fee</span><span>$${o.delivery_fee.toFixed(2)}</span></div>
      ${o.tip?`<div class="row"><span>Driver tip</span><span>$${o.tip.toFixed(2)}</span></div>`:''}
+     ${o.discount?`<div class="row" style="color:var(--ok)"><span>Discount (${o.promo_code})</span><span>-$${o.discount.toFixed(2)}</span></div>`:''}
      <div class="row total"><span>Total</span><span>$${o.total.toFixed(2)}</span></div>`;
   if(o.status==='cancelled'){
     document.getElementById('steps').innerHTML='<div class="card">This order was cancelled. Ken will reach out about a refund.</div>';

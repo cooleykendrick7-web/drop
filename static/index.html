@@ -1,6 +1,10 @@
 <!DOCTYPE html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Drop — Bismarck Food Delivery</title>
+<title>Drop — Food Delivery in Bismarck, ND | Faster Than DoorDash</title>
+<meta name="description" content="Drop delivers your favorite Bismarck restaurants to your door — McDonald's, Taco Bell, Pizza Hut, local spots & more. One flat $3.99 fee, one local driver, real-time tracking.">
+<meta property="og:title" content="Drop — Bismarck Food Delivery">
+<meta property="og:description" content="Bismarck's favorite food, dropped at your door. $3.99 flat delivery.">
+<meta property="og:image" content="/static/logo.jpg">
 <link rel="icon" href="/static/logo-mark.jpg">
 <link rel="stylesheet" href="/static/styles.css">
 </head><body>
@@ -44,10 +48,22 @@ async function load(){
   }
   const r = await (await fetch('/api/restaurants')).json();
   document.getElementById('count').textContent = r.length + ' spots';
-  document.getElementById('list').innerHTML = r.map(x=>`
+  // one-tap reorder
+  let reorder='';
+  try{
+    const last=JSON.parse(localStorage.getItem('droplast')||'null');
+    if(last && last.rid){
+      const lr=r.find(x=>x.id===last.rid);
+      if(lr) reorder=`<a class="card rest" href="/restaurant.html?id=${lr.id}&reorder=1" style="border-color:var(--acc)">
+        <div class="emoji">🔁</div>
+        <div class="meta"><b>Order again from ${lr.name}</b><span>Your last order, one tap</span></div>
+        <span class="badge open">REORDER</span></a>`;
+    }
+  }catch(e){}
+  document.getElementById('list').innerHTML = reorder + r.map(x=>`
     <a class="card rest" href="/restaurant.html?id=${x.id}">
       <div class="emoji">${x.emoji}</div>
-      <div class="meta"><b>${x.name}</b><span>${x.cuisine} · ${x.menu.length} items</span><span class="fee">$${fee.toFixed(2)} delivery</span></div>
+      <div class="meta"><b>${x.name}</b><span>${x.cuisine} · ${x.menu.length} items</span><span class="fee">$${fee.toFixed(2)} delivery${x.eta?` · ⏱️ ${x.eta}`:''}</span></div>
       <span class="badge ${x.open?'open':'closed'}">${x.open?'OPEN':'CLOSED'}</span>
     </a>`).join('') || '<p>No restaurants yet — check back soon.</p>';
 }

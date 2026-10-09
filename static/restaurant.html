@@ -15,6 +15,16 @@
 const rid = new URLSearchParams(location.search).get('id');
 let cart = JSON.parse(localStorage.getItem('dropcart_'+rid) || '{}');
 let menu = [], rest = null, fee = 3.99;
+// one-tap reorder: restore last order's items
+try{
+  if(new URLSearchParams(location.search).get('reorder')==='1'){
+    const last=JSON.parse(localStorage.getItem('droplast')||'null');
+    if(last && last.rid==rid && last.items){
+      cart=last.items;
+      localStorage.setItem('dropcart_'+rid, JSON.stringify(cart));
+    }
+  }
+}catch(e){}
 async function load(){
   const cfg = await (await fetch('/api/config')).json();
   fee = cfg.delivery_fee;
