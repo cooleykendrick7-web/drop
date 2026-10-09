@@ -7,17 +7,21 @@ Run:  ./venv/bin/uvicorn app:app --host 0.0.0.0 --port 8000
 DB:   drop.db in this directory (SQLite, persists across restarts).
 Env:  STRIPE_SECRET_KEY, STRIPE_PUBLISHABLE_KEY (optional -> dev mode)
 """
+import hashlib
+import hmac
 import json
 import os
+import re
+import secrets
 import sqlite3
 import threading
 import time
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import FastAPI, Header, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 BASE = os.path.dirname(os.path.abspath(__file__))
@@ -108,6 +112,23 @@ def init_db():
     c.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('min_order', '10.00')")
     c.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('accepting_orders', '1')")
     c.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('mins_per_delivery', '18')")
+    # customer accounts + rewards (added 2026-10-09)
+    c.execute("""CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL, phone TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        created_at TEXT NOT NULL)""")
+    c.execute("""CREATE TABLE IF NOT EXISTS sessions (
+        token TEXT PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        expires_at TEXT NOT NULL)""")
+    c.execute("""CREATE TABLE IF NOT EXISTS rewards (
+        user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        punches INTEGER NOT NULL DEFAULT 0,
+        free_fee INTEGER NOT NULL DEFAULT 0)""")
+    ocols2 = [r[1] for r in c.execute("PRAGMA table_info(orders)").fetchall()]
+    if "user_id" not in ocols2:
+        c.execute("ALTER TABLE orders ADD COLUMN user_id INTEGER DEFAULT 0")
     defaults = {
         "delivery_fee": "3.99",
         "pin": "1234",
@@ -264,6 +285,9 @@ async def create_order(req: Request):
     if get_setting("accepting_orders") == "0":
         raise HTTPException(400, "We're at capacity right now — please check back soon")
     rid = body.get("restaurant_id")
+    # logged-in customer?
+    me = get_session_user(req)
+    user_id = me["id"] if me else 0
     items = body.get("items", [])
     cust = body.get("customer", {})
     name = (cust.get("name") or "").strip()
@@ -296,6 +320,13 @@ async def create_order(req: Request):
                        "price": mi["price"], "qty": qty, "line": line})
     food_total = round(food_total, 2)
     fee = round(float(get_setting("delivery_fee")), 2)
+    free_fee_applied = False
+    if user_id:
+        rw = get_rewards(user_id)
+        if rw["free_fee"]:
+            fee = 0.0
+            free_fee_applied = True
+            conn.execute("UPDATE rewards SET free_fee=0 WHERE user_id=?", (user_id,))
     try:
         tip = round(max(0.0, min(100.0, float(body.get("tip", 0)))), 2)
     except (TypeError, ValueError):
@@ -312,15 +343,16 @@ async def create_order(req: Request):
     cur = conn.execute(
         """INSERT INTO orders(restaurant_id, items_json, customer_name, phone, address,
                               notes, food_total, delivery_fee, tip, discount, promo_code,
-                              total, status, stripe_status, created_at, updated_at)
-           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,'placed','pending',?,?)""",
+                              user_id, total, status, stripe_status, created_at, updated_at)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'placed','pending',?,?)""",
         (rid, json.dumps(priced), name, phone, address, notes,
-         food_total, fee, tip, discount, promo_code, total, now_iso(), now_iso()))
+         food_total, fee, tip, discount, promo_code, user_id, total, now_iso(), now_iso()))
     oid = cur.lastrowid
     conn.commit()
     conn.close()
     return {"order_id": oid, "food_total": food_total, "delivery_fee": fee,
             "tip": tip, "discount": discount, "promo_code": promo_code,
+            "free_fee_applied": free_fee_applied,
             "total": total, "stripe_live": STRIPE_LIVE}
 
 
@@ -496,8 +528,12 @@ async def op_set_status(oid: int, req: Request, x_pin: str = Header(default=""))
     conn.execute("UPDATE orders SET status=?, stripe_status=?, updated_at=? WHERE id=?",
                  (status, new_stripe_status, now_iso(), oid))
     conn.commit()
+    punch = None
+    if status == "delivered" and (o["user_id"] or 0) and new_stripe_status == "paid":
+        punch = award_punch(o["user_id"])
     conn.close()
-    return {"ok": True, "status": status, "label": STATUS_LABELS[status], "refunded": refunded}
+    return {"ok": True, "status": status, "label": STATUS_LABELS[status],
+            "refunded": refunded, "rewards": punch}
 
 
 @app.get("/api/operator/earnings")
@@ -674,6 +710,150 @@ def op_delete_promo(pid: int, x_pin: str = Header(default="")):
     conn.commit()
     conn.close()
     return {"ok": True}
+
+
+# ---------------- customer accounts + rewards ----------------
+def hash_pw(password, salt=None):
+    salt = salt or secrets.token_hex(16)
+    h = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 200_000)
+    return f"{salt}${h.hex()}"
+
+
+def check_pw(password, stored):
+    try:
+        salt, _ = stored.split("$", 1)
+    except (ValueError, AttributeError):
+        return False
+    return hmac.compare_digest(hash_pw(password, salt), stored)
+
+
+def norm_phone(p):
+    return re.sub(r"\D", "", p or "")[:15]
+
+
+def create_session(user_id):
+    token = secrets.token_urlsafe(32)
+    exp = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+    conn = db()
+    conn.execute("INSERT INTO sessions(token, user_id, expires_at) VALUES(?,?,?)",
+                 (token, user_id, exp))
+    conn.commit()
+    conn.close()
+    return token
+
+
+def get_session_user(req):
+    token = req.cookies.get("drop_session", "")
+    if not token:
+        return None
+    conn = db()
+    s = conn.execute("SELECT user_id, expires_at FROM sessions WHERE token=?", (token,)).fetchone()
+    if not s:
+        conn.close()
+        return None
+    if s["expires_at"] < now_iso():
+        conn.execute("DELETE FROM sessions WHERE token=?", (token,))
+        conn.commit()
+        conn.close()
+        return None
+    u = conn.execute("SELECT id, name, phone, created_at FROM users WHERE id=?",
+                     (s["user_id"],)).fetchone()
+    conn.close()
+    return dict(u) if u else None
+
+
+def get_rewards(user_id):
+    conn = db()
+    conn.execute("INSERT OR IGNORE INTO rewards(user_id, punches, free_fee) VALUES(?,0,0)", (user_id,))
+    r = conn.execute("SELECT punches, free_fee FROM rewards WHERE user_id=?", (user_id,)).fetchone()
+    conn.commit()
+    conn.close()
+    return {"punches": r["punches"], "free_fee": bool(r["free_fee"])}
+
+
+def award_punch(user_id):
+    """Called when a user's paid order is delivered. Returns updated rewards."""
+    conn = db()
+    conn.execute("INSERT OR IGNORE INTO rewards(user_id, punches, free_fee) VALUES(?,0,0)", (user_id,))
+    r = conn.execute("SELECT punches FROM rewards WHERE user_id=?", (user_id,)).fetchone()
+    new_p = (r["punches"] or 0) + 1
+    if new_p >= 10:
+        conn.execute("UPDATE rewards SET punches=0, free_fee=1 WHERE user_id=?", (user_id,))
+    else:
+        conn.execute("UPDATE rewards SET punches=? WHERE user_id=?", (new_p, user_id))
+    conn.commit()
+    conn.close()
+    return get_rewards(user_id)
+
+
+@app.post("/api/auth/signup")
+async def auth_signup(req: Request, resp: Response):
+    body = await req.json()
+    name = (body.get("name") or "").strip()[:60]
+    phone = norm_phone(body.get("phone"))
+    pw = body.get("password") or ""
+    if not name:
+        raise HTTPException(400, "Name required")
+    if len(phone) < 10:
+        raise HTTPException(400, "Enter a valid 10-digit phone number")
+    if len(pw) < 6:
+        raise HTTPException(400, "Password must be at least 6 characters")
+    conn = db()
+    if conn.execute("SELECT id FROM users WHERE phone=?", (phone,)).fetchone():
+        conn.close()
+        raise HTTPException(400, "That number already has an account — try logging in")
+    cur = conn.execute("INSERT INTO users(name, phone, password_hash, created_at) VALUES(?,?,?,?)",
+                       (name, phone, hash_pw(pw), now_iso()))
+    uid = cur.lastrowid
+    conn.execute("INSERT INTO rewards(user_id, punches, free_fee) VALUES(?,0,0)", (uid,))
+    conn.commit()
+    conn.close()
+    token = create_session(uid)
+    resp.set_cookie("drop_session", token, httponly=True, samesite="lax", path="/", max_age=30*86400)
+    return {"ok": True}
+
+
+@app.post("/api/auth/login")
+async def auth_login(req: Request, resp: Response):
+    body = await req.json()
+    phone = norm_phone(body.get("phone"))
+    pw = body.get("password") or ""
+    conn = db()
+    u = conn.execute("SELECT * FROM users WHERE phone=?", (phone,)).fetchone()
+    conn.close()
+    if not u or not check_pw(pw, u["password_hash"]):
+        raise HTTPException(401, "Wrong number or password")
+    token = create_session(u["id"])
+    resp.set_cookie("drop_session", token, httponly=True, samesite="lax", path="/", max_age=30*86400)
+    return {"ok": True, "name": u["name"]}
+
+
+@app.post("/api/auth/logout")
+async def auth_logout(req: Request, resp: Response):
+    token = req.cookies.get("drop_session", "")
+    if token:
+        conn = db()
+        conn.execute("DELETE FROM sessions WHERE token=?", (token,))
+        conn.commit()
+        conn.close()
+    resp.delete_cookie("drop_session", path="/")
+    return {"ok": True}
+
+
+@app.get("/api/auth/me")
+def auth_me(req: Request):
+    u = get_session_user(req)
+    if not u:
+        raise HTTPException(401, "Not logged in")
+    rw = get_rewards(u["id"])
+    conn = db()
+    orders = conn.execute(
+        """SELECT o.id, o.total, o.status, o.created_at, r.name AS restaurant_name
+           FROM orders o LEFT JOIN restaurants r ON r.id=o.restaurant_id
+           WHERE o.user_id=? ORDER BY o.id DESC LIMIT 20""", (u["id"],)).fetchall()
+    conn.close()
+    return {"user": u, "rewards": rw,
+            "orders": [dict(x) for x in orders]}
 
 
 # ---------------- queue ----------------
