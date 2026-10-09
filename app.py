@@ -135,6 +135,11 @@ def init_db():
     ocols2 = [r[1] for r in c.execute("PRAGMA table_info(orders)").fetchall()]
     if "user_id" not in ocols2:
         c.execute("ALTER TABLE orders ADD COLUMN user_id INTEGER DEFAULT 0")
+    rcols = [r[1] for r in c.execute("PRAGMA table_info(restaurants)").fetchall()]
+    if "logo" not in rcols:
+        c.execute("ALTER TABLE restaurants ADD COLUMN logo TEXT DEFAULT ''")
+    if "photo" not in rcols:
+        c.execute("ALTER TABLE restaurants ADD COLUMN photo TEXT DEFAULT ''")
     defaults = {
         "delivery_fee": "3.99",
         "pin": "1234",
@@ -1084,6 +1089,10 @@ async def op_edit_restaurant(rid: int, req: Request, x_pin: str = Header(default
         if k in body:
             fields.append(f"{k}=?")
             vals.append(str(body[k]).strip()[:20] if k == "eta" else str(body[k]).strip())
+    for k in ("logo", "photo"):
+        if k in body:
+            fields.append(f"{k}=?")
+            vals.append(str(body[k]).strip()[:500])
     if "open" in body:
         fields.append("open=?")
         vals.append(1 if body["open"] else 0)
