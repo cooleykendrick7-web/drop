@@ -20,6 +20,7 @@
     <button class="on" data-t="orders">Orders</button>
     <button data-t="earn">Earnings</button>
     <button data-t="menu">Menu</button>
+    <button data-t="sup">Support <span id="tixbadge"></span></button>
     <button data-t="set">Settings</button>
   </div>
 
@@ -40,6 +41,10 @@
       <input id="nname" placeholder="Name"><input id="ncuisine" placeholder="Cuisine">
       <input id="nemoji" placeholder="Emoji (e.g. 🍔)">
       <button class="btn" id="addrest">Add</button></div>
+  </div>
+
+  <div class="tab" id="t-sup">
+    <div id="tixlist"></div>
   </div>
 
   <div class="tab" id="t-set">
@@ -76,7 +81,7 @@ document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
   b.classList.add('on'); $('t-'+b.dataset.t).classList.add('on');
-  if(b.dataset.t==='earn') loadEarn(); if(b.dataset.t==='menu') loadMenu(); if(b.dataset.t==='set') loadSet();
+  if(b.dataset.t==='earn') loadEarn(); if(b.dataset.t==='menu') loadMenu(); if(b.dataset.t==='set') loadSet(); if(b.dataset.t==='sup') loadTix();
 });
 
 $('gobtn').onclick=async()=>{
@@ -172,4 +177,21 @@ $('saveset').onclick=async()=>{
   else $('setmsg').textContent='Error: '+(j.detail||'save failed');
 };
 setInterval(()=>{if(PIN) loadOrders();},5000);
+async function loadTix(){
+  const t=await (await fetch('/api/operator/tickets',{headers:H()})).json();
+  const open=t.filter(x=>x.status==='open').length;
+  $('tixbadge').textContent=open?`(${open})`:'';
+  $('tixlist').innerHTML = t.map(x=>`
+    <div class="card ${x.status==='open'?'order new':''}">
+      <div class="row"><b>#${x.id} — ${x.name.replace(/</g,'&lt;')}</b>
+      <span class="badge ${x.status==='open'?'open':'closed'}">${x.status.toUpperCase()}</span></div>
+      <p class="small">📞 ${x.phone.replace(/</g,'&lt;')||'—'} · Order #${x.order_id||'—'} · ${x.created_at.slice(0,16).replace('T',' ')}</p>
+      <p>${x.message.replace(/</g,'&lt;')}</p>
+      ${x.status==='open'?`<button class="btn small" onclick="resolveTix(${x.id})">✓ Mark resolved</button>`:''}
+    </div>`).join('') || '<p>No support messages yet.</p>';
+}
+async function resolveTix(id){
+  await fetch('/api/operator/tickets/'+id+'/resolve',{method:'POST',headers:H()});
+  loadTix();
+}
 </script></body></html>

@@ -112,3 +112,31 @@ a{color:var(--acc2)}
 footer{margin:38px 0 10px;text-align:center;color:var(--mut);font-size:.82rem}
 footer .motto{letter-spacing:3px;font-weight:700;color:var(--acc2);font-size:.75rem;margin-bottom:8px}
 footer a{color:var(--mut)}
+footer a.secret{color:inherit;text-decoration:none;cursor:default}
+
+/* support chat widget */
+#dropchat{position:fixed;right:14px;bottom:86px;z-index:80}
+#dc-btn{width:56px;height:56px;border-radius:50%;border:0;background:var(--grad);font-size:1.5rem;
+  cursor:pointer;box-shadow:0 8px 26px rgba(255,106,0,.45);color:#fff}
+#dc-panel{position:fixed;right:14px;bottom:150px;width:min(330px,calc(100vw - 28px));height:430px;
+  max-height:60vh;background:var(--bg2);border:1px solid var(--line);border-radius:18px;
+  display:flex;flex-direction:column;overflow:hidden;box-shadow:var(--shadow)}
+#dc-head{display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid var(--line);background:var(--card)}
+#dc-head img{height:30px;width:auto;border-radius:7px}
+#dc-head div{flex:1}
+#dc-head b{display:block;font-size:.92rem}
+#dc-head span{font-size:.72rem;color:var(--ok)}
+#dc-head button{background:none;border:0;color:var(--mut);font-size:1rem;cursor:pointer}
+#dc-msgs{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px}
+.dc-bubble{max-width:85%;padding:10px 13px;border-radius:14px;font-size:.9rem;line-height:1.4}
+.dc-bubble.bot{background:var(--card2);align-self:flex-start;border-bottom-left-radius:4px}
+.dc-bubble.me{background:var(--grad);color:#fff;align-self:flex-end;border-bottom-right-radius:4px}
+#dc-quick{display:flex;gap:6px;flex-wrap:wrap;padding:8px 12px;border-top:1px solid var(--line)}
+#dc-quick button{background:var(--card2);border:1px solid var(--line);color:var(--txt);
+  border-radius:999px;padding:7px 12px;font-size:.78rem;cursor:pointer;font-weight:600}
+#dc-form{padding:10px 12px;border-top:1px solid var(--line);overflow-y:auto}
+#dc-form input,#dc-form textarea{margin:4px 0;padding:10px;font-size:.88rem}
+#dc-form .btn{margin-top:6px;padding:11px}
+#dc-inputrow{display:flex;gap:6px;padding:10px 12px;border-top:1px solid var(--line)}
+#dc-inputrow input{margin:0}
+#dc-go{background:var(--grad);border:0;color:#fff;border-radius:10px;width:46px;cursor:pointer;font-size:1.1rem}

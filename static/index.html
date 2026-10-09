@@ -28,10 +28,11 @@
 <div id="list"></div>
 
 <footer>
-  <div class="motto">PICK UP &nbsp;•&nbsp; DELIVER &nbsp;•&nbsp; DONE</div>
-  <div>Drop — Bismarck, North Dakota<br><a href="/dash">Operator login</a></div>
+  <div class="motto"><a class="secret" href="/dash">PICK UP &nbsp;•&nbsp; DELIVER &nbsp;•&nbsp; DONE</a></div>
+  <div>Drop — Bismarck, North Dakota</div>
 </footer>
 
+<script src="/static/chat.js"></script>
 <script>
 async function load(){
   const cfg = await (await fetch('/api/config')).json();
