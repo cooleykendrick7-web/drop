@@ -1,0 +1,173 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Drop — Operator</title><link rel="stylesheet" href="/static/styles.css">
+<style>.tabs{display:flex;gap:6px;margin:10px 0}.tabs button{flex:1;background:#2a2a33;color:#fff;border:0;border-radius:10px;padding:11px 4px;font-weight:700}.tabs button.on{background:var(--acc)}.tab{display:none}.tab.on{display:block}</style>
+</head><body>
+<div class="brand"><div class="logo">D</div><b>Drop</b> <span class="small">operator</span></div>
+<div class="alert" id="alert"></div>
+
+<div id="login" class="card">
+  <h1>Operator login</h1>
+  <label>PIN</label><input id="pin" inputmode="numeric" type="password" placeholder="Enter PIN">
+  <button class="btn" id="gobtn">Unlock</button>
+  <p class="small" id="loginmsg"></p>
+</div>
+
+<div id="app" style="display:none">
+  <div class="tabs">
+    <button class="on" data-t="orders">Orders</button>
+    <button data-t="earn">Earnings</button>
+    <button data-t="menu">Menu</button>
+    <button data-t="set">Settings</button>
+  </div>
+
+  <div class="tab on" id="t-orders">
+    <div id="olist"></div>
+  </div>
+
+  <div class="tab" id="t-earn">
+    <div class="card"><h2 style="margin:0">Delivery fees earned</h2>
+      <div class="total" id="etotal">$0.00</div>
+      <p class="small" id="ecount"></p></div>
+    <div id="ebyday"></div>
+  </div>
+
+  <div class="tab" id="t-menu">
+    <div id="rlist"></div>
+    <div class="card"><h3>Add restaurant</h3>
+      <input id="nname" placeholder="Name"><input id="ncuisine" placeholder="Cuisine">
+      <input id="nemoji" placeholder="Emoji (e.g. 🍔)">
+      <button class="btn" id="addrest">Add</button></div>
+  </div>
+
+  <div class="tab" id="t-set">
+    <div class="card"><h3>Delivery fee ($)</h3>
+      <input id="sfee" inputmode="decimal"><h3>Change PIN</h3>
+      <input id="spin" inputmode="numeric" placeholder="4–8 digits"><h3>ntfy push topic</h3>
+      <input id="stopic" placeholder="secret-topic-name">
+      <button class="btn" id="saveset">Save settings</button>
+      <p class="small" id="setmsg"></p></div>
+    <div class="card"><h3>📲 Phone alerts (ntfy)</h3>
+      <p class="small">1. Install the <b>ntfy</b> app (free) on your phone.<br>
+      2. Tap + / Subscribe and enter the topic name above.<br>
+      3. New paid orders will buzz your phone instantly.<br>
+      No account or signup needed.</p></div>
+  </div>
+</div>
+
+<script>
+let PIN='', lastSeen=0;
+const H=()=>({'X-PIN':PIN});
+const $=id=>document.getElementById(id);
+const NEXT={placed:'confirmed',confirmed:'picked_up',picked_up:'on_the_way',on_the_way:'delivered'};
+const NEXTLBL={confirmed:'✅ Confirm',picked_up:'🛍️ Picked up',on_the_way:'🛵 On the way',delivered:'📦 Delivered'};
+
+function beep(){
+  try{const c=new (window.AudioContext||window.webkitAudioContext)();
+  const o=c.createOscillator(),g=c.createGain();o.connect(g);g.connect(c.destination);
+  o.frequency.value=880;g.gain.value=0.3;o.start();
+  o.frequency.setValueAtTime(660,c.currentTime+0.25);o.stop(c.currentTime+0.6);}catch(e){}
+}
+function banner(t){const a=$('alert');a.textContent=t;a.style.display='block';setTimeout(()=>a.style.display='none',8000);}
+
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
+  b.classList.add('on'); $('t-'+b.dataset.t).classList.add('on');
+  if(b.dataset.t==='earn') loadEarn(); if(b.dataset.t==='menu') loadMenu(); if(b.dataset.t==='set') loadSet();
+});
+
+$('gobtn').onclick=async()=>{
+  PIN=$('pin').value.trim();
+  const r=await fetch('/api/operator/orders',{headers:H()});
+  if(r.status===401){$('loginmsg').textContent='Wrong PIN.';return;}
+  sessionStorage.setItem('droppin',PIN);
+  $('login').style.display='none';$('app').style.display='block';
+  loadOrders(true);
+};
+PIN=sessionStorage.getItem('droppin')||'';
+if(PIN){$('login').style.display='none';$('app').style.display='block';loadOrders(true);}
+
+async function loadOrders(first){
+  const r=await fetch('/api/operator/orders',{headers:H()});
+  if(r.status===401){location.reload();return;}
+  const orders=await r.json();
+  const ids=orders.map(o=>o.id), mx=Math.max(0,...ids);
+  if(!first && mx>lastSeen){
+    const fresh=orders.filter(o=>o.id>lastSeen);
+    beep(); banner(`🔔 ${fresh.length} NEW ORDER${fresh.length>1?'S':''} — check the list!`);
+  }
+  lastSeen=mx;
+  const open=orders.filter(o=>!['delivered','cancelled'].includes(o.status));
+  const done=orders.filter(o=>['delivered','cancelled'].includes(o.status));
+  const card=o=>`
+    <div class="card order ${o.id>lastSeen-2&&o.status==='placed'?'new':''}">
+      <div class="row"><b>#${o.id} · ${o.restaurant_name}</b>
+        <span class="badge ${o.status==='placed'?'closed':''}">${o.status_label}</span></div>
+      <p><b>${o.customer_name}</b> · <a href="tel:${o.phone}">${o.phone}</a><br>
+      📍 ${o.address}${o.notes?`<br>📝 ${o.notes}`:''}</p>
+      ${o.items.map(i=>`<div class="row small"><span>${i.qty}× ${i.name}</span><span>$${i.line.toFixed(2)}</span></div>`).join('')}
+      <div class="row"><span class="small">Food $${o.food_total.toFixed(2)} + fee $${o.delivery_fee.toFixed(2)}</span><b>$${o.total.toFixed(2)}</b></div>
+      <div class="small">${o.paid?'💰 Paid ✓':'⚠️ NOT PAID'} · ${new Date(o.created_at).toLocaleString()}</div>
+      <div style="margin-top:8px">
+        ${NEXT[o.status]?`<button class="btn small" onclick="setStatus(${o.id},'${NEXT[o.status]}')">${NEXTLBL[NEXT[o.status]]}</button>`:''}
+        ${!['delivered','cancelled'].includes(o.status)?`<button class="btn small ghost" onclick="setStatus(${o.id},'cancelled')">Cancel</button>`:''}
+      </div>
+    </div>`;
+  $('olist').innerHTML = '<h2>Active ('+open.length+')</h2>'+(open.map(card).join('')||'<p class="small">None right now.</p>')
+    + '<h2>History</h2>'+(done.map(card).join('')||'<p class="small">Nothing yet.</p>');
+}
+async function setStatus(id,s){
+  await fetch('/api/operator/orders/'+id+'/status',{method:'POST',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({status:s})});
+  loadOrders();
+}
+async function loadEarn(){
+  const e=await (await fetch('/api/operator/earnings',{headers:H()})).json();
+  $('etotal').textContent='$'+e.total_fees.toFixed(2);
+  $('ecount').textContent=e.orders+' paid deliveries · $'+e.total_sales.toFixed(2)+' total sales';
+  $('ebyday').innerHTML=Object.entries(e.by_day).sort().reverse().map(([d,v])=>
+    `<div class="card"><div class="row"><b>${d}</b><b>$${v.fees.toFixed(2)}</b></div>
+     <span class="small">${v.orders} deliveries · $${v.sales.toFixed(2)} sales</span></div>`).join('')||'<p class="small">No earnings yet.</p>';
+}
+async function loadMenu(){
+  const r=await (await fetch('/api/restaurants')).json();
+  $('rlist').innerHTML=r.map(x=>`
+    <div class="card"><div class="row"><b>${x.emoji} ${x.name}</b>
+      <span><button class="btn small ${x.open?'ghost':''}" onclick="toggleR(${x.id},${x.open?0:1})">${x.open?'Close':'Open'}</button>
+      <button class="btn small ghost" onclick="delR(${x.id})">✕</button></span></div>
+      <span class="small">${x.cuisine}${x.sample?' · SAMPLE':''}</span>
+      ${x.menu.map(m=>`<div class="row"><span class="small">${m.available?'':'🚫 '}${m.name} — $${m.price.toFixed(2)}</span>
+        <span><button class="btn small ghost" onclick="toggleM(${m.id},${m.available?0:1})">${m.available?'Hide':'Show'}</button>
+        <button class="btn small ghost" onclick="delM(${m.id})">✕</button></span></div>`).join('')}
+      <div class="row" style="margin-top:8px"><input id="mi-n-${x.id}" placeholder="New item name" style="flex:2;margin-right:6px">
+      <input id="mi-p-${x.id}" placeholder="$" inputmode="decimal" style="flex:1;margin-right:6px">
+      <button class="btn small" onclick="addM(${x.id})">Add</button></div>
+    </div>`).join('');
+}
+async function toggleR(id,open){await fetch('/api/operator/restaurants/'+id,{method:'PUT',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({open})});loadMenu();}
+async function delR(id){if(confirm('Delete this restaurant and its menu?')){await fetch('/api/operator/restaurants/'+id,{method:'DELETE',headers:H()});loadMenu();}}
+async function addM(rid){const n=$('mi-n-'+rid).value.trim(),p=parseFloat($('mi-p-'+rid).value);
+  if(!n||!(p>0)){alert('Need a name and price');return;}
+  await fetch('/api/operator/menu-items',{method:'POST',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({restaurant_id:rid,name:n,price:p})});loadMenu();}
+async function toggleM(id,a){await fetch('/api/operator/menu-items/'+id,{method:'PUT',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({available:!!a})});loadMenu();}
+async function delM(id){await fetch('/api/operator/menu-items/'+id,{method:'DELETE',headers:H()});loadMenu();}
+$('addrest').onclick=async()=>{
+  const n=$('nname').value.trim(); if(!n){alert('Name required');return;}
+  await fetch('/api/operator/restaurants',{method:'POST',headers:{...H(),'Content-Type':'application/json'},
+    body:JSON.stringify({name:n,cuisine:$('ncuisine').value,emoji:$('nemoji').value||'🍽️'})});
+  $('nname').value='';$('ncuisine').value='';$('nemoji').value='';loadMenu();
+};
+async function loadSet(){
+  const s=await (await fetch('/api/operator/settings',{headers:H()})).json();
+  $('sfee').value=s.delivery_fee;$('stopic').value=s.ntfy_topic||'';
+}
+$('saveset').onclick=async()=>{
+  const body={delivery_fee:parseFloat($('sfee').value),ntfy_topic:$('stopic').value.trim()};
+  if($('spin').value.trim()) body.pin=$('spin').value.trim();
+  const r=await fetch('/api/operator/settings',{method:'PUT',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const j=await r.json();
+  if(r.ok){$('setmsg').textContent='Saved ✓';if(body.pin)PIN=body.pin,sessionStorage.setItem('droppin',PIN);$('spin').value='';}
+  else $('setmsg').textContent='Error: '+(j.detail||'save failed');
+};
+setInterval(()=>{if(PIN) loadOrders();},5000);
+</script></body></html>

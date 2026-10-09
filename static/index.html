@@ -1,0 +1,28 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Drop — Food Delivery</title><link rel="stylesheet" href="/static/styles.css">
+</head><body>
+<div class="brand"><div class="logo">D</div><b>Drop</b></div>
+<p class="sub" id="tagline">We drop it at your door.</p>
+<div id="dev"></div>
+<h1>Restaurants near you</h1>
+<div id="list"></div>
+<p class="small" style="text-align:center;margin-top:24px">Driver? <a href="/dash">Operator login</a></p>
+<script>
+async function load(){
+  const cfg = await (await fetch('/api/config')).json();
+  document.getElementById('tagline').textContent = cfg.tagline || 'We drop it at your door.';
+  if(!cfg.stripe_live){
+    document.getElementById('dev').innerHTML =
+      '<div class="devbanner">🚧 Demo payments are on (test mode) — real cards come later.</div>';
+  }
+  const r = await (await fetch('/api/restaurants')).json();
+  document.getElementById('list').innerHTML = r.map(x=>`
+    <a class="card rest" href="/restaurant.html?id=${x.id}">
+      <div class="emoji">${x.emoji}</div>
+      <div class="meta"><b>${x.name}</b><span>${x.cuisine} · ${x.menu.length} items · $3.99 delivery</span></div>
+      <span class="badge ${x.open?'open':'closed'}">${x.open?'OPEN':'CLOSED'}</span>
+    </a>`).join('') || '<p>No restaurants yet.</p>';
+}
+load();
+</script></body></html>

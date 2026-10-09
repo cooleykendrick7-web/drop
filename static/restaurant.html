@@ -1,0 +1,53 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Drop — Menu</title><link rel="stylesheet" href="/static/styles.css">
+</head><body>
+<div class="brand"><div class="logo">D</div><b>Drop</b></div>
+<a href="/" class="small">← All restaurants</a>
+<div id="head"></div>
+<div id="menu"></div>
+<div class="cartbar" id="cartbar" style="display:none">
+  <button class="btn" id="gocheck">View cart · $<span id="ctotal">0.00</span></button>
+</div>
+<script>
+const rid = new URLSearchParams(location.search).get('id');
+let cart = JSON.parse(localStorage.getItem('dropcart_'+rid) || '{}');
+let menu = [], rest = null, fee = 3.99;
+async function load(){
+  const cfg = await (await fetch('/api/config')).json();
+  fee = cfg.delivery_fee;
+  const r = await (await fetch('/api/restaurants')).json();
+  rest = r.find(x=>x.id==rid);
+  if(!rest){ document.body.innerHTML='<p>Restaurant not found. <a href="/">Home</a></p>'; return; }
+  menu = rest.menu;
+  document.getElementById('head').innerHTML =
+    `<h1>${rest.emoji} ${rest.name}</h1><p class="sub">${rest.cuisine} · Delivery $${fee.toFixed(2)} · ${rest.open?'Open now':'Closed'}</p>`;
+  document.getElementById('menu').innerHTML = menu.map(m=>`
+    <div class="card menu-item">
+      <div class="info"><b>${m.name}</b><span>${m.description||''}</span><span class="price">$${m.price.toFixed(2)}</span></div>
+      <div class="qty">
+        <button onclick="ch(${m.id},-1)">−</button>
+        <b id="q${m.id}">${cart[m.id]||0}</b>
+        <button onclick="ch(${m.id},1)">+</button>
+      </div>
+    </div>`).join('');
+  draw();
+}
+function ch(id,d){
+  cart[id]=(cart[id]||0)+d;
+  if(cart[id]<=0) delete cart[id];
+  localStorage.setItem('dropcart_'+rid, JSON.stringify(cart));
+  document.getElementById('q'+id).textContent = cart[id]||0;
+  draw();
+}
+function draw(){
+  let t=0,n=0;
+  for(const [id,q] of Object.entries(cart)){
+    const m=menu.find(x=>x.id==id); if(m){t+=m.price*q;n+=q;}
+  }
+  document.getElementById('ctotal').textContent=t.toFixed(2);
+  document.getElementById('cartbar').style.display = n? 'block':'none';
+}
+document.getElementById('gocheck').onclick=()=>location.href='/checkout.html?rid='+rid;
+load();
+</script></body></html>

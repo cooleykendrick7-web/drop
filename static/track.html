@@ -1,0 +1,38 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Drop — Track order</title><link rel="stylesheet" href="/static/styles.css">
+</head><body>
+<div class="brand"><div class="logo">D</div><b>Drop</b></div>
+<h1>Order <span id="oid"></span></h1>
+<p class="sub" id="rname"></p>
+<div class="card" id="items"></div>
+<h2>Where's my food?</h2>
+<div class="steps" id="steps"></div>
+<p class="small" id="note">Live updates every few seconds.</p>
+<script>
+const oid = new URLSearchParams(location.search).get('id');
+const FLOW=[['placed','Order placed','Ken got your order'],['confirmed','Confirmed','Ken is heading to the restaurant'],['picked_up','Picked up','Ken has your food'],['on_the_way','On the way','Ken is driving to you'],['delivered','Delivered','Enjoy!']];
+async function poll(){
+  const o = await (await fetch('/api/orders/'+oid+'/public')).json();
+  if(o.id===undefined){document.body.innerHTML='<p>Order not found.</p>';return;}
+  document.getElementById('oid').textContent='#'+o.id;
+  document.getElementById('rname').textContent=o.restaurant+' · '+(o.paid?'Paid ✓':'Payment pending');
+  document.getElementById('items').innerHTML =
+    o.items.map(i=>`<div class="row"><span>${i.qty}× ${i.name}</span><span>$${i.line.toFixed(2)}</span></div>`).join('')+
+    `<div class="row"><span>Delivery fee</span><span>$${o.delivery_fee.toFixed(2)}</span></div>
+     <div class="row total"><span>Total</span><span>$${o.total.toFixed(2)}</span></div>`;
+  if(o.status==='cancelled'){
+    document.getElementById('steps').innerHTML='<div class="card">This order was cancelled. Ken will reach out about a refund.</div>';
+    return;
+  }
+  const idx=FLOW.findIndex(s=>s[0]===o.status);
+  document.getElementById('steps').innerHTML = FLOW.map((s,i)=>{
+    const cls = i<idx?'done':(i===idx?'now':'');
+    const icon = i<idx?'✓':(i===idx?'●':'○');
+    return `<div class="step ${cls}"><div class="dot">${icon}</div><div class="t"><b>${s[1]}</b><span>${s[2]}</span></div></div>`;
+  }).join('');
+  if(o.status!=='delivered') setTimeout(poll,5000);
+  else document.getElementById('note').textContent='Delivered! Thanks for using Drop. 🧡';
+}
+poll();
+</script></body></html>

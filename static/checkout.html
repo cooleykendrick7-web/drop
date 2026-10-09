@@ -1,0 +1,68 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Drop — Checkout</title><link rel="stylesheet" href="/static/styles.css">
+</head><body>
+<div class="brand"><div class="logo">D</div><b>Drop</b></div>
+<a href="/" class="small">← Home</a>
+<h1>Checkout</h1>
+<div id="dev"></div>
+<div id="summary" class="card"></div>
+<div class="card">
+  <label>Your name</label><input id="name" placeholder="Jane Doe" autocomplete="name">
+  <label>Phone (so Ken can reach you)</label><input id="phone" placeholder="(555) 123-4567" inputmode="tel" autocomplete="tel">
+  <label>Delivery address</label><textarea id="address" rows="2" placeholder="123 Main St, Apt 4, Jackson MS" autocomplete="street-address"></textarea>
+  <label>Notes for Ken (optional)</label><textarea id="notes" rows="2" placeholder="Gate code, leave at door, etc."></textarea>
+</div>
+<button class="btn" id="pay">Place order</button>
+<p class="small" id="msg"></p>
+<script>
+const rid = new URLSearchParams(location.search).get('rid');
+let fee=3.99, live=false, cart={}, menu=[];
+async function load(){
+  if(new URLSearchParams(location.search).get('cancelled'))
+    document.getElementById('msg').textContent='Payment was cancelled — your order is saved, you can try again.';
+  const cfg = await (await fetch('/api/config')).json();
+  fee=cfg.delivery_fee; live=cfg.stripe_live;
+  if(!live) document.getElementById('dev').innerHTML='<div class="devbanner">🚧 TEST MODE — no real card is charged. Hit "Place order" then the test-pay button.</div>';
+  cart = JSON.parse(localStorage.getItem('dropcart_'+rid)||'{}');
+  const r = await (await fetch('/api/restaurants')).json();
+  const rest = r.find(x=>x.id==rid); menu = rest? rest.menu : [];
+  let food=0, rows='';
+  for(const [id,q] of Object.entries(cart)){
+    const m=menu.find(x=>x.id==id); if(!m) continue;
+    food+=m.price*q; rows+=`<div class="row"><span>${q}× ${m.name}</span><span>$${(m.price*q).toFixed(2)}</span></div>`;
+  }
+  if(!food){ document.body.innerHTML='<p>Your cart is empty. <a href="/">Home</a></p>'; return; }
+  document.getElementById('summary').innerHTML = rows +
+    `<div class="row"><span>Delivery fee</span><span>$${fee.toFixed(2)}</span></div>
+     <div class="row total"><span>Total</span><span>$${(food+fee).toFixed(2)}</span></div>`;
+  window._food=food;
+}
+document.getElementById('pay').onclick = async ()=>{
+  const name=document.getElementById('name').value.trim(),
+        phone=document.getElementById('phone').value.trim(),
+        address=document.getElementById('address').value.trim(),
+        notes=document.getElementById('notes').value.trim();
+  const msg=document.getElementById('msg');
+  if(!name||!phone||!address){ msg.textContent='Please fill in name, phone, and address.'; return; }
+  msg.textContent='Placing your order…';
+  const items=Object.entries(cart).map(([id,q])=>({menu_item_id:+id,qty:q}));
+  const o = await (await fetch('/api/orders',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({restaurant_id:+rid,items,customer:{name,phone,address,notes}})})).json();
+  if(o.order_id===undefined){ msg.textContent='Error: '+(o.detail||'could not place order'); return; }
+  localStorage.removeItem('dropcart_'+rid);
+  const c = await (await fetch('/api/checkout',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({order_id:o.order_id})})).json();
+  if(c.url){ location.href=c.url; }
+  else if(c.dev){
+    document.getElementById('pay').outerHTML =
+      `<button class="btn" onclick="testpay(${o.order_id})">✅ TEST PAY $${o.total.toFixed(2)} (no real charge)</button>`;
+    msg.textContent='Order placed! Tap to simulate payment.';
+  } else if(c.track_url){ location.href=c.track_url; }
+};
+async function testpay(oid){
+  const r = await (await fetch('/api/dev-pay/'+oid,{method:'POST'})).json();
+  location.href = r.track_url;
+}
+load();
+</script></body></html>
