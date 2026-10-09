@@ -1,0 +1,20 @@
+# Drop — one-click Render deploy (Blueprint)
+# In Render: New → Blueprint → connect the repo containing this folder.
+# Then add a persistent disk (Starter plan+, ~$7/mo) mounted at /opt/render/project/src
+# so drop.db survives restarts — required before taking real orders.
+services:
+  - type: web
+    name: drop
+    env: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    disk:
+      name: drop-data
+      mountPath: /opt/render/project/src
+      sizeGB: 1
+    envVars:
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_PUBLISHABLE_KEY
+        sync: false
