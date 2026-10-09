@@ -86,6 +86,26 @@ def init_db():
     cols = [r[1] for r in c.execute("PRAGMA table_info(orders)").fetchall()]
     if "tip" not in cols:
         c.execute("ALTER TABLE orders ADD COLUMN tip REAL DEFAULT 0")
+    # promo codes + min order + ETAs (added 2026-10-08)
+    c.execute("""CREATE TABLE IF NOT EXISTS promo_codes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        code TEXT NOT NULL UNIQUE,
+        kind TEXT NOT NULL DEFAULT 'fixed',
+        value REAL NOT NULL DEFAULT 0,
+        min_order REAL NOT NULL DEFAULT 0,
+        max_uses INTEGER NOT NULL DEFAULT 0,
+        uses INTEGER NOT NULL DEFAULT 0,
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL)""")
+    ocols = [r[1] for r in c.execute("PRAGMA table_info(orders)").fetchall()]
+    if "discount" not in ocols:
+        c.execute("ALTER TABLE orders ADD COLUMN discount REAL DEFAULT 0")
+    if "promo_code" not in ocols:
+        c.execute("ALTER TABLE orders ADD COLUMN promo_code TEXT DEFAULT ''")
+    rcols = [r[1] for r in c.execute("PRAGMA table_info(restaurants)").fetchall()]
+    if "eta" not in rcols:
+        c.execute("ALTER TABLE restaurants ADD COLUMN eta TEXT DEFAULT ''")
+    c.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('min_order', '10.00')")
     defaults = {
         "delivery_fee": "3.99",
         "pin": "1234",
@@ -214,6 +234,7 @@ def config():
         "stripe_live": STRIPE_LIVE,
         "stripe_publishable_key": STRIPE_PUBLISHABLE_KEY if STRIPE_LIVE else "",
         "delivery_fee": float(get_setting("delivery_fee")),
+        "min_order": float(get_setting("min_order") or 10),
         "tagline": get_setting("tagline"),
     }
 
@@ -275,19 +296,28 @@ async def create_order(req: Request):
         tip = round(max(0.0, min(100.0, float(body.get("tip", 0)))), 2)
     except (TypeError, ValueError):
         tip = 0.0
-    total = round(food_total + fee + tip, 2)
+    # promo code (re-validated server-side; never trust the client)
+    discount, promo_code = 0.0, ""
+    pcode = (body.get("promo_code") or "").strip()
+    if pcode:
+        discount, msg = validate_promo(pcode, food_total)
+        if discount > 0:
+            promo_code = pcode.strip().upper()
+            conn.execute("UPDATE promo_codes SET uses=uses+1 WHERE code=?", (promo_code,))
+    total = round(food_total + fee + tip - discount, 2)
     cur = conn.execute(
         """INSERT INTO orders(restaurant_id, items_json, customer_name, phone, address,
-                              notes, food_total, delivery_fee, tip, total, status,
-                              stripe_status, created_at, updated_at)
-           VALUES(?,?,?,?,?,?,?,?,?,?,'placed','pending',?,?)""",
+                              notes, food_total, delivery_fee, tip, discount, promo_code,
+                              total, status, stripe_status, created_at, updated_at)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,'placed','pending',?,?)""",
         (rid, json.dumps(priced), name, phone, address, notes,
-         food_total, fee, tip, total, now_iso(), now_iso()))
+         food_total, fee, tip, discount, promo_code, total, now_iso(), now_iso()))
     oid = cur.lastrowid
     conn.commit()
     conn.close()
     return {"order_id": oid, "food_total": food_total, "delivery_fee": fee,
-            "tip": tip, "total": total, "stripe_live": STRIPE_LIVE}
+            "tip": tip, "discount": discount, "promo_code": promo_code,
+            "total": total, "stripe_live": STRIPE_LIVE}
 
 
 @app.post("/api/checkout")
@@ -325,6 +355,15 @@ async def checkout(req: Request):
                     "currency": "usd",
                     "product_data": {"name": "Tip for your driver"},
                     "unit_amount": int(round(o["tip"] * 100)),
+                },
+                "quantity": 1,
+            })
+        if (o["discount"] or 0) > 0:
+            line_items.append({
+                "price_data": {
+                    "currency": "usd",
+                    "product_data": {"name": f"Discount ({o['promo_code']})"},
+                    "unit_amount": -int(round(o["discount"] * 100)),
                 },
                 "quantity": 1,
             })
@@ -399,7 +438,9 @@ def public_order(oid: int):
     return {
         "id": od["id"], "restaurant": rest["name"] if rest else "",
         "items": od["items"], "food_total": od["food_total"],
-        "delivery_fee": od["delivery_fee"], "tip": od.get("tip", 0), "total": od["total"],
+        "delivery_fee": od["delivery_fee"], "tip": od.get("tip", 0),
+        "discount": od.get("discount", 0), "promo_code": od.get("promo_code", ""),
+        "total": od["total"],
         "status": od["status"], "status_label": od["status_label"],
         "paid": od["stripe_status"] == "paid", "created_at": od["created_at"],
     }
@@ -470,6 +511,7 @@ def op_earnings(x_pin: str = Header(default="")):
 def op_get_settings(x_pin: str = Header(default="")):
     check_pin(x_pin)
     return {"delivery_fee": float(get_setting("delivery_fee")),
+            "min_order": float(get_setting("min_order") or 10),
             "pin": get_setting("pin"),
             "ntfy_topic": get_setting("ntfy_topic"),
             "tagline": get_setting("tagline")}
@@ -486,6 +528,12 @@ async def op_put_settings(req: Request, x_pin: str = Header(default="")):
             raise HTTPException(400, "Fee must be 0–50")
         set_setting("delivery_fee", str(fee))
         out["delivery_fee"] = fee
+    if "min_order" in body:
+        mo = round(max(0, float(body["min_order"])), 2)
+        if mo > 200:
+            raise HTTPException(400, "Min order must be 0–200")
+        set_setting("min_order", str(mo))
+        out["min_order"] = mo
     if "pin" in body:
         pin = str(body["pin"]).strip()
         if not (pin.isdigit() and 4 <= len(pin) <= 8):
@@ -500,6 +548,105 @@ async def op_put_settings(req: Request, x_pin: str = Header(default="")):
         set_setting("tagline", str(body["tagline"]).strip()[:80])
         out["tagline"] = "updated"
     return out
+
+
+# ---------------- promo codes ----------------
+def validate_promo(code, subtotal):
+    """Returns (discount, message). Discount 0.0 means invalid."""
+    code = (code or "").strip().upper()
+    if not code:
+        return 0.0, "Enter a code"
+    conn = db()
+    p = conn.execute("SELECT * FROM promo_codes WHERE code=?", (code,)).fetchone()
+    conn.close()
+    if not p or not p["active"]:
+        return 0.0, "That code isn't valid"
+    if p["max_uses"] > 0 and p["uses"] >= p["max_uses"]:
+        return 0.0, "That code has been used up"
+    if subtotal < (p["min_order"] or 0):
+        return 0.0, f"Needs a ${p['min_order']:.2f} order"
+    if p["kind"] == "percent":
+        discount = round(subtotal * min(p["value"], 50) / 100, 2)
+    else:
+        discount = round(min(p["value"], subtotal), 2)
+    return discount, "ok"
+
+
+@app.post("/api/promo/validate")
+async def promo_validate(req: Request):
+    body = await req.json()
+    try:
+        subtotal = float(body.get("subtotal", 0))
+    except (TypeError, ValueError):
+        subtotal = 0
+    discount, msg = validate_promo(body.get("code"), subtotal)
+    return {"valid": discount > 0, "discount": discount, "message": msg,
+            "code": (body.get("code") or "").strip().upper()}
+
+
+@app.get("/api/operator/promos")
+def op_list_promos(x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    conn = db()
+    rows = conn.execute("SELECT * FROM promo_codes ORDER BY id DESC").fetchall()
+    out = [dict(r) for r in rows]
+    conn.close()
+    return out
+
+
+@app.post("/api/operator/promos")
+async def op_create_promo(req: Request, x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    body = await req.json()
+    code = (body.get("code") or "").strip().upper()
+    if not code or len(code) > 20:
+        raise HTTPException(400, "Code required (max 20 chars)")
+    kind = body.get("kind", "fixed")
+    if kind not in ("fixed", "percent"):
+        raise HTTPException(400, "kind must be fixed or percent")
+    try:
+        value = round(float(body.get("value", 0)), 2)
+        min_order = round(max(0, float(body.get("min_order", 0))), 2)
+        max_uses = max(0, int(body.get("max_uses", 0)))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Bad numbers")
+    if value <= 0 or (kind == "percent" and value > 50):
+        raise HTTPException(400, "Value must be > 0 (percent max 50)")
+    conn = db()
+    try:
+        cur = conn.execute(
+            "INSERT INTO promo_codes(code, kind, value, min_order, max_uses, uses, active, created_at)"
+            " VALUES(?,?,?,?,?,0,1,?)",
+            (code, kind, value, min_order, max_uses, now_iso()))
+        pid = cur.lastrowid
+        conn.commit()
+    except sqlite3.IntegrityError:
+        conn.close()
+        raise HTTPException(400, "That code already exists")
+    conn.close()
+    return {"ok": True, "id": pid}
+
+
+@app.put("/api/operator/promos/{pid}")
+async def op_toggle_promo(pid: int, req: Request, x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    body = await req.json()
+    active = 1 if body.get("active") else 0
+    conn = db()
+    conn.execute("UPDATE promo_codes SET active=? WHERE id=?", (active, pid))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.delete("/api/operator/promos/{pid}")
+def op_delete_promo(pid: int, x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    conn = db()
+    conn.execute("DELETE FROM promo_codes WHERE id=?", (pid,))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
 
 
 # ---------------- support tickets ----------------
@@ -571,10 +718,10 @@ async def op_edit_restaurant(rid: int, req: Request, x_pin: str = Header(default
     body = await req.json()
     conn = db()
     fields, vals = [], []
-    for k in ("name", "cuisine", "emoji"):
+    for k in ("name", "cuisine", "emoji", "eta"):
         if k in body:
             fields.append(f"{k}=?")
-            vals.append(str(body[k]).strip())
+            vals.append(str(body[k]).strip()[:20] if k == "eta" else str(body[k]).strip())
     if "open" in body:
         fields.append("open=?")
         vals.append(1 if body["open"] else 0)
