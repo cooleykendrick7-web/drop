@@ -35,7 +35,8 @@ async function load(){
   if(!rest){ document.body.innerHTML='<p>Restaurant not found. <a href="/">Home</a></p>'; return; }
   menu = rest.menu;
   document.getElementById('head').innerHTML =
-    `<h1>${rest.emoji} ${rest.name}</h1><p class="sub">${rest.cuisine} · Delivery $${fee.toFixed(2)} · ${rest.open?'Open now':'Closed'}</p>`;
+    `${rest.photo?`<div class="hero-photo" style="background-image:url('${rest.photo}')"></div>`:''}
+     <h1>${rest.logo?`<img class="rlogo-lg" src="${rest.logo}" alt="">`:rest.emoji} ${rest.name}</h1><p class="sub">${rest.cuisine} · Delivery $${fee.toFixed(2)} · ${rest.open?'Open now':'Closed'}</p>`;
   document.getElementById('menu').innerHTML = menu.map(m=>`
     <div class="card menu-item">
       <div class="info"><b>${m.name}</b><span>${m.description||''}</span><span class="price">$${m.price.toFixed(2)}</span></div>

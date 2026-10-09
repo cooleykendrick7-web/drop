@@ -90,9 +90,12 @@ async function load(){
   }catch(e){}
   document.getElementById('list').innerHTML = reorder + r.map(x=>`
     <a class="card rest" href="/restaurant.html?id=${x.id}">
-      <div class="emoji">${x.emoji}</div>
+      ${x.photo?`<div class="rphoto" style="background-image:url('${x.photo}')"></div>`:''}
+      <div class="rbody">
+      ${x.logo?`<img class="rlogo" src="${x.logo}" alt="${x.name} logo" loading="lazy">`:`<div class="emoji">${x.emoji}</div>`}
       <div class="meta"><b>${x.name}</b><span>${x.cuisine} · ${x.menu.length} items</span><span class="fee">$${fee.toFixed(2)} delivery${x.eta?` · ⏱️ ${x.eta}`:''}</span></div>
       <span class="badge ${x.open?'open':'closed'}">${x.open?'OPEN':'CLOSED'}</span>
+      </div>
     </a>`).join('') || '<p>No restaurants yet — check back soon.</p>';
 }
 load();

@@ -193,6 +193,12 @@ async function loadMenu(){
       <div class="row" style="margin-top:6px"><span class="small">⏱️ ETA:</span>
         <input id="eta-${x.id}" value="${(x.eta||'').replace(/"/g,'&quot;')}" placeholder="25–35 min" style="flex:1;margin:0 6px;max-width:140px">
         <button class="btn small ghost" onclick="saveEta(${x.id})">Save</button></div>
+      <div class="row" style="margin-top:6px"><span class="small">🖼️ Photo:</span>
+        <input id="ph-${x.id}" value="${(x.photo||'').replace(/"/g,'&quot;')}" placeholder="image URL" style="flex:1;margin:0 6px">
+        <button class="btn small ghost" onclick="savePh(${x.id})">Save</button></div>
+      <div class="row" style="margin-top:6px"><span class="small">🔰 Logo:</span>
+        <input id="lg-${x.id}" value="${(x.logo||'').replace(/"/g,'&quot;')}" placeholder="logo URL" style="flex:1;margin:0 6px">
+        <button class="btn small ghost" onclick="saveLg(${x.id})">Save</button></div>
       ${x.menu.map(m=>`<div class="row"><span class="small">${m.available?'':'🚫 '}${m.name} — $${m.price.toFixed(2)}</span>
         <span><button class="btn small ghost" onclick="toggleM(${m.id},${m.available?0:1})">${m.available?'Hide':'Show'}</button>
         <button class="btn small ghost" onclick="delM(${m.id})">✕</button></span></div>`).join('')}
@@ -210,6 +216,10 @@ async function toggleM(id,a){await fetch('/api/operator/menu-items/'+id,{method:
 async function delM(id){await fetch('/api/operator/menu-items/'+id,{method:'DELETE',headers:H()});loadMenu();}
 async function saveEta(id){const v=$('eta-'+id).value.trim();
   await fetch('/api/operator/restaurants/'+id,{method:'PUT',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({eta:v})});}
+async function savePh(id){const v=$('ph-'+id).value.trim();
+  await fetch('/api/operator/restaurants/'+id,{method:'PUT',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({photo:v})});}
+async function saveLg(id){const v=$('lg-'+id).value.trim();
+  await fetch('/api/operator/restaurants/'+id,{method:'PUT',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({logo:v})});}
 $('addrest').onclick=async()=>{
   const n=$('nname').value.trim(); if(!n){alert('Name required');return;}
   await fetch('/api/operator/restaurants',{method:'POST',headers:{...H(),'Content-Type':'application/json'},
