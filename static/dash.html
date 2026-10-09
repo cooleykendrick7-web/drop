@@ -22,6 +22,7 @@
     <button data-t="menu">Menu</button>
     <button data-t="promo">Promos</button>
     <button data-t="sup">Support <span id="tixbadge"></span></button>
+    <button data-t="stats">Stats</button>
     <button data-t="set">Settings</button>
   </div>
 
@@ -60,10 +61,23 @@
     <div id="tixlist"></div>
   </div>
 
+  <div class="tab" id="t-stats">
+    <div class="card"><h2 style="margin:0">Last 14 days</h2>
+      <p class="small" id="statsum">Loading…</p>
+      <div id="statbars"></div></div>
+  </div>
+
   <div class="tab" id="t-set">
     <div class="card"><h3>🟢 Accepting orders</h3>
       <div class="row"><span class="small">Turn off when you're slammed — the site tells customers to check back.</span>
       <button class="btn small" id="pausetoggle" style="width:auto;padding:10px 20px">Pause</button></div>
+      <h3>Business hours (auto-pause)</h3>
+      <div class="row"><input id="sopen" inputmode="numeric" placeholder="Open (10)" style="max-width:110px">
+      <input id="sclose" inputmode="numeric" placeholder="Close (23)" style="max-width:110px"></div>
+      <p class="small">24-hour format, Bismarck time. Orders outside these hours are blocked automatically. Set both to the same number for 24/7.</p>
+      <h3>Delivery zone</h3>
+      <input id="szone" placeholder="Bismarck, ND">
+      <p class="small">Shown on the homepage and checkout so customers know where you deliver.</p>
       <h3>Minutes per delivery</h3>
       <input id="smpd" inputmode="numeric" placeholder="18">
       <p class="small">Used to estimate customer wait times. Your average door-to-door minutes.</p>
@@ -101,8 +115,21 @@ document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
   b.classList.add('on'); $('t-'+b.dataset.t).classList.add('on');
-  if(b.dataset.t==='earn') loadEarn(); if(b.dataset.t==='menu') loadMenu(); if(b.dataset.t==='set') loadSet(); if(b.dataset.t==='sup') loadTix(); if(b.dataset.t==='promo') loadPromos();
+  if(b.dataset.t==='earn') loadEarn(); if(b.dataset.t==='menu') loadMenu(); if(b.dataset.t==='set') loadSet(); if(b.dataset.t==='sup') loadTix(); if(b.dataset.t==='promo') loadPromos(); if(b.dataset.t==='stats') loadStats();
 });
+
+async function loadStats(){
+  const a=await (await fetch('/api/operator/analytics',{headers:H()})).json();
+  $('statsum').innerHTML=`<b>${a.total_visits}</b> visits · <b>${a.total_orders}</b> orders · <b>${a.conversion}%</b> order rate`;
+  const mv=Math.max(1,...a.days.map(d=>d.visits));
+  $('statbars').innerHTML=a.days.map(d=>{
+    const h=Math.round(d.visits/mv*90);
+    return `<div style="display:inline-block;width:6.4%;text-align:center;vertical-align:bottom" title="${d.date}: ${d.visits} visits, ${d.orders} orders">
+      <div style="font-size:11px;color:var(--acc);font-weight:700">${d.orders||''}</div>
+      <div style="height:${h}px;background:linear-gradient(180deg,var(--acc),#7a2d00);border-radius:3px 3px 0 0;min-height:3px"></div>
+      <div style="font-size:9px;opacity:.6">${d.date}</div></div>`;
+  }).join('');
+}
 
 $('gobtn').onclick=async()=>{
   PIN=$('pin').value.trim();
@@ -192,6 +219,7 @@ $('addrest').onclick=async()=>{
 async function loadSet(){
   const s=await (await fetch('/api/operator/settings',{headers:H()})).json();
   $('sfee').value=s.delivery_fee;$('smin').value=s.min_order;$('smpd').value=s.mins_per_delivery;$('stopic').value=s.ntfy_topic||'';
+  $('sopen').value=s.open_hour;$('sclose').value=s.close_hour;$('szone').value=s.delivery_zone||'';
   const pt=$('pausetoggle');
   pt.textContent=s.accepting_orders?'Pause':'Resume';
   pt.classList.toggle('ghost',!s.accepting_orders);
@@ -204,7 +232,10 @@ $('pausetoggle').onclick=async()=>{
 };
 $('saveset').onclick=async()=>{
   const body={delivery_fee:parseFloat($('sfee').value),min_order:parseFloat($('smin').value)||0,
-    mins_per_delivery:parseInt($('smpd').value)||18,ntfy_topic:$('stopic').value.trim()};
+    mins_per_delivery:parseInt($('smpd').value)||18,ntfy_topic:$('stopic').value.trim(),
+    delivery_zone:$('szone').value.trim()};
+  const oh=parseInt($('sopen').value),ch=parseInt($('sclose').value);
+  if(!isNaN(oh))body.open_hour=oh; if(!isNaN(ch))body.close_hour=ch;
   if($('spin').value.trim()) body.pin=$('spin').value.trim();
   const r=await fetch('/api/operator/settings',{method:'PUT',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify(body)});
   const j=await r.json();

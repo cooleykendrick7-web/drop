@@ -99,6 +99,13 @@ async function load(){
     document.getElementById('msg').textContent='Payment was cancelled — your order is saved, you can try again.';
   const cfg = await (await fetch('/api/config')).json();
   fee=cfg.delivery_fee; minOrder=cfg.min_order||10; live=cfg.stripe_live;
+  if(!cfg.open_now){
+    document.getElementById('pay').disabled=true;
+    document.getElementById('pay').style.opacity=.5;
+    document.getElementById('msg').textContent=`We're closed right now — back at ${cfg.hours_label.split('–')[0]}. Your cart is saved.`;
+  }
+  if(!sessionStorage.getItem('dropv')){sessionStorage.setItem('dropv','1');
+    fetch('/api/visit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({page:'checkout'})});}
   // logged in? pre-fill + rewards
   try{
     const me = await (await fetch('/api/auth/me')).json();

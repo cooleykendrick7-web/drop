@@ -12,6 +12,8 @@
   <button class="btn" id="gocheck">View cart · $<span id="ctotal">0.00</span></button>
 </div>
 <script>
+if(!sessionStorage.getItem('dropv')){sessionStorage.setItem('dropv','1');
+fetch('/api/visit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({page:'restaurant'})});}
 const rid = new URLSearchParams(location.search).get('id');
 let cart = JSON.parse(localStorage.getItem('dropcart_'+rid) || '{}');
 let menu = [], rest = null, fee = 3.99;

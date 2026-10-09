@@ -21,8 +21,9 @@
   <div class="trust">
     <span class="pill">🔒 Secure checkout</span>
     <span class="pill">🛵 <b>$3.99</b> flat delivery</span>
-    <span class="pill">📍 Bismarck, ND</span>
+    <span class="pill">📍 <span id="zonepill">Bismarck, ND</span></span>
   </div>
+  <div id="openstat" class="small" style="margin-top:10px"></div>
 </div>
 
 <div id="dev"></div>
@@ -51,13 +52,23 @@
   <div class="motto"><a class="secret" href="/dash">PICK UP &nbsp;•&nbsp; DELIVER &nbsp;•&nbsp; DONE</a></div>
   <div>Drop — Bismarck, North Dakota</div>
   <div style="margin-top:8px">📧 <a href="mailto:wearedropservicesllc@gmail.com">wearedropservicesllc@gmail.com</a><br>📞 <a href="tel:+12629777869">(262) 977-7869</a></div>
+  <div style="margin-top:8px"><a href="/terms">Terms & refund policy</a></div>
 </footer>
 
 <script src="/static/chat.js"></script>
 <script>
+if(!sessionStorage.getItem('dropv')){sessionStorage.setItem('dropv','1');
+fetch('/api/visit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({page:'home'})});}
 async function load(){
   const cfg = await (await fetch('/api/config')).json();
   if(cfg.tagline) document.getElementById('tagline').textContent = cfg.tagline;
+  if(cfg.delivery_zone) document.getElementById('zonepill').textContent = cfg.delivery_zone;
+  const os=document.getElementById('openstat');
+  os.innerHTML = cfg.open_now
+    ? `🟢 <b>Open now</b> · ${cfg.hours_label} · delivering in ${cfg.delivery_zone}`
+    : `🔴 <b>Closed</b> — back at ${cfg.hours_label.split('–')[0]} · delivering in ${cfg.delivery_zone}`;
+  const cta=document.querySelector('.cta');
+  if(!cfg.open_now){cta.style.opacity=.5;}
   const fee = cfg.delivery_fee || 3.99;
   if(!cfg.stripe_live){
     document.getElementById('dev').innerHTML =
