@@ -19,6 +19,9 @@ import time
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+
+CENTRAL = ZoneInfo("America/Chicago")
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -126,6 +129,9 @@ def init_db():
         user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
         punches INTEGER NOT NULL DEFAULT 0,
         free_fee INTEGER NOT NULL DEFAULT 0)""")
+    c.execute("""CREATE TABLE IF NOT EXISTS visits (
+        date TEXT NOT NULL, page TEXT NOT NULL, count INTEGER DEFAULT 0,
+        PRIMARY KEY(date, page))""")
     ocols2 = [r[1] for r in c.execute("PRAGMA table_info(orders)").fetchall()]
     if "user_id" not in ocols2:
         c.execute("ALTER TABLE orders ADD COLUMN user_id INTEGER DEFAULT 0")
@@ -134,6 +140,9 @@ def init_db():
         "pin": "1234",
         "ntfy_topic": "",
         "tagline": "We drop it at your door.",
+        "open_hour": "10",
+        "close_hour": "23",
+        "delivery_zone": "Bismarck, ND",
     }
     for k, v in defaults.items():
         c.execute("INSERT OR IGNORE INTO settings(key, value) VALUES(?, ?)", (k, v))
@@ -209,6 +218,35 @@ def now_iso():
     return datetime.now(timezone.utc).isoformat()
 
 
+def get_hours():
+    try:
+        oh = max(0, min(23, int(get_setting("open_hour") or 10)))
+    except (TypeError, ValueError):
+        oh = 10
+    try:
+        ch = max(0, min(23, int(get_setting("close_hour") or 23)))
+    except (TypeError, ValueError):
+        ch = 23
+    return oh, ch
+
+
+def is_open_now():
+    oh, ch = get_hours()
+    now = datetime.now(CENTRAL)
+    h = now.hour + now.minute / 60
+    if oh == ch:
+        return True  # open 24 hours
+    if oh < ch:
+        return oh <= h < ch
+    return h >= oh or h < ch  # overnight range
+
+
+def fmt_hour(h):
+    h = int(h) % 24
+    ap = "am" if h < 12 else "pm"
+    return f"{h % 12 or 12}{ap}"
+
+
 def order_dict(row):
     d = dict(row)
     d["items"] = json.loads(d.pop("items_json"))
@@ -253,12 +291,18 @@ def health():
 
 @app.get("/api/config")
 def config():
+    oh, ch = get_hours()
     return {
         "stripe_live": STRIPE_LIVE,
         "stripe_publishable_key": STRIPE_PUBLISHABLE_KEY if STRIPE_LIVE else "",
         "delivery_fee": float(get_setting("delivery_fee")),
         "min_order": float(get_setting("min_order") or 10),
         "tagline": get_setting("tagline"),
+        "open_now": is_open_now(),
+        "open_hour": oh,
+        "close_hour": ch,
+        "hours_label": f"{fmt_hour(oh)}–{fmt_hour(ch)}",
+        "delivery_zone": get_setting("delivery_zone") or "Bismarck, ND",
     }
 
 
@@ -282,6 +326,9 @@ def list_restaurants():
 async def create_order(req: Request):
     """Create an order (unpaid). Server prices everything from the DB."""
     body = await req.json()
+    if not is_open_now():
+        oh, _ = get_hours()
+        raise HTTPException(400, f"We're closed right now — back at {fmt_hour(oh)}")
     if get_setting("accepting_orders") == "0":
         raise HTTPException(400, "We're at capacity right now — please check back soon")
     rid = body.get("restaurant_id")
@@ -563,10 +610,13 @@ def op_earnings(x_pin: str = Header(default="")):
 @app.get("/api/operator/settings")
 def op_get_settings(x_pin: str = Header(default="")):
     check_pin(x_pin)
+    oh, ch = get_hours()
     return {"delivery_fee": float(get_setting("delivery_fee")),
             "min_order": float(get_setting("min_order") or 10),
             "accepting_orders": get_setting("accepting_orders") != "0",
             "mins_per_delivery": int(get_setting("mins_per_delivery") or 18),
+            "open_hour": oh, "close_hour": ch,
+            "delivery_zone": get_setting("delivery_zone") or "Bismarck, ND",
             "pin": get_setting("pin"),
             "ntfy_topic": get_setting("ntfy_topic"),
             "tagline": get_setting("tagline")}
@@ -610,6 +660,18 @@ async def op_put_settings(req: Request, x_pin: str = Header(default="")):
     if "tagline" in body:
         set_setting("tagline", str(body["tagline"]).strip()[:80])
         out["tagline"] = "updated"
+    if "open_hour" in body:
+        oh = max(0, min(23, int(body["open_hour"])))
+        set_setting("open_hour", str(oh))
+        out["open_hour"] = oh
+    if "close_hour" in body:
+        ch = max(0, min(23, int(body["close_hour"])))
+        set_setting("close_hour", str(ch))
+        out["close_hour"] = ch
+    if "delivery_zone" in body:
+        z = str(body["delivery_zone"]).strip()[:80] or "Bismarck, ND"
+        set_setting("delivery_zone", z)
+        out["delivery_zone"] = z
     return out
 
 
@@ -880,12 +942,15 @@ def queue_status():
     ).fetchone()["c"]
     conn.close()
     accepting = get_setting("accepting_orders") != "0"
+    open_now = is_open_now()
+    oh, ch = get_hours()
     try:
         mins = max(5, min(120, int(get_setting("mins_per_delivery") or 18)))
     except (TypeError, ValueError):
         mins = 18
-    return {"active": n, "accepting": accepting,
-            "estimated_mins": (n * mins + 25) if accepting else 0}
+    return {"active": n, "accepting": accepting and open_now,
+            "open_now": open_now, "hours_label": f"{fmt_hour(oh)}–{fmt_hour(ch)}",
+            "estimated_mins": (n * mins + 25) if (accepting and open_now) else 0}
 
 
 @app.post("/api/orders/{oid}/cancel")
@@ -908,6 +973,42 @@ def customer_cancel(oid: int):
     conn.commit()
     conn.close()
     return {"ok": True, "refunded": refunded}
+
+
+# ---------------- visitor analytics ----------------
+@app.post("/api/visit")
+async def track_visit(req: Request):
+    """Count one visit per browser session per page (frontend dedupes)."""
+    body = await req.json()
+    page = re.sub(r"[^a-z]", "", str(body.get("page") or "home").lower())[:20] or "home"
+    today = datetime.now(CENTRAL).date().isoformat()
+    conn = db()
+    conn.execute(
+        "INSERT INTO visits(date, page, count) VALUES(?,?,1) "
+        "ON CONFLICT(date, page) DO UPDATE SET count=count+1",
+        (today, page))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.get("/api/operator/analytics")
+def op_analytics(x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    conn = db()
+    days = []
+    for i in range(13, -1, -1):
+        d = (datetime.now(CENTRAL).date() - timedelta(days=i)).isoformat()
+        v = conn.execute("SELECT COALESCE(SUM(count),0) c FROM visits WHERE date=?", (d,)).fetchone()["c"]
+        o = conn.execute(
+            "SELECT COUNT(*) c FROM orders WHERE substr(created_at,1,10)=? AND status!='cancelled'",
+            (d,)).fetchone()["c"]
+        days.append({"date": d[5:], "visits": v, "orders": o})
+    conn.close()
+    tv = sum(x["visits"] for x in days)
+    to = sum(x["orders"] for x in days)
+    return {"days": days, "total_visits": tv, "total_orders": to,
+            "conversion": round(100 * to / tv, 1) if tv else 0}
 
 
 # ---------------- support tickets ----------------
@@ -1102,4 +1203,11 @@ def acctpage():
 @app.get("/dash.html", response_class=HTMLResponse)
 def dpage():
     with open(os.path.join(BASE, "static", "dash.html")) as f:
+        return f.read()
+
+
+@app.get("/terms", response_class=HTMLResponse)
+@app.get("/terms.html", response_class=HTMLResponse)
+def termspage():
+    with open(os.path.join(BASE, "static", "terms.html")) as f:
         return f.read()
