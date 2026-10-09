@@ -15,7 +15,10 @@ h2{font-size:1.25rem;margin:20px 0 8px}
 
 /* header */
 .topbar{position:sticky;top:0;z-index:50;background:rgba(10,10,11,.92);
-  backdrop-filter:blur(10px);margin:0 -14px;padding:10px 14px;border-bottom:1px solid var(--line)}
+  backdrop-filter:blur(10px);margin:0 -14px;padding:10px 14px;border-bottom:1px solid var(--line);
+  display:flex;align-items:center;justify-content:space-between}
+.topbar .acct{font-size:.85rem;font-weight:700;color:var(--txt);text-decoration:none;
+  border:1px solid var(--line);border-radius:999px;padding:8px 14px;background:var(--card)}
 .brand{display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--txt)}
 .brandmark{height:38px;width:auto;border-radius:9px;display:block}
 .brand b{font-size:1.45rem;letter-spacing:-.5px}

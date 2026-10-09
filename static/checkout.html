@@ -4,7 +4,7 @@
 <link rel="icon" href="/static/logo-mark.jpg">
 <link rel="stylesheet" href="/static/styles.css">
 </head><body>
-<header class="topbar"><a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg" alt="Drop"><b>Drop</b></a></header>
+<header class="topbar"><a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg" alt="Drop"><b>Drop</b></a><a class="acct" href="/account.html">👤 Account</a></header>
 <a href="/" class="small">← Home</a>
 <h1>Checkout</h1>
 <div id="dev"></div>
@@ -99,6 +99,22 @@ async function load(){
     document.getElementById('msg').textContent='Payment was cancelled — your order is saved, you can try again.';
   const cfg = await (await fetch('/api/config')).json();
   fee=cfg.delivery_fee; minOrder=cfg.min_order||10; live=cfg.stripe_live;
+  // logged in? pre-fill + rewards
+  try{
+    const me = await (await fetch('/api/auth/me')).json();
+    if(me.user){
+      document.getElementById('name').value=me.user.name||'';
+      document.getElementById('phone').value=me.user.phone.replace(/(\d{3})(\d{3})(\d{4})/,'($1) $2-$3')||'';
+      const rw=me.rewards;
+      const banner=document.createElement('div');
+      banner.className='card';
+      banner.innerHTML = rw.free_fee
+        ? '🎉 <b>FREE delivery</b> applied from your Drop Rewards card!'
+        : `🧡 Drop Rewards: <b>${rw.punches}/10</b> punches ${rw.punches>0?`(${10-rw.punches} to a free delivery)`:''}`;
+      document.getElementById('summary').before(banner);
+      if(rw.free_fee) fee=0;
+    }
+  }catch(e){}
   if(!live) document.getElementById('dev').innerHTML='<div class="devbanner">🚧 TEST MODE — no real card is charged. Hit "Place order" then the test-pay button.</div>';
   cart = JSON.parse(localStorage.getItem('dropcart_'+rid)||'{}');
   const r = await (await fetch('/api/restaurants')).json();

@@ -1,0 +1,55 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Drop — My Account</title>
+<link rel="icon" href="/static/logo-mark.jpg">
+<link rel="stylesheet" href="/static/styles.css">
+<style>
+.rwcard{background:linear-gradient(135deg,#ff6a00,#e63900 60%,#7a1e00);border-radius:20px;padding:22px;color:#fff;
+  box-shadow:0 12px 32px rgba(255,106,0,.35);margin-bottom:18px;position:relative;overflow:hidden}
+.rwcard::after{content:'D';position:absolute;right:8px;top:-24px;font-size:9rem;font-weight:900;opacity:.14}
+.rwcard .brand{font-weight:900;letter-spacing:2px;font-size:.8rem;opacity:.9}
+.rwcard h2{margin:6px 0 2px;font-size:1.4rem}
+.rwcard .dots{display:flex;gap:8px;margin:14px 0;flex-wrap:wrap}
+.rwcard .dot{width:30px;height:30px;border-radius:50%;border:2px solid rgba(255,255,255,.55);
+  display:flex;align-items:center;justify-content:center;font-size:.85rem;font-weight:800}
+.rwcard .dot.on{background:#fff;color:#e63900;border-color:#fff}
+.rwcard .sub{font-size:.85rem;opacity:.92}
+</style>
+</head><body>
+<header class="topbar"><a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg" alt="Drop"><b>Drop</b></a>
+<a href="/" style="font-size:.85rem">← Order food</a></header>
+<div style="max-width:560px;margin:20px auto;padding:0 16px" id="wrap"><p>Loading…</p></div>
+<script>
+const $=id=>document.getElementById(id);
+async function load(){
+  const r=await fetch('/api/auth/me');
+  if(!r.ok){location.href='/login.html';return;}
+  const {user,rewards,orders}=await r.json();
+  const dots=Array.from({length:10},(_,i)=>
+    `<div class="dot ${i<rewards.punches?'on':''}">${i<rewards.punches?'✓':i+1}</div>`).join('');
+  const rwmsg=rewards.free_fee
+    ? '🎉 <b>FREE delivery</b> waiting for you — it applies automatically at checkout!'
+    : rewards.punches===0
+      ? 'Order 10 times, get your 11th delivery fee <b>free</b>.'
+      : `${10-rewards.punches} more ${10-rewards.punches===1?'delivery':'deliveries'} for a <b>FREE</b> delivery fee!`;
+  $('wrap').innerHTML=`
+    <h1>Hey, ${user.name.split(' ')[0]} 👋</h1>
+    <div class="rwcard">
+      <div class="brand">DROP REWARDS</div>
+      <h2>${user.name}</h2>
+      <div class="sub">${user.phone.replace(/(\d{3})(\d{3})(\d{4})/,'($1) $2-$3')}</div>
+      <div class="dots">${dots}</div>
+      <div class="sub">${rwmsg}</div>
+    </div>
+    <h2>Order history</h2>
+    <div id="hist">${orders.map(o=>`
+      <a class="card" href="/track.html?id=${o.id}" style="display:block;text-decoration:none;color:inherit">
+        <div class="row"><b>#${o.id} · ${o.restaurant_name||'Drop'}</b><b>$${o.total.toFixed(2)}</b></div>
+        <span class="small">${new Date(o.created_at).toLocaleDateString()} · ${o.status.replace(/_/g,' ')}</span>
+      </a>`).join('')||'<p class="small">No orders yet — <a href="/">fix that 🧡</a></p>'}</div>
+    <button class="btn ghost" id="logout" style="margin-top:14px">Log out</button>`;
+  $('logout').onclick=async()=>{await fetch('/api/auth/logout',{method:'POST'});location.href='/';};
+}
+load();
+</script>
+<script src="/static/chat.js"></script></body></html>

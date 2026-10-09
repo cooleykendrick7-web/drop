@@ -1,0 +1,55 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Drop — Log in or Sign up</title>
+<link rel="icon" href="/static/logo-mark.jpg">
+<link rel="stylesheet" href="/static/styles.css">
+</head><body>
+<header class="topbar"><a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg" alt="Drop"><b>Drop</b></a></header>
+<div style="max-width:420px;margin:30px auto;padding:0 16px">
+  <div style="text-align:center;margin-bottom:20px"><img src="/static/logo.jpg" alt="Drop" style="height:90px;border-radius:16px"></div>
+  <div class="tabs" style="margin-bottom:0">
+    <button class="on" id="tab-login">Log in</button>
+    <button id="tab-signup">Sign up</button>
+  </div>
+  <div class="card" id="pane-login">
+    <label>Phone number</label>
+    <input id="li-phone" inputmode="tel" placeholder="(262) 555-1234">
+    <label>Password</label>
+    <input id="li-pw" type="password" placeholder="Your password">
+    <button class="btn" id="li-go">Log in</button>
+    <p class="small" id="li-msg"></p>
+  </div>
+  <div class="card" id="pane-signup" style="display:none">
+    <label>Your name</label>
+    <input id="su-name" placeholder="Jane Doe">
+    <label>Phone number</label>
+    <input id="su-phone" inputmode="tel" placeholder="(262) 555-1234">
+    <label>Password (6+ characters)</label>
+    <input id="su-pw" type="password" placeholder="Pick a password">
+    <button class="btn" id="su-go">Create my Drop account</button>
+    <p class="small">Get a virtual Drop Rewards card — every 10th delivery fee is free. 🧡</p>
+    <p class="small" id="su-msg"></p>
+  </div>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+$('tab-login').onclick=()=>{$('tab-login').classList.add('on');$('tab-signup').classList.remove('on');$('pane-login').style.display='block';$('pane-signup').style.display='none';};
+$('tab-signup').onclick=()=>{$('tab-signup').classList.add('on');$('tab-login').classList.remove('on');$('pane-signup').style.display='block';$('pane-login').style.display='none';};
+async function post(path,body){
+  const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  return {ok:r.ok,j:await r.json()};
+}
+$('li-go').onclick=async()=>{
+  const {ok,j}=await post('/api/auth/login',{phone:$('li-phone').value,password:$('li-pw').value});
+  if(ok){location.href='/account.html';}
+  else $('li-msg').textContent='Error: '+(j.detail||'login failed');
+};
+$('su-go').onclick=async()=>{
+  const {ok,j}=await post('/api/auth/signup',{name:$('su-name').value,phone:$('su-phone').value,password:$('su-pw').value});
+  if(ok){location.href='/account.html';}
+  else $('su-msg').textContent='Error: '+(j.detail||'signup failed');
+};
+// already logged in? go to account
+fetch('/api/auth/me').then(r=>{if(r.ok)location.href='/account.html';}).catch(()=>{});
+</script>
+<script src="/static/chat.js"></script></body></html>
