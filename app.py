@@ -75,6 +75,13 @@ def init_db():
         status TEXT NOT NULL DEFAULT 'placed',
         stripe_payment_id TEXT DEFAULT '', stripe_status TEXT NOT NULL DEFAULT 'pending',
         created_at TEXT NOT NULL, updated_at TEXT NOT NULL)""")
+    c.execute("""CREATE TABLE IF NOT EXISTS support_tickets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL, phone TEXT DEFAULT '',
+        order_id INTEGER DEFAULT 0,
+        message TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'open',
+        created_at TEXT NOT NULL)""")
     defaults = {
         "delivery_fee": "3.99",
         "pin": "1234",
@@ -472,6 +479,52 @@ async def op_put_settings(req: Request, x_pin: str = Header(default="")):
         set_setting("tagline", str(body["tagline"]).strip()[:80])
         out["tagline"] = "updated"
     return out
+
+
+# ---------------- support tickets ----------------
+@app.post("/api/support/ticket")
+async def support_create(req: Request):
+    """Public: customer sends a message to Ken. Creates a support ticket."""
+    body = await req.json()
+    name = (body.get("name") or "").strip()[:60]
+    phone = (body.get("phone") or "").strip()[:30]
+    message = (body.get("message") or "").strip()[:2000]
+    try:
+        order_id = int(body.get("order_id") or 0)
+    except (TypeError, ValueError):
+        order_id = 0
+    if not name or not message:
+        raise HTTPException(400, "Name and message required")
+    conn = db()
+    cur = conn.execute(
+        "INSERT INTO support_tickets(name, phone, order_id, message, status, created_at)"
+        " VALUES(?,?,?,?, 'open', ?)",
+        (name, phone, order_id, message, now_iso()))
+    tid = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return {"ok": True, "ticket_id": tid}
+
+
+@app.get("/api/operator/tickets")
+def op_list_tickets(x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    conn = db()
+    rows = conn.execute(
+        "SELECT * FROM support_tickets ORDER BY id DESC").fetchall()
+    out = [dict(r) for r in rows]
+    conn.close()
+    return out
+
+
+@app.post("/api/operator/tickets/{tid}/resolve")
+def op_resolve_ticket(tid: int, x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    conn = db()
+    conn.execute("UPDATE support_tickets SET status='resolved' WHERE id=?", (tid,))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
 
 
 @app.post("/api/operator/restaurants")
