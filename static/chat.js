@@ -19,6 +19,8 @@
      a:"Sorry about that — let's get Ken on it. Tap <b>Message Ken</b> below, include your order number if you have it, and he'll make it right."},
     {k:["account","sign up","log in","login"],
      a:"No account needed — just pick your food, check out, and track it. Simple."},
+    {k:["contact","email","phone number","call you","reach you","talk to someone","human"],
+     a:"You can reach us anytime at <b>wearedropservicesllc@gmail.com</b> or <b>(262) 977-7869</b> — or tap <b>Message Ken</b> and he'll get back to you."},
   ];
 
   function answer(q){
