@@ -114,7 +114,7 @@ async function loadOrders(first){
       <p><b>${o.customer_name}</b> · <a href="tel:${o.phone}">${o.phone}</a><br>
       📍 ${o.address}${o.notes?`<br>📝 ${o.notes}`:''}</p>
       ${o.items.map(i=>`<div class="row small"><span>${i.qty}× ${i.name}</span><span>$${i.line.toFixed(2)}</span></div>`).join('')}
-      <div class="row"><span class="small">Food $${o.food_total.toFixed(2)} + fee $${o.delivery_fee.toFixed(2)}</span><b>$${o.total.toFixed(2)}</b></div>
+      <div class="row"><span class="small">Food $${o.food_total.toFixed(2)} + fee $${o.delivery_fee.toFixed(2)}${o.tip?` + tip $${o.tip.toFixed(2)}`:''}</span><b>$${o.total.toFixed(2)}</b></div>
       <div class="small">${o.paid?'💰 Paid ✓':'⚠️ NOT PAID'} · ${new Date(o.created_at).toLocaleString()}</div>
       <div style="margin-top:8px">
         ${NEXT[o.status]?`<button class="btn small" onclick="setStatus(${o.id},'${NEXT[o.status]}')">${NEXTLBL[NEXT[o.status]]}</button>`:''}
@@ -130,11 +130,11 @@ async function setStatus(id,s){
 }
 async function loadEarn(){
   const e=await (await fetch('/api/operator/earnings',{headers:H()})).json();
-  $('etotal').textContent='$'+e.total_fees.toFixed(2);
-  $('ecount').textContent=e.orders+' paid deliveries · $'+e.total_sales.toFixed(2)+' total sales';
+  $('etotal').textContent='$'+e.total_earned.toFixed(2);
+  $('ecount').textContent=e.orders+' paid deliveries · $'+e.total_fees.toFixed(2)+' fees + $'+e.total_tips.toFixed(2)+' tips';
   $('ebyday').innerHTML=Object.entries(e.by_day).sort().reverse().map(([d,v])=>
-    `<div class="card"><div class="row"><b>${d}</b><b>$${v.fees.toFixed(2)}</b></div>
-     <span class="small">${v.orders} deliveries · $${v.sales.toFixed(2)} sales</span></div>`).join('')||'<p class="small">No earnings yet.</p>';
+    `<div class="card"><div class="row"><b>${d}</b><b>$${(v.fees+v.tips).toFixed(2)}</b></div>
+     <span class="small">${v.orders} deliveries · $${v.fees.toFixed(2)} fees + $${v.tips.toFixed(2)} tips</span></div>`).join('')||'<p class="small">No earnings yet.</p>';
 }
 async function loadMenu(){
   const r=await (await fetch('/api/restaurants')).json();

@@ -10,6 +10,16 @@
 <div id="dev"></div>
 <div id="summary" class="card"></div>
 <div class="card">
+  <label>Tip your driver <span class="small">(100% goes to Ken)</span></label>
+  <div id="tips" style="display:flex;gap:8px;flex-wrap:wrap;margin:6px 0">
+    <button class="btn small ghost tipbtn" data-t="0">$0</button>
+    <button class="btn small ghost tipbtn" data-t="1">$1</button>
+    <button class="btn small ghost tipbtn on" data-t="2">$2</button>
+    <button class="btn small ghost tipbtn" data-t="5">$5</button>
+    <input id="customtip" inputmode="decimal" placeholder="Custom $" style="width:110px;margin:4px 0">
+  </div>
+</div>
+<div class="card">
   <label>Your name</label><input id="name" placeholder="Jane Doe" autocomplete="name">
   <label>Phone (so Ken can reach you)</label><input id="phone" placeholder="(555) 123-4567" inputmode="tel" autocomplete="tel">
   <label>Delivery address</label><textarea id="address" rows="2" placeholder="123 Main St, Apt 4, Bismarck ND" autocomplete="street-address"></textarea>
@@ -19,7 +29,37 @@
 <p class="small" id="msg"></p>
 <script>
 const rid = new URLSearchParams(location.search).get('rid');
-let fee=3.99, live=false, cart={}, menu=[];
+let fee=3.99, live=false, cart={}, menu=[], tip=2;
+function getTip(){
+  const c=parseFloat(document.getElementById('customtip').value);
+  if(c>0) return Math.min(100,Math.round(c*100)/100);
+  return tip;
+}
+document.querySelectorAll('.tipbtn').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.tipbtn').forEach(x=>{x.classList.remove('on');x.classList.add('ghost');});
+  b.classList.add('on');b.classList.remove('ghost');
+  document.getElementById('customtip').value='';
+  tip=parseFloat(b.dataset.t); drawSummary();
+});
+document.getElementById('customtip').addEventListener('input',()=>{
+  if(document.getElementById('customtip').value.trim()!==''){
+    document.querySelectorAll('.tipbtn').forEach(x=>{x.classList.remove('on');x.classList.add('ghost');});
+  }
+  drawSummary();
+});
+function drawSummary(){
+  const t=getTip();
+  let food=0, rows='';
+  for(const [id,q] of Object.entries(cart)){
+    const m=menu.find(x=>x.id==id); if(!m) continue;
+    food+=m.price*q; rows+=`<div class="row"><span>${q}× ${m.name}</span><span>$${(m.price*q).toFixed(2)}</span></div>`;
+  }
+  document.getElementById('summary').innerHTML = rows +
+    `<div class="row"><span>Delivery fee</span><span>$${fee.toFixed(2)}</span></div>
+     <div class="row"><span>Driver tip</span><span>$${t.toFixed(2)}</span></div>
+     <div class="row total"><span>Total</span><span>$${(food+fee+t).toFixed(2)}</span></div>`;
+  window._food=food;
+}
 async function load(){
   if(new URLSearchParams(location.search).get('cancelled'))
     document.getElementById('msg').textContent='Payment was cancelled — your order is saved, you can try again.';
@@ -29,16 +69,12 @@ async function load(){
   cart = JSON.parse(localStorage.getItem('dropcart_'+rid)||'{}');
   const r = await (await fetch('/api/restaurants')).json();
   const rest = r.find(x=>x.id==rid); menu = rest? rest.menu : [];
-  let food=0, rows='';
+  let food=0;
   for(const [id,q] of Object.entries(cart)){
-    const m=menu.find(x=>x.id==id); if(!m) continue;
-    food+=m.price*q; rows+=`<div class="row"><span>${q}× ${m.name}</span><span>$${(m.price*q).toFixed(2)}</span></div>`;
+    const m=menu.find(x=>x.id==id); if(m) food+=m.price*q;
   }
   if(!food){ document.body.innerHTML='<p>Your cart is empty. <a href="/">Home</a></p>'; return; }
-  document.getElementById('summary').innerHTML = rows +
-    `<div class="row"><span>Delivery fee</span><span>$${fee.toFixed(2)}</span></div>
-     <div class="row total"><span>Total</span><span>$${(food+fee).toFixed(2)}</span></div>`;
-  window._food=food;
+  drawSummary();
 }
 document.getElementById('pay').onclick = async ()=>{
   const name=document.getElementById('name').value.trim(),
@@ -50,7 +86,7 @@ document.getElementById('pay').onclick = async ()=>{
   msg.textContent='Placing your order…';
   const items=Object.entries(cart).map(([id,q])=>({menu_item_id:+id,qty:q}));
   const o = await (await fetch('/api/orders',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({restaurant_id:+rid,items,customer:{name,phone,address,notes}})})).json();
+    body:JSON.stringify({restaurant_id:+rid,items,tip:getTip(),customer:{name,phone,address,notes}})})).json();
   if(o.order_id===undefined){ msg.textContent='Error: '+(o.detail||'could not place order'); return; }
   localStorage.removeItem('dropcart_'+rid);
   const c = await (await fetch('/api/checkout',{method:'POST',headers:{'Content-Type':'application/json'},
