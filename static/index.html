@@ -1,28 +1,54 @@
 <!DOCTYPE html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Drop — Food Delivery</title><link rel="stylesheet" href="/static/styles.css">
+<title>Drop — Bismarck Food Delivery</title>
+<link rel="icon" href="/static/logo-mark.jpg">
+<link rel="stylesheet" href="/static/styles.css">
 </head><body>
-<div class="brand"><div class="logo">D</div><b>Drop</b></div>
-<p class="sub" id="tagline">We drop it at your door.</p>
+<header class="topbar">
+  <a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg" alt="Drop"><b>Drop</b><span class="tag">Bismarck</span></a>
+</header>
+
+<div class="hero">
+  <img class="logo-full" src="/static/logo.jpg" alt="Drop — Pick up. Deliver. Done.">
+  <h1>Bismarck's favorite food,<br><span class="hl">dropped at your door.</span></h1>
+  <p class="tagline" id="tagline">One local driver. One flat $3.99 fee. Real-time tracking.</p>
+  <a class="cta" href="#restaurants">Order now</a>
+  <div class="trust">
+    <span class="pill">🔒 Secure checkout</span>
+    <span class="pill">🛵 <b>$3.99</b> flat delivery</span>
+    <span class="pill">📍 Bismarck, ND</span>
+  </div>
+</div>
+
 <div id="dev"></div>
-<h1>Restaurants near you</h1>
+
+<div class="section-title" id="restaurants">
+  <h2>Order from local spots</h2><span id="count"></span>
+</div>
 <div id="list"></div>
-<p class="small" style="text-align:center;margin-top:24px">Driver? <a href="/dash">Operator login</a></p>
+
+<footer>
+  <div class="motto">PICK UP &nbsp;•&nbsp; DELIVER &nbsp;•&nbsp; DONE</div>
+  <div>Drop — Bismarck, North Dakota<br><a href="/dash">Operator login</a></div>
+</footer>
+
 <script>
 async function load(){
   const cfg = await (await fetch('/api/config')).json();
-  document.getElementById('tagline').textContent = cfg.tagline || 'We drop it at your door.';
+  if(cfg.tagline) document.getElementById('tagline').textContent = cfg.tagline;
+  const fee = cfg.delivery_fee || 3.99;
   if(!cfg.stripe_live){
     document.getElementById('dev').innerHTML =
       '<div class="devbanner">🚧 Demo payments are on (test mode) — real cards come later.</div>';
   }
   const r = await (await fetch('/api/restaurants')).json();
+  document.getElementById('count').textContent = r.length + ' spots';
   document.getElementById('list').innerHTML = r.map(x=>`
     <a class="card rest" href="/restaurant.html?id=${x.id}">
       <div class="emoji">${x.emoji}</div>
-      <div class="meta"><b>${x.name}</b><span>${x.cuisine} · ${x.menu.length} items · $3.99 delivery</span></div>
+      <div class="meta"><b>${x.name}</b><span>${x.cuisine} · ${x.menu.length} items</span><span class="fee">$${fee.toFixed(2)} delivery</span></div>
       <span class="badge ${x.open?'open':'closed'}">${x.open?'OPEN':'CLOSED'}</span>
-    </a>`).join('') || '<p>No restaurants yet.</p>';
+    </a>`).join('') || '<p>No restaurants yet — check back soon.</p>';
 }
 load();
 </script></body></html>

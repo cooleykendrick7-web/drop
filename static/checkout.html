@@ -1,8 +1,10 @@
 <!DOCTYPE html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Drop — Checkout</title><link rel="stylesheet" href="/static/styles.css">
+<title>Drop — Checkout</title>
+<link rel="icon" href="/static/logo-mark.jpg">
+<link rel="stylesheet" href="/static/styles.css">
 </head><body>
-<div class="brand"><div class="logo">D</div><b>Drop</b></div>
+<header class="topbar"><a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg" alt="Drop"><b>Drop</b></a></header>
 <a href="/" class="small">← Home</a>
 <h1>Checkout</h1>
 <div id="dev"></div>
@@ -10,7 +12,7 @@
 <div class="card">
   <label>Your name</label><input id="name" placeholder="Jane Doe" autocomplete="name">
   <label>Phone (so Ken can reach you)</label><input id="phone" placeholder="(555) 123-4567" inputmode="tel" autocomplete="tel">
-  <label>Delivery address</label><textarea id="address" rows="2" placeholder="123 Main St, Apt 4, Jackson MS" autocomplete="street-address"></textarea>
+  <label>Delivery address</label><textarea id="address" rows="2" placeholder="123 Main St, Apt 4, Bismarck ND" autocomplete="street-address"></textarea>
   <label>Notes for Ken (optional)</label><textarea id="notes" rows="2" placeholder="Gate code, leave at door, etc."></textarea>
 </div>
 <button class="btn" id="pay">Place order</button>
