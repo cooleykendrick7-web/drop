@@ -61,7 +61,13 @@
   </div>
 
   <div class="tab" id="t-set">
-    <div class="card"><h3>Delivery fee ($)</h3>
+    <div class="card"><h3>🟢 Accepting orders</h3>
+      <div class="row"><span class="small">Turn off when you're slammed — the site tells customers to check back.</span>
+      <button class="btn small" id="pausetoggle" style="width:auto;padding:10px 20px">Pause</button></div>
+      <h3>Minutes per delivery</h3>
+      <input id="smpd" inputmode="numeric" placeholder="18">
+      <p class="small">Used to estimate customer wait times. Your average door-to-door minutes.</p>
+      <h3>Delivery fee ($)</h3>
       <input id="sfee" inputmode="decimal"><h3>Minimum food order ($)</h3>
       <input id="smin" inputmode="decimal" placeholder="10.00"><h3>Change PIN</h3>
       <input id="spin" inputmode="numeric" placeholder="4–8 digits"><h3>ntfy push topic</h3>
@@ -121,9 +127,9 @@ async function loadOrders(first){
   lastSeen=mx;
   const open=orders.filter(o=>!['delivered','cancelled'].includes(o.status));
   const done=orders.filter(o=>['delivered','cancelled'].includes(o.status));
-  const card=o=>`
+  const card=(o,i)=>`
     <div class="card order ${o.id>lastSeen-2&&o.status==='placed'?'new':''}">
-      <div class="row"><b>#${o.id} · ${o.restaurant_name}</b>
+      <div class="row"><b>${i>=0?`#${i+1} · `:''}${o.id} · ${o.restaurant_name}</b>
         <span class="badge ${o.status==='placed'?'closed':''}">${o.status_label}</span></div>
       <p><b>${o.customer_name}</b> · <a href="tel:${o.phone}">${o.phone}</a><br>
       📍 ${o.address}${o.notes?`<br>📝 ${o.notes}`:''}</p>
@@ -135,8 +141,8 @@ async function loadOrders(first){
         ${!['delivered','cancelled'].includes(o.status)?`<button class="btn small ghost" onclick="setStatus(${o.id},'cancelled')">Cancel</button>`:''}
       </div>
     </div>`;
-  $('olist').innerHTML = '<h2>Active ('+open.length+')</h2>'+(open.map(card).join('')||'<p class="small">None right now.</p>')
-    + '<h2>History</h2>'+(done.map(card).join('')||'<p class="small">Nothing yet.</p>');
+  $('olist').innerHTML = '<h2>Active ('+open.length+')</h2>'+(open.map((o,i)=>card(o,i)).join('')||'<p class="small">None right now.</p>')
+    + '<h2>History</h2>'+(done.map(o=>card(o,-1)).join('')||'<p class="small">Nothing yet.</p>');
 }
 async function setStatus(id,s){
   await fetch('/api/operator/orders/'+id+'/status',{method:'POST',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({status:s})});
@@ -185,10 +191,20 @@ $('addrest').onclick=async()=>{
 };
 async function loadSet(){
   const s=await (await fetch('/api/operator/settings',{headers:H()})).json();
-  $('sfee').value=s.delivery_fee;$('smin').value=s.min_order;$('stopic').value=s.ntfy_topic||'';
+  $('sfee').value=s.delivery_fee;$('smin').value=s.min_order;$('smpd').value=s.mins_per_delivery;$('stopic').value=s.ntfy_topic||'';
+  const pt=$('pausetoggle');
+  pt.textContent=s.accepting_orders?'Pause':'Resume';
+  pt.classList.toggle('ghost',!s.accepting_orders);
 }
+$('pausetoggle').onclick=async()=>{
+  const s=await (await fetch('/api/operator/settings',{headers:H()})).json();
+  await fetch('/api/operator/settings',{method:'PUT',headers:{...H(),'Content-Type':'application/json'},
+    body:JSON.stringify({accepting_orders:!s.accepting_orders})});
+  loadSet();
+};
 $('saveset').onclick=async()=>{
-  const body={delivery_fee:parseFloat($('sfee').value),min_order:parseFloat($('smin').value)||0,ntfy_topic:$('stopic').value.trim()};
+  const body={delivery_fee:parseFloat($('sfee').value),min_order:parseFloat($('smin').value)||0,
+    mins_per_delivery:parseInt($('smpd').value)||18,ntfy_topic:$('stopic').value.trim()};
   if($('spin').value.trim()) body.pin=$('spin').value.trim();
   const r=await fetch('/api/operator/settings',{method:'PUT',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify(body)});
   const j=await r.json();

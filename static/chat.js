@@ -35,6 +35,19 @@
       : "Good question — I don't have that one yet. Tap <b>Message Ken</b> and he'll get back to you personally.";
   }
 
+  /* queue status bar — shows live wait info on every customer page */
+  async function mountQueueBar(){
+    if(document.getElementById('queuebar') || location.pathname.startsWith('/dash')) return;
+    try{
+      const q = await (await fetch('/api/queue')).json();
+      window.DROP_QUEUE = q;
+      const bar = el(q.accepting
+        ? `<div id="queuebar" style="text-align:center;padding:8px 12px;font-size:.82rem;font-weight:600;background:rgba(0,200,100,.12);color:#4ade80;border-bottom:1px solid var(--line)">🟢 Taking orders · about ${q.estimated_mins} min right now${q.active>0?` (${q.active} ahead of you)`:''}</div>`
+        : `<div id="queuebar" style="text-align:center;padding:10px 12px;font-size:.85rem;font-weight:700;background:rgba(255,80,80,.14);color:#ff8080;border-bottom:1px solid var(--line)">🔴 At capacity right now — check back soon!</div>`);
+      document.body.prepend(bar);
+    }catch(e){}
+  }
+
   function el(html){
     const d = document.createElement('div');
     d.innerHTML = html.trim();
@@ -43,6 +56,7 @@
 
   function mount(){
     if(document.getElementById('dropchat')) return;
+    mountQueueBar();
     const root = el(`<div id="dropchat">
       <button id="dc-btn" aria-label="Chat with us">💬</button>
       <div id="dc-panel" style="display:none">

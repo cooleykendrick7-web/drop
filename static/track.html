@@ -7,10 +7,12 @@
 <header class="topbar"><a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg" alt="Drop"><b>Drop</b></a></header>
 <h1>Order <span id="oid"></span></h1>
 <p class="sub" id="rname"></p>
+<div id="queuepos"></div>
 <div class="card" id="items"></div>
 <h2>Where's my food?</h2>
 <div class="steps" id="steps"></div>
 <p class="small" id="note">Live updates every few seconds.</p>
+<div id="cancelwrap" style="margin-top:12px"></div>
 <script>
 const oid = new URLSearchParams(location.search).get('id');
 const FLOW=[['placed','Order placed','Ken got your order'],['confirmed','Confirmed','Ken is heading to the restaurant'],['picked_up','Picked up','Ken has your food'],['on_the_way','On the way','Ken is driving to you'],['delivered','Delivered','Enjoy!']];
@@ -26,8 +28,26 @@ async function poll(){
      ${o.discount?`<div class="row" style="color:var(--ok)"><span>Discount (${o.promo_code})</span><span>-$${o.discount.toFixed(2)}</span></div>`:''}
      <div class="row total"><span>Total</span><span>$${o.total.toFixed(2)}</span></div>`;
   if(o.status==='cancelled'){
-    document.getElementById('steps').innerHTML='<div class="card">This order was cancelled. Ken will reach out about a refund.</div>';
+    document.getElementById('steps').innerHTML='<div class="card">This order was cancelled.</div>';
+    document.getElementById('queuepos').innerHTML='';
+    document.getElementById('cancelwrap').innerHTML='';
     return;
+  }
+  if(o.queue_position>0){
+    document.getElementById('queuepos').innerHTML =
+      `<div class="card" style="border-color:var(--acc)"><b>🔢 You're #${o.queue_position} in line</b><br><span class="small">Ken does them one by one — you're ${o.queue_position===1?'up next!':'almost up.'}</span></div>`;
+  }
+  if(['placed','confirmed'].includes(o.status)){
+    document.getElementById('cancelwrap').innerHTML =
+      `<button class="btn ghost" id="cancelbtn" style="border-color:#ff6b6b;color:#ff6b6b">Cancel order${o.paid?' & refund':''}</button>`;
+    document.getElementById('cancelbtn').onclick=async()=>{
+      if(!confirm("Cancel this order?"+(o.paid?" You'll be refunded.":""))){return;}
+      const r=await (await fetch('/api/orders/'+oid+'/cancel',{method:'POST'})).json();
+      if(r.ok){poll();}
+      else alert(r.detail||'Could not cancel');
+    };
+  } else {
+    document.getElementById('cancelwrap').innerHTML='';
   }
   const idx=FLOW.findIndex(s=>s[0]===o.status);
   document.getElementById('steps').innerHTML = FLOW.map((s,i)=>{

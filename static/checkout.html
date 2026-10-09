@@ -117,6 +117,7 @@ document.getElementById('pay').onclick = async ()=>{
         notes=document.getElementById('notes').value.trim();
   const msg=document.getElementById('msg');
   if(!name||!phone||!address){ msg.textContent='Please fill in name, phone, and address.'; return; }
+  if(window.DROP_QUEUE && !window.DROP_QUEUE.accepting){ msg.textContent="We're at capacity right now — please check back soon."; return; }
   if(foodTotal()<minOrder){ msg.textContent=`Minimum food order is $${minOrder.toFixed(2)} — add a little more!`; return; }
   msg.textContent='Placing your order…';
   const items=Object.entries(cart).map(([id,q])=>({menu_item_id:+id,qty:q}));
