@@ -116,6 +116,10 @@ def init_db():
     c.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('accepting_orders', '1')")
     c.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('mins_per_delivery', '18')")
     c.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('max_queue', '8')")
+    c.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('owner_pin', '')")
+    ocols = [r[1] for r in c.execute("PRAGMA table_info(orders)").fetchall()]
+    if "claimed_by_owner" not in ocols:
+        c.execute("ALTER TABLE orders ADD COLUMN claimed_by_owner INTEGER DEFAULT 0")
     # customer accounts + rewards (added 2026-10-09)
     c.execute("""CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1693,7 +1697,22 @@ async def driver_deny_order(oid: int, req: Request):
     body = await req.json()
     driver_id = int(body.get("driver_id") or 0)
     reason = (body.get("reason") or "").strip()[:200]
+    d = get_driver(req)
+    if not d or d["id"] != driver_id:
+        raise HTTPException(403, "Driver login required")
     conn = db()
+    if d.get("is_owner"):
+        o = conn.execute("SELECT * FROM orders WHERE id=? AND driver_id=0"
+                         " AND claimed_by_owner=1", (oid,)).fetchone()
+        if not o:
+            conn.close()
+            raise HTTPException(404, "Order not claimed by you")
+        conn.execute("UPDATE orders SET claimed_by_owner=0, updated_at=? WHERE id=?",
+                     (now_iso(), oid))
+        conn.commit()
+        conn.close()
+        log_event("order", f"👑 Owner released order #{oid}", reason)
+        return {"ok": True}
     # Verify this driver has the order
     o = conn.execute("SELECT * FROM orders WHERE id=? AND driver_id=?",
                      (oid, driver_id)).fetchone()
@@ -1714,9 +1733,16 @@ async def driver_pass_order(oid: int, req: Request):
     import math
     body = await req.json()
     driver_id = int(body.get("driver_id") or 0)
+    d = get_driver(req)
+    if not d or d["id"] != driver_id:
+        raise HTTPException(403, "Driver login required")
     conn = db()
-    o = conn.execute("SELECT * FROM orders WHERE id=? AND driver_id=?",
-                     (oid, driver_id)).fetchone()
+    if d.get("is_owner"):
+        o = conn.execute("SELECT * FROM orders WHERE id=? AND driver_id=0"
+                         " AND claimed_by_owner=1", (oid,)).fetchone()
+    else:
+        o = conn.execute("SELECT * FROM orders WHERE id=? AND driver_id=?",
+                         (oid, driver_id)).fetchone()
     if not o:
         conn.close()
         raise HTTPException(404, "Order not found")
@@ -1744,7 +1770,7 @@ async def driver_pass_order(oid: int, req: Request):
                 except Exception:
                     pass
     # Release order
-    conn.execute("UPDATE orders SET driver_id=0, status='new' WHERE id=?", (oid,))
+    conn.execute("UPDATE orders SET driver_id=0, claimed_by_owner=0, status='new' WHERE id=?", (oid,))
     conn.commit()
     conn.close()
     log_event("order", f"🔄 Driver #{driver_id} passed order #{oid}", f"{notified} drivers notified")
@@ -2326,6 +2352,7 @@ def op_get_settings(x_pin: str = Header(default="")):
             "open_hour": oh, "close_hour": ch,
             "delivery_zone": get_setting("delivery_zone") or "Bismarck, ND",
             "pin": get_setting("pin"),
+            "owner_pin": get_setting("owner_pin") or "",
             "ntfy_topic": get_setting("ntfy_topic"),
             "tagline": get_setting("tagline")}
 
@@ -2359,6 +2386,12 @@ async def op_put_settings(req: Request, x_pin: str = Header(default="")):
         mq = max(1, min(50, int(body["max_queue"])))
         set_setting("max_queue", str(mq))
         out["max_queue"] = mq
+    if "owner_pin" in body:
+        opin = str(body["owner_pin"]).strip()
+        if opin and not (opin.isdigit() and len(opin) == 6):
+            raise HTTPException(400, "Owner PIN must be 6 digits")
+        set_setting("owner_pin", opin)
+        out["owner_pin"] = opin
     if "pin" in body:
         pin = str(body["pin"]).strip()
         if not (pin.isdigit() and 4 <= len(pin) <= 8):
@@ -3123,6 +3156,15 @@ def get_driver(req):
     if not s:
         conn.close()
         return None
+    if s["driver_id"] == 0:
+        # Owner master session — synthetic driver record
+        conn.close()
+        return {"id": 0, "name": "Owner 👑", "status": "approved", "is_owner": True,
+                "login_pin": get_setting("owner_pin"), "ntfy_topic": "",
+                "on_time": 0, "deliveries": 0, "on_time_rate": 100.0,
+                "gov_id_status": "verified", "insurance_status": "verified",
+                "vehicle_reg_status": "verified", "vehicle_year": "",
+                "vehicle_make": "", "vehicle_model": "", "vehicle_color": ""}
     d = conn.execute("SELECT * FROM drivers WHERE id=?", (s["driver_id"],)).fetchone()
     conn.close()
     if not d or d["status"] != "approved":
@@ -3310,19 +3352,42 @@ def op_suspend_driver(did: int, x_pin: str = Header(default="")):
 
 
 @app.post("/api/drivers/pin-login")
-async def driver_pin_login(req: Request):
-    """Driver Hub login via 6-digit PIN."""
+async def driver_pin_login(req: Request, resp: Response):
+    """Driver Hub login via 6-digit PIN. The owner's master PIN opens the
+    master hub in the very same box."""
+    from secrets import token_urlsafe
     body = await req.json()
     pin = (body.get("pin") or "").strip()
     if len(pin) != 6 or not pin.isdigit():
         raise HTTPException(401, "Invalid PIN")
+    owner_pin = get_setting("owner_pin").strip()
     conn = db()
+    if owner_pin and pin == owner_pin:
+        token = token_urlsafe(32)
+        exp = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+        conn.execute("INSERT INTO driver_sessions(token, driver_id, expires_at)"
+                     " VALUES(?,?,?)", (token, 0, exp))
+        conn.commit()
+        conn.close()
+        resp.set_cookie("drop_driver", token, httponly=True, samesite="lax",
+                        path="/", max_age=30 * 86400)
+        return {"ok": True, "id": 0, "driver_id": 0, "name": "Owner 👑",
+                "is_owner": True}
     d = conn.execute("SELECT * FROM drivers WHERE login_pin=?", (pin,)).fetchone()
-    conn.close()
     if not d:
+        conn.close()
         raise HTTPException(401, "Invalid PIN")
     if d["status"] != "approved":
+        conn.close()
         raise HTTPException(403, "Driver account not active")
+    token = token_urlsafe(32)
+    exp = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+    conn.execute("INSERT INTO driver_sessions(token, driver_id, expires_at)"
+                 " VALUES(?,?,?)", (token, d["id"], exp))
+    conn.commit()
+    conn.close()
+    resp.set_cookie("drop_driver", token, httponly=True, samesite="lax",
+                    path="/", max_age=30 * 86400)
     return {"ok": True, "id": d["id"], "driver_id": d["id"], "name": d["name"]}
 
 
@@ -3382,19 +3447,7 @@ async def driver_me(req: Request):
 
 
 @app.get("/api/drivers/orders")
-async def driver_orders(req: Request):
-    """Orders assigned to this driver."""
-    d = get_driver(req)
-    if not d:
-        raise HTTPException(401, "Not logged in")
-    conn = db()
-    rows = conn.execute(
-        """SELECT o.*, COALESCE(r.name, o.pickup_name) AS pickup_label,
-                  COALESCE(r.address, o.pickup_address) AS pickup_addr,
-                  COALESCE(r.lat, o.pickup_lat) AS plat, COALESCE(r.lng, o.pickup_lng) AS plng
-           FROM orders o LEFT JOIN restaurants r ON r.id = o.restaurant_id
-           WHERE o.driver_id=? AND o.status NOT IN ('delivered','cancelled')
-           ORDER BY o.id""", (d["id"],)).fetchall()
+def _order_cards(rows):
     out = []
     for r in rows:
         od = order_dict(r)
@@ -3402,9 +3455,91 @@ async def driver_orders(req: Request):
         od["pickup_addr"] = r["pickup_addr"]
         od["plat"] = r["plat"] or 0
         od["plng"] = r["plng"] or 0
+        od["claimed_by_owner"] = r["claimed_by_owner"] or 0
         out.append(od)
+    return out
+
+
+async def driver_orders(req: Request):
+    """Orders assigned to this driver. Owner sees what they've claimed."""
+    d = get_driver(req)
+    if not d:
+        raise HTTPException(401, "Not logged in")
+    conn = db()
+    if d.get("is_owner"):
+        rows = conn.execute(
+            """SELECT o.*, COALESCE(r.name, o.pickup_name) AS pickup_label,
+                      COALESCE(r.address, o.pickup_address) AS pickup_addr,
+                      COALESCE(r.lat, o.pickup_lat) AS plat, COALESCE(r.lng, o.pickup_lng) AS plng
+               FROM orders o LEFT JOIN restaurants r ON r.id = o.restaurant_id
+               WHERE o.claimed_by_owner=1 AND o.status NOT IN ('delivered','cancelled')
+               ORDER BY o.id""").fetchall()
+    else:
+        rows = conn.execute(
+            """SELECT o.*, COALESCE(r.name, o.pickup_name) AS pickup_label,
+                      COALESCE(r.address, o.pickup_address) AS pickup_addr,
+                      COALESCE(r.lat, o.pickup_lat) AS plat, COALESCE(r.lng, o.pickup_lng) AS plng
+               FROM orders o LEFT JOIN restaurants r ON r.id = o.restaurant_id
+               WHERE o.driver_id=? AND o.status NOT IN ('delivered','cancelled')
+               ORDER BY o.id""", (d["id"],)).fetchall()
+    out = _order_cards(rows)
     conn.close()
     return out
+
+
+@app.get("/api/drivers/pool")
+async def driver_pool(req: Request):
+    """Owner only: every unassigned live order, ready to claim."""
+    d = get_driver(req)
+    if not d or not d.get("is_owner"):
+        raise HTTPException(403, "Owner only")
+    conn = db()
+    rows = conn.execute(
+        """SELECT o.*, COALESCE(r.name, o.pickup_name) AS pickup_label,
+                  COALESCE(r.address, o.pickup_address) AS pickup_addr,
+                  COALESCE(r.lat, o.pickup_lat) AS plat, COALESCE(r.lng, o.pickup_lng) AS plng
+           FROM orders o LEFT JOIN restaurants r ON r.id = o.restaurant_id
+           WHERE o.driver_id=0 AND o.claimed_by_owner=0
+             AND o.status NOT IN ('delivered','cancelled')
+           ORDER BY o.id""").fetchall()
+    out = _order_cards(rows)
+    conn.close()
+    return out
+
+
+@app.post("/api/drivers/claim/{oid}")
+async def driver_claim(oid: int, req: Request):
+    """Owner jumps on any unassigned delivery."""
+    d = get_driver(req)
+    if not d or not d.get("is_owner"):
+        raise HTTPException(403, "Owner only")
+    conn = db()
+    o = conn.execute("SELECT * FROM orders WHERE id=? AND driver_id=0"
+                     " AND claimed_by_owner=0 AND status NOT IN ('delivered','cancelled')",
+                     (oid,)).fetchone()
+    if not o:
+        conn.close()
+        raise HTTPException(404, "Order not available")
+    conn.execute("UPDATE orders SET claimed_by_owner=1, updated_at=? WHERE id=?",
+                 (now_iso(), oid))
+    conn.commit()
+    conn.close()
+    log_event("order", f"👑 Owner claimed order #{oid}", "")
+    return {"ok": True}
+
+
+@app.post("/api/drivers/release/{oid}")
+async def driver_release(oid: int, req: Request):
+    """Owner releases a claimed delivery back to the pool."""
+    d = get_driver(req)
+    if not d or not d.get("is_owner"):
+        raise HTTPException(403, "Owner only")
+    conn = db()
+    conn.execute("UPDATE orders SET claimed_by_owner=0, updated_at=? WHERE id=?",
+                 (now_iso(), oid))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
 
 
 @app.post("/api/drivers/orders/{oid}/status")
@@ -3417,14 +3552,18 @@ async def driver_set_status(oid: int, req: Request):
     if status not in ("picked_up", "on_the_way", "delivered"):
         raise HTTPException(400, "Bad status")
     conn = db()
-    o = conn.execute("SELECT * FROM orders WHERE id=? AND driver_id=?",
-                     (oid, d["id"])).fetchone()
+    if d.get("is_owner"):
+        o = conn.execute("SELECT * FROM orders WHERE id=? AND driver_id=0"
+                         " AND claimed_by_owner=1", (oid,)).fetchone()
+    else:
+        o = conn.execute("SELECT * FROM orders WHERE id=? AND driver_id=?",
+                         (oid, d["id"])).fetchone()
     if not o:
         conn.close()
         raise HTTPException(404, "Order not found")
     conn.execute("UPDATE orders SET status=?, updated_at=? WHERE id=?",
                  (status, now_iso(), oid))
-    if status == "delivered":
+    if status == "delivered" and not d.get("is_owner"):
         conn.execute("UPDATE drivers SET deliveries=deliveries+1, on_time=on_time+1 WHERE id=?",
                      (d["id"],))
     conn.commit()
@@ -3496,6 +3635,13 @@ async def driver_delivery_photo(req: Request):
     d = get_driver(req)
     if not d or d["id"] != driver_id:
         raise HTTPException(403, "Driver login required")
+    if d.get("is_owner"):
+        conn_chk = db()
+        oc = conn_chk.execute("SELECT claimed_by_owner FROM orders WHERE id=?",
+                              (order_id,)).fetchone()
+        conn_chk.close()
+        if not oc or not oc["claimed_by_owner"]:
+            raise HTTPException(403, "Claim this order first")
     data = await file.read()
     if len(data) > 5 * 1024 * 1024:
         raise HTTPException(400, "Photo too large (max 5MB)")
@@ -3577,7 +3723,9 @@ async def order_message_send(oid: int, req: Request):
         raise HTTPException(404, "Order not found")
     sender = None
     d = get_driver(req)
-    if d and (o["driver_id"] == d["id"] or not o["driver_id"]):
+    if d and not d.get("is_owner") and (o["driver_id"] == d["id"] or not o["driver_id"]):
+        sender = "driver"
+    elif d and d.get("is_owner") and o["driver_id"] == 0 and o["claimed_by_owner"]:
         sender = "driver"
     elif _digits(body.get("phone")) and _digits(body.get("phone")) == _digits(o["phone"]):
         sender = "customer"

@@ -275,7 +275,11 @@
       <h3>Delivery fee ($)</h3>
       <input id="sfee" inputmode="decimal"><h3>Minimum food order ($)</h3>
       <input id="smin" inputmode="decimal" placeholder="10.00"><h3>Change PIN</h3>
-      <input id="spin" inputmode="numeric" placeholder="4–8 digits"><h3>ntfy push topic</h3>
+      <input id="spin" inputmode="numeric" placeholder="4–8 digits">
+      <h3>Owner driver PIN</h3>
+      <input id="sopin" inputmode="numeric" maxlength="6" placeholder="6 digits">
+      <p class="small">Your master key: type it in the Driver Hub PIN box to open the 👑 Master Hub — claim any delivery, all driver features.</p>
+      <h3>ntfy push topic</h3>
       <input id="stopic" placeholder="secret-topic-name">
       <button class="btn" id="saveset">Save settings</button>
       <p class="small" id="setmsg"></p></div>
@@ -600,7 +604,7 @@ $('addrest').onclick=async()=>{
 };
 async function loadSet(){
   const s=await (await fetch('/api/operator/settings',{headers:H()})).json();
-  $('sfee').value=s.delivery_fee;$('smin').value=s.min_order;$('smpd').value=s.mins_per_delivery;$('smaxq').value=s.max_queue||8;$('stopic').value=s.ntfy_topic||'';
+  $('sfee').value=s.delivery_fee;$('smin').value=s.min_order;$('smpd').value=s.mins_per_delivery;$('smaxq').value=s.max_queue||8;$('sopin').value=s.owner_pin||'';$('stopic').value=s.ntfy_topic||'';
   $('sopen').value=s.open_hour;$('sclose').value=s.close_hour;$('szone').value=s.delivery_zone||'';
   const pt=$('pausetoggle');
   pt.textContent=s.accepting_orders?'Pause':'Resume';
@@ -619,6 +623,7 @@ $('saveset').onclick=async()=>{
   const oh=parseInt($('sopen').value),ch=parseInt($('sclose').value);
   if(!isNaN(oh))body.open_hour=oh; if(!isNaN(ch))body.close_hour=ch;
   if($('spin').value.trim()) body.pin=$('spin').value.trim();
+  body.owner_pin=$('sopin').value.trim();
   const r=await fetch('/api/operator/settings',{method:'PUT',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify(body)});
   const j=await r.json();
   if(r.ok){$('setmsg').textContent='Saved ✓';if(body.pin)PIN=body.pin,sessionStorage.setItem('droppin',PIN);$('spin').value='';}

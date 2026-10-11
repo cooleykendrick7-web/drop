@@ -155,6 +155,13 @@ $('gobtn').onclick=async()=>{
   $('login').style.display='none';$('app').style.display='block';
   $('dname').textContent='· '+j.name;
   DID=j.id||j.driver_id||0;
+  IS_OWNER=!!j.is_owner;
+  if(IS_OWNER){
+    document.querySelector('.tag').textContent='master';
+    document.getElementById('onboard').innerHTML=
+      `<div class="card" style="border-left:4px solid #ffd700"><b>👑 Master Hub</b><br>
+       <span class="small">Claim any delivery below, or grab one whenever you want. All driver tools work on your claimed orders.</span></div>`;
+  }
   try{ localStorage.setItem('driver_pin', pin); }catch(e){}
   loadOrders(); loadNews();
 };
@@ -207,7 +214,32 @@ async function loadOrders(){
   const r=await fetch('/api/drivers/orders');
   if(r.status===401){location.reload();return;}
   const orders=await r.json();
-  $('olist').innerHTML='<h2>My deliveries ('+orders.length+')</h2>'+(orders.map(o=>{
+  let pool=[];
+  if(IS_OWNER){ try{ pool=await(await fetch('/api/drivers/pool')).json(); }catch(e){} }
+  const head='<h2>'+(IS_OWNER?'👑 My claimed deliveries':'My deliveries')+' ('+orders.length+')</h2>';
+  const claimedHtml=orders.map(o=>orderCard(o)).join('')||
+    (IS_OWNER?'<p class="small">Nothing claimed yet — grab one from the pool below! 👇</p>'
+             :'<p class="small">No deliveries assigned right now. New orders will appear here.</p>');
+  const poolHtml=!IS_OWNER?'':('<h2 style="margin-top:18px">📦 Available deliveries ('+pool.length+')</h2>'+
+    (pool.map(o=>`<div class="card order">
+      <div class="row"><b>#${o.id} · ${o.kind==='courier'?'📦 Courier':'🍔 Food'}</b>
+        <span class="badge">${o.status_label}</span></div>
+      <p><b>Pick up:</b> ${o.pickup_label}<br><span class="small">📍 ${o.pickup_addr||''}</span></p>
+      <p><b>Deliver to:</b> ${o.customer_name}<br><span class="small">🏠 ${o.address}</span></p>
+      <button class="btn" onclick="claimOrder(${o.id})">✋ Claim this delivery</button>
+    </div>`).join('')||'<p class="small">Pool is empty — new orders will appear here.</p>'));
+  $('olist').innerHTML=head+claimedHtml+poolHtml;
+}
+async function claimOrder(oid){
+  const r=await(await fetch('/api/drivers/claim/'+oid,{method:'POST'})).json();
+  if(r.ok){ loadOrders(); } else alert(r.detail||'Could not claim');
+}
+async function releaseOrder(oid){
+  if(!confirm('Release this delivery back to the pool?')) return;
+  const r=await(await fetch('/api/drivers/release/'+oid,{method:'POST'})).json();
+  if(r.ok){ loadOrders(); } else alert(r.detail||'Could not release');
+}
+function orderCard(o){
     const restDest=o.plat?`${o.plat},${o.plng}`:encodeURIComponent(o.pickup_addr||'');
     const custDest=o.cust_lat?`${o.cust_lat},${o.cust_lng}`:encodeURIComponent(o.address||'');
     return `<div class="card order">
@@ -226,7 +258,9 @@ async function loadOrders(){
         ${o.status==='confirmed'?`<button class="btn small" onclick="setStatus(${o.id},'picked_up')">🛍️ Picked up</button>`:''}
       </div>
       <div style="margin-top:8px;display:flex;gap:8px">
-        <button class="btn small ghost" onclick="denyOrder(${o.id})" style="flex:1">❌ Decline</button>
+        ${IS_OWNER
+          ? `<button class="btn small ghost" onclick="releaseOrder(${o.id})" style="flex:1">↩️ Release</button>`
+          : `<button class="btn small ghost" onclick="denyOrder(${o.id})" style="flex:1">❌ Decline</button>`}
         <button class="btn small ghost" onclick="passOrder(${o.id})" style="flex:1">🔄 Pass to another driver</button>
       </div>
       ${['placed','confirmed'].includes(o.status)?`
@@ -254,7 +288,6 @@ async function loadOrders(){
         </div>
       </div>
     </div>`;
-  }).join('')||'<p class="small">No deliveries assigned right now. New orders will appear here.</p>');
 }
 async function snapPhoto(oid,type,inp){
   const f=inp.files[0]; if(!f) return;
@@ -349,6 +382,11 @@ async function loadMe(){
 }
 /* Driver onboarding checklist — hidden once everything is done */
 function renderOnboarding(m){
+  if(IS_OWNER){
+    $('onboard').innerHTML=`<div class="card" style="border-left:4px solid #ffd700"><b>👑 Master Hub</b><br>
+      <span class="small">Claim any delivery below, or grab one whenever you want. All driver tools work on your claimed orders.</span></div>`;
+    return;
+  }
   const docsOk=['gov_id_status','insurance_status','vehicle_reg_status'].every(k=>m[k]==='verified');
   const steps=[
     {label:'Application submitted', done:true},
@@ -435,6 +473,7 @@ async function loadNews(){
 
 // Goals
 let DID=0;
+let IS_OWNER=false;
 async function loadGoals(){
   if(!DID) return;
   const g=await(await fetch(`/api/drivers/goals?driver_id=${DID}`)).json();
