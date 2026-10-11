@@ -168,6 +168,52 @@ def init_db():
         sender TEXT NOT NULL DEFAULT 'customer',
         message TEXT NOT NULL,
         created_at TEXT NOT NULL)""")
+    # Drop More: B2B courier businesses (added 2026-10-11)
+    c.execute("""CREATE TABLE IF NOT EXISTS businesses (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL, category TEXT DEFAULT '',
+        address TEXT DEFAULT '', lat REAL DEFAULT 0, lng REAL DEFAULT 0,
+        phone TEXT DEFAULT '', website TEXT DEFAULT '',
+        logo TEXT DEFAULT '', photo TEXT DEFAULT '',
+        open INTEGER DEFAULT 1,
+        created_at TEXT NOT NULL)""")
+    # Droppers: driver applications + accounts (added 2026-10-11)
+    c.execute("""CREATE TABLE IF NOT EXISTS drivers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL, phone TEXT NOT NULL UNIQUE, email TEXT DEFAULT '',
+        password_hash TEXT NOT NULL DEFAULT '',
+        license_number TEXT DEFAULT '', license_state TEXT DEFAULT '',
+        insurance TEXT DEFAULT '',
+        vehicle_make TEXT DEFAULT '', vehicle_model TEXT DEFAULT '',
+        vehicle_year TEXT DEFAULT '', vehicle_color TEXT DEFAULT '',
+        availability TEXT DEFAULT '', background_consent INTEGER DEFAULT 0,
+        experience TEXT DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'pending',
+        deliveries INTEGER NOT NULL DEFAULT 0,
+        on_time INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL)""")
+    c.execute("""CREATE TABLE IF NOT EXISTS driver_sessions (
+        token TEXT PRIMARY KEY,
+        driver_id INTEGER NOT NULL REFERENCES drivers(id) ON DELETE CASCADE,
+        expires_at TEXT NOT NULL)""")
+    # Drop Investors: inbound investor interest (added 2026-10-11)
+    c.execute("""CREATE TABLE IF NOT EXISTS investor_leads (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL, email TEXT NOT NULL, phone TEXT DEFAULT '',
+        amount_range TEXT DEFAULT '', message TEXT DEFAULT '',
+        created_at TEXT NOT NULL)""")
+    # courier order fields + driver assignment (added 2026-10-11)
+    ocols4 = [r[1] for r in c.execute("PRAGMA table_info(orders)").fetchall()]
+    for _col, _ddl in (("kind", "TEXT DEFAULT 'food'"),
+                       ("business_id", "INTEGER DEFAULT 0"),
+                       ("pickup_name", "TEXT DEFAULT ''"),
+                       ("pickup_address", "TEXT DEFAULT ''"),
+                       ("pickup_lat", "REAL DEFAULT 0"),
+                       ("pickup_lng", "REAL DEFAULT 0"),
+                       ("item_desc", "TEXT DEFAULT ''"),
+                       ("driver_id", "INTEGER DEFAULT 0")):
+        if _col not in ocols4:
+            c.execute(f"ALTER TABLE orders ADD COLUMN {_col} {_ddl}")
     defaults = {
         "delivery_fee": "3.99",
         "pin": "1234",
@@ -576,8 +622,15 @@ def public_order(oid: int):
     if not o:
         conn.close()
         raise HTTPException(404, "Order not found")
-    rest = conn.execute("SELECT name, address, lat, lng FROM restaurants WHERE id=?",
-                        (o["restaurant_id"],)).fetchone()
+    kind = o["kind"] or "food"
+    if kind == "courier":
+        label = o["pickup_name"] or "Pickup"
+        plat, plng, paddr = o["pickup_lat"] or 0, o["pickup_lng"] or 0, o["pickup_address"] or ""
+    else:
+        rest = conn.execute("SELECT name, address, lat, lng FROM restaurants WHERE id=?",
+                            (o["restaurant_id"],)).fetchone()
+        label = rest["name"] if rest else ""
+        plat, plng, paddr = (rest["lat"] or 0, rest["lng"] or 0, rest["address"] or "") if rest else (0, 0, "")
     pos = 0
     if o["status"] not in ("delivered", "cancelled"):
         pos = conn.execute(
@@ -586,10 +639,10 @@ def public_order(oid: int):
     conn.close()
     od = order_dict(o)
     return {
-        "id": od["id"], "restaurant": rest["name"] if rest else "",
-        "restaurant_address": (rest["address"] or "") if rest else "",
-        "restaurant_lat": (rest["lat"] or 0) if rest else 0,
-        "restaurant_lng": (rest["lng"] or 0) if rest else 0,
+        "id": od["id"], "kind": kind,
+        "restaurant": label,
+        "restaurant_address": paddr,
+        "restaurant_lat": plat, "restaurant_lng": plng,
         "address": od["address"],
         "cust_lat": od.get("cust_lat") or 0, "cust_lng": od.get("cust_lng") or 0,
         "driver_lat": od.get("driver_lat") or 0, "driver_lng": od.get("driver_lng") or 0,
@@ -610,13 +663,14 @@ def op_orders(x_pin: str = Header(default="")):
     conn = db()
     rows = conn.execute(
         """SELECT o.*, r.name AS restaurant_name, r.lat AS rest_lat, r.lng AS rest_lng,
-           r.address AS rest_address FROM orders o
-           JOIN restaurants r ON r.id = o.restaurant_id
+           r.address AS rest_address, d.name AS driver_name FROM orders o
+           LEFT JOIN restaurants r ON r.id = o.restaurant_id
+           LEFT JOIN drivers d ON d.id = o.driver_id
            ORDER BY o.id DESC""").fetchall()
     out = []
     for r in rows:
         d = order_dict(r)
-        d["restaurant_name"] = r["restaurant_name"]
+        d["restaurant_name"] = r["restaurant_name"] or r["pickup_name"] or "—"
         out.append(d)
     conn.close()
     return out
@@ -1386,6 +1440,467 @@ def op_ticket_suggest(tid: int, x_pin: str = Header(default="")):
     return {"draft": draft}
 
 
+# ---------------- Drop More: B2B courier businesses ----------------
+@app.get("/api/businesses")
+def list_businesses():
+    conn = db()
+    rows = conn.execute("SELECT * FROM businesses WHERE open=1 ORDER BY category, name").fetchall()
+    out = [dict(r) for r in rows]
+    conn.close()
+    cats = []
+    for b in out:
+        if b["category"] not in cats:
+            cats.append(b["category"])
+    return {"businesses": out, "categories": cats}
+
+
+@app.post("/api/operator/businesses")
+async def op_add_business(req: Request, x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    body = await req.json()
+    name = (body.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "Name required")
+    addr = (body.get("address") or "").strip()[:200]
+    glat, glng = (0.0, 0.0)
+    if addr:
+        glat, glng = geocode(addr)
+    conn = db()
+    cur = conn.execute(
+        """INSERT INTO businesses(name, category, address, lat, lng, phone, website,
+                                  logo, photo, open, created_at)
+           VALUES(?,?,?,?,?,?,?,?,?,1,?)""",
+        (name, (body.get("category") or "").strip()[:60], addr, glat, glng,
+         (body.get("phone") or "").strip()[:30], (body.get("website") or "").strip()[:500],
+         (body.get("logo") or "").strip()[:500], (body.get("photo") or "").strip()[:500],
+         now_iso()))
+    bid = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return {"id": bid}
+
+
+@app.put("/api/operator/businesses/{bid}")
+async def op_edit_business(bid: int, req: Request, x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    body = await req.json()
+    conn = db()
+    fields, vals = [], []
+    for k in ("name", "category", "phone", "website", "logo", "photo"):
+        if k in body:
+            fields.append(f"{k}=?")
+            vals.append(str(body[k]).strip()[:500])
+    if "address" in body:
+        addr = str(body["address"]).strip()[:200]
+        fields.append("address=?")
+        vals.append(addr)
+        if addr:
+            glat, glng = geocode(addr)
+            if glat:
+                fields += ["lat=?", "lng=?"]
+                vals += [glat, glng]
+    if "open" in body:
+        fields.append("open=?")
+        vals.append(1 if body["open"] else 0)
+    if fields:
+        vals.append(bid)
+        conn.execute(f"UPDATE businesses SET {', '.join(fields)} WHERE id=?", vals)
+        conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.delete("/api/operator/businesses/{bid}")
+def op_del_business(bid: int, x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    conn = db()
+    conn.execute("DELETE FROM businesses WHERE id=?", (bid,))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.post("/api/courier-orders")
+async def create_courier_order(req: Request):
+    """Drop More courier request: pick up items from a business, deliver to customer."""
+    body = await req.json()
+    if not is_open_now():
+        oh, _ = get_hours()
+        raise HTTPException(400, f"We're closed right now — back at {fmt_hour(oh)}")
+    if get_setting("accepting_orders") == "0":
+        raise HTTPException(400, "We're at capacity right now — please check back soon")
+    me = get_session_user(req)
+    user_id = me["id"] if me else 0
+    business_id = int(body.get("business_id") or 0)
+    # pickup can be a listed business or a custom location
+    pickup_name = (body.get("pickup_name") or "").strip()[:120]
+    pickup_address = (body.get("pickup_address") or "").strip()[:200]
+    item_desc = (body.get("item_desc") or "").strip()[:1000]
+    cust = body.get("customer", {})
+    name = (cust.get("name") or "").strip()
+    phone = (cust.get("phone") or "").strip()
+    address = (cust.get("address") or "").strip()
+    notes = (cust.get("notes") or "").strip()
+    if not item_desc or not name or not phone or not address:
+        raise HTTPException(400, "Missing items, name, phone, or delivery address")
+    if not pickup_name and not business_id:
+        raise HTTPException(400, "Missing pickup location")
+    try:
+        est_total = round(max(0.0, float(body.get("est_total") or 0)), 2)
+    except (TypeError, ValueError):
+        est_total = 0.0
+    conn = db()
+    plat, plng = 0.0, 0.0
+    if business_id:
+        b = conn.execute("SELECT * FROM businesses WHERE id=?", (business_id,)).fetchone()
+        if not b:
+            conn.close()
+            raise HTTPException(400, "Unknown business")
+        pickup_name, pickup_address, plat, plng = b["name"], b["address"], b["lat"], b["lng"]
+    elif pickup_address:
+        plat, plng = geocode(pickup_address + ", Bismarck, ND")
+    fee = round(float(get_setting("delivery_fee")), 2)
+    try:
+        tip = round(max(0.0, min(100.0, float(body.get("tip", 0)))), 2)
+    except (TypeError, ValueError):
+        tip = 0.0
+    total = round(est_total + fee + tip, 2)
+    items_json = json.dumps([{"name": item_desc[:120], "qty": 1,
+                              "price": est_total, "line": est_total}])
+    cur = conn.execute(
+        """INSERT INTO orders(kind, business_id, pickup_name, pickup_address, pickup_lat, pickup_lng,
+                              item_desc, restaurant_id, items_json, customer_name, phone, address,
+                              notes, food_total, delivery_fee, tip, user_id, total,
+                              status, stripe_status, created_at, updated_at)
+           VALUES('courier',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'placed','pending',?,?)""",
+        (business_id, pickup_name, pickup_address, plat, plng, item_desc,
+         0, items_json, name, phone, address, notes,
+         est_total, fee, tip, user_id, total, now_iso(), now_iso()))
+    oid = cur.lastrowid
+    conn.commit()
+    # geocode delivery address in background
+    def _geo():
+        try:
+            glat, glng = geocode(address + ", Bismarck, ND")
+            if glat:
+                c2 = db()
+                c2.execute("UPDATE orders SET cust_lat=?, cust_lng=? WHERE id=?",
+                           (glat, glng, oid))
+                c2.commit()
+                c2.close()
+        except Exception:
+            pass
+    threading.Thread(target=_geo, daemon=True).start()
+    conn.close()
+    return {"order_id": oid, "est_total": est_total, "delivery_fee": fee,
+            "tip": tip, "total": total, "stripe_live": STRIPE_LIVE}
+
+
+# ---------------- Droppers: driver applications + portal ----------------
+def get_driver(req):
+    token = req.cookies.get("drop_driver", "")
+    if not token:
+        return None
+    conn = db()
+    s = conn.execute("SELECT driver_id, expires_at FROM driver_sessions WHERE token=?",
+                     (token,)).fetchone()
+    if not s:
+        conn.close()
+        return None
+    d = conn.execute("SELECT * FROM drivers WHERE id=?", (s["driver_id"],)).fetchone()
+    conn.close()
+    if not d or d["status"] != "approved":
+        return None
+    return dict(d)
+
+
+@app.post("/api/drivers/apply")
+async def driver_apply(req: Request):
+    """Now Hiring: full driver application. Goes to pending for Ken's approval."""
+    body = await req.json()
+    name = (body.get("name") or "").strip()[:80]
+    phone = norm_phone(body.get("phone"))
+    email = (body.get("email") or "").strip()[:120]
+    password = body.get("password") or ""
+    if not name or not phone or len(password) < 6:
+        raise HTTPException(400, "Name, phone, and a 6+ character password are required")
+    if not body.get("background_consent"):
+        raise HTTPException(400, "Background check consent is required")
+    conn = db()
+    if conn.execute("SELECT id FROM drivers WHERE phone=?", (phone,)).fetchone():
+        conn.close()
+        raise HTTPException(400, "This phone number already has an application")
+    cur = conn.execute(
+        """INSERT INTO drivers(name, phone, email, password_hash, license_number, license_state,
+                               insurance, vehicle_make, vehicle_model, vehicle_year, vehicle_color,
+                               availability, background_consent, experience, status, created_at)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending',?)""",
+        (name, phone, email, hash_pw(password),
+         (body.get("license_number") or "").strip()[:40],
+         (body.get("license_state") or "").strip()[:10],
+         (body.get("insurance") or "").strip()[:80],
+         (body.get("vehicle_make") or "").strip()[:40],
+         (body.get("vehicle_model") or "").strip()[:40],
+         (body.get("vehicle_year") or "").strip()[:10],
+         (body.get("vehicle_color") or "").strip()[:30],
+         (body.get("availability") or "").strip()[:200],
+         1, (body.get("experience") or "").strip()[:500], now_iso()))
+    did = cur.lastrowid
+    conn.commit()
+    conn.close()
+    # notify Ken
+    try:
+        topic = get_setting("ntfy_topic").strip()
+        if topic:
+            msg = f"🚗 NEW DRIVER APPLICATION #{did}\n{name} {phone}"
+            r2 = urllib.request.Request(
+                f"https://ntfy.sh/{urllib.parse.quote(topic)}",
+                data=msg.encode(), headers={"Title": "Drop driver application"}, method="POST")
+            threading.Thread(
+                target=lambda: urllib.request.urlopen(r2, timeout=5).read(),
+                daemon=True).start()
+    except Exception:
+        pass
+    return {"ok": True, "id": did}
+
+
+@app.get("/api/operator/drivers")
+def op_list_drivers(x_pin: str = Header(default=""), status: str = ""):
+    check_pin(x_pin)
+    conn = db()
+    q = "SELECT id, name, phone, email, license_number, license_state, insurance, vehicle_make, vehicle_model, vehicle_year, vehicle_color, availability, experience, status, deliveries, on_time, created_at FROM drivers"
+    if status:
+        q += " WHERE status=?"
+        rows = conn.execute(q + " ORDER BY id DESC", (status,)).fetchall()
+    else:
+        rows = conn.execute(q + " ORDER BY id DESC").fetchall()
+    out = [dict(r) for r in rows]
+    conn.close()
+    return out
+
+
+@app.post("/api/operator/drivers/{did}/approve")
+def op_approve_driver(did: int, x_pin: str = Header(default="")):
+    """Ken approves -> driver can log into their portal."""
+    check_pin(x_pin)
+    conn = db()
+    conn.execute("UPDATE drivers SET status='approved' WHERE id=?", (did,))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.post("/api/operator/drivers/{did}/deny")
+def op_deny_driver(did: int, x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    conn = db()
+    conn.execute("UPDATE drivers SET status='denied' WHERE id=?", (did,))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.post("/api/operator/drivers/{did}/suspend")
+def op_suspend_driver(did: int, x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    conn = db()
+    conn.execute("UPDATE drivers SET status='suspended' WHERE id=?", (did,))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.post("/api/drivers/login")
+async def driver_login(req: Request):
+    body = await req.json()
+    phone = norm_phone(body.get("phone"))
+    password = body.get("password") or ""
+    conn = db()
+    d = conn.execute("SELECT * FROM drivers WHERE phone=?", (phone,)).fetchone()
+    conn.close()
+    if not d or not check_pw(password, d["password_hash"]):
+        raise HTTPException(401, "Wrong phone or password")
+    if d["status"] == "pending":
+        raise HTTPException(403, "Your application is still under review")
+    if d["status"] != "approved":
+        raise HTTPException(403, "This driver account is not active")
+    token = secrets.token_urlsafe(32)
+    exp = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+    conn = db()
+    conn.execute("INSERT INTO driver_sessions(token, driver_id, expires_at) VALUES(?,?,?)",
+                 (token, d["id"], exp))
+    conn.commit()
+    conn.close()
+    resp = JSONResponse({"ok": True, "name": d["name"]})
+    resp.set_cookie("drop_driver", token, max_age=30*86400, httponly=True, samesite="lax")
+    return resp
+
+
+@app.post("/api/drivers/logout")
+async def driver_logout(req: Request):
+    token = req.cookies.get("drop_driver", "")
+    conn = db()
+    conn.execute("DELETE FROM driver_sessions WHERE token=?", (token,))
+    conn.commit()
+    conn.close()
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie("drop_driver")
+    return resp
+
+
+@app.get("/api/drivers/me")
+async def driver_me(req: Request):
+    d = get_driver(req)
+    if not d:
+        raise HTTPException(401, "Not logged in")
+    d.pop("password_hash", None)
+    # rank score: on-time rate (simple, transparent)
+    d["on_time_rate"] = round(100.0 * d["on_time"] / d["deliveries"], 1) if d["deliveries"] else 100.0
+    return d
+
+
+@app.get("/api/drivers/orders")
+async def driver_orders(req: Request):
+    """Orders assigned to this driver."""
+    d = get_driver(req)
+    if not d:
+        raise HTTPException(401, "Not logged in")
+    conn = db()
+    rows = conn.execute(
+        """SELECT o.*, COALESCE(r.name, o.pickup_name) AS pickup_label,
+                  COALESCE(r.address, o.pickup_address) AS pickup_addr,
+                  COALESCE(r.lat, o.pickup_lat) AS plat, COALESCE(r.lng, o.pickup_lng) AS plng
+           FROM orders o LEFT JOIN restaurants r ON r.id = o.restaurant_id
+           WHERE o.driver_id=? AND o.status NOT IN ('delivered','cancelled')
+           ORDER BY o.id""", (d["id"],)).fetchall()
+    out = []
+    for r in rows:
+        od = order_dict(r)
+        od["pickup_label"] = r["pickup_label"]
+        od["pickup_addr"] = r["pickup_addr"]
+        od["plat"] = r["plat"] or 0
+        od["plng"] = r["plng"] or 0
+        out.append(od)
+    conn.close()
+    return out
+
+
+@app.post("/api/drivers/orders/{oid}/status")
+async def driver_set_status(oid: int, req: Request):
+    d = get_driver(req)
+    if not d:
+        raise HTTPException(401, "Not logged in")
+    body = await req.json()
+    status = body.get("status")
+    if status not in ("picked_up", "on_the_way", "delivered"):
+        raise HTTPException(400, "Bad status")
+    conn = db()
+    o = conn.execute("SELECT * FROM orders WHERE id=? AND driver_id=?",
+                     (oid, d["id"])).fetchone()
+    if not o:
+        conn.close()
+        raise HTTPException(404, "Order not found")
+    conn.execute("UPDATE orders SET status=?, updated_at=? WHERE id=?",
+                 (status, now_iso(), oid))
+    if status == "delivered":
+        conn.execute("UPDATE drivers SET deliveries=deliveries+1, on_time=on_time+1 WHERE id=?",
+                     (d["id"],))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.post("/api/drivers/location")
+async def driver_location(req: Request):
+    """A dropper's phone posts GPS — updates their assigned orders."""
+    d = get_driver(req)
+    if not d:
+        raise HTTPException(401, "Not logged in")
+    body = await req.json()
+    try:
+        lat = float(body.get("lat"))
+        lng = float(body.get("lng"))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "lat/lng required")
+    conn = db()
+    conn.execute("""UPDATE orders SET driver_lat=?, driver_lng=?, driver_updated=?
+                    WHERE driver_id=? AND status IN ('confirmed','picked_up','on_the_way')""",
+                 (lat, lng, now_iso(), d["id"]))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.get("/api/drivers/earnings")
+async def driver_earnings(req: Request):
+    d = get_driver(req)
+    if not d:
+        raise HTTPException(401, "Not logged in")
+    conn = db()
+    rows = conn.execute(
+        """SELECT delivery_fee, tip, created_at FROM orders
+           WHERE driver_id=? AND stripe_status='paid' AND status='delivered'""",
+        (d["id"],)).fetchall()
+    fees = round(sum(r["delivery_fee"] for r in rows), 2)
+    tips = round(sum((r["tip"] or 0) for r in rows), 2)
+    conn.close()
+    return {"deliveries": len(rows), "fees": fees, "tips": tips,
+            "total": round(fees + tips, 2)}
+
+
+@app.post("/api/operator/orders/{oid}/assign")
+async def op_assign_order(oid: int, req: Request, x_pin: str = Header(default="")):
+    """Ken assigns an order to a driver (0 = Ken himself)."""
+    check_pin(x_pin)
+    body = await req.json()
+    driver_id = int(body.get("driver_id") or 0)
+    conn = db()
+    if driver_id:
+        dr = conn.execute("SELECT id FROM drivers WHERE id=? AND status='approved'",
+                          (driver_id,)).fetchone()
+        if not dr:
+            conn.close()
+            raise HTTPException(400, "Driver not found or not approved")
+    conn.execute("UPDATE orders SET driver_id=?, updated_at=? WHERE id=?",
+                 (driver_id, now_iso(), oid))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+# ---------------- Drop Investors ----------------
+@app.post("/api/investors/interest")
+async def investor_interest(req: Request):
+    """Investor lead form. This collects interest only — actual investment
+    requires proper legal setup, which Ken handles offline."""
+    body = await req.json()
+    name = (body.get("name") or "").strip()[:80]
+    email = (body.get("email") or "").strip()[:120]
+    if not name or "@" not in email:
+        raise HTTPException(400, "Name and valid email required")
+    conn = db()
+    cur = conn.execute(
+        "INSERT INTO investor_leads(name, email, phone, amount_range, message, created_at)"
+        " VALUES(?,?,?,?,?,?)",
+        (name, email, (body.get("phone") or "").strip()[:30],
+         (body.get("amount_range") or "").strip()[:40],
+         (body.get("message") or "").strip()[:1000], now_iso()))
+    lid = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return {"ok": True, "id": lid}
+
+
+@app.get("/api/operator/investor-leads")
+def op_investor_leads(x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    conn = db()
+    rows = conn.execute("SELECT * FROM investor_leads ORDER BY id DESC").fetchall()
+    out = [dict(r) for r in rows]
+    conn.close()
+    return out
+
+
 @app.post("/api/operator/restaurants")
 async def op_add_restaurant(req: Request, x_pin: str = Header(default="")):
     check_pin(x_pin)
@@ -1517,6 +2032,30 @@ app.mount("/static", StaticFiles(directory=os.path.join(BASE, "static")), name="
 @app.get("/", response_class=HTMLResponse)
 def home():
     with open(os.path.join(BASE, "static", "index.html")) as f:
+        return f.read()
+
+
+@app.get("/courier.html", response_class=HTMLResponse)
+def courierpage():
+    with open(os.path.join(BASE, "static", "courier.html")) as f:
+        return f.read()
+
+
+@app.get("/drive.html", response_class=HTMLResponse)
+def drivepage():
+    with open(os.path.join(BASE, "static", "drive.html")) as f:
+        return f.read()
+
+
+@app.get("/driver.html", response_class=HTMLResponse)
+def driverpage():
+    with open(os.path.join(BASE, "static", "driver.html")) as f:
+        return f.read()
+
+
+@app.get("/investors.html", response_class=HTMLResponse)
+def investorspage():
+    with open(os.path.join(BASE, "static", "investors.html")) as f:
         return f.read()
 
 
