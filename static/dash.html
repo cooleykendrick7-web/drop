@@ -40,6 +40,7 @@
       <span class="small">While ON, customers watch your car move on their tracking map.</span></span>
       <button class="btn small ghost" id="locToggle" style="width:auto;padding:10px 20px">Start</button></div>
       <p class="small" id="locmsg"></p></div>
+    <div id="schedlist"></div>
     <div id="olist"></div>
   </div>
 
@@ -151,6 +152,13 @@
       <p class="small">All your drivers, right now. Auto-refreshes every 15 seconds.</p>
       <div id="drivermap" style="height:300px;border-radius:12px;z-index:1"></div>
       <div id="driverlist" style="margin-top:10px"></div></div>
+    <div class="card"><b>📢 Promo blast</b>
+      <p class="small">Send a deal alert to every customer with push notifications on.</p>
+      <textarea id="blastmsg" rows="2" placeholder="🔥 20% off all pizza this weekend! Use code WEEKEND20" style="width:100%"></textarea>
+      <div class="row" style="margin-top:8px">
+        <button class="btn small" id="blastgo" style="width:auto">📢 Send blast</button>
+        <span class="small" id="blaststatus"></span></div>
+      <div id="blasthist" style="margin-top:8px"></div></div>
     <div class="card"><b>🤖 AI suggestions</b>
       <p class="small">What needs your attention right now, based on live data.</p>
       <div id="sugglist"><p class="small">Loading…</p></div></div>
@@ -253,10 +261,28 @@ $('gobtn').onclick=async()=>{
 PIN=sessionStorage.getItem('droppin')||'';
 if(PIN){$('login').style.display='none';$('app').style.display='block';loadOrders(true);}
 
+async function activateSched(oid){
+  if(!confirm('Activate order #'+oid+' now?'))return;
+  await fetch('/api/operator/orders/'+oid+'/status',{method:'POST',headers:H(),
+    body:JSON.stringify({status:'confirmed'})});
+  loadOrders();
+}
 async function loadOrders(first){
   const r=await fetch('/api/operator/orders',{headers:H()});
   if(r.status===401){location.reload();return;}
   const orders=await r.json();
+  // scheduled orders
+  try{
+    const sch=await (await fetch('/api/operator/scheduled',{headers:H()})).json();
+    $('schedlist').innerHTML=sch.length?`<div class="card" style="border:2px solid #a78bfa">
+      <b>📅 Scheduled (${sch.length})</b>
+      ${sch.map(o=>`<div class="row" style="padding:6px 0;border-top:1px solid #222">
+        <div><b>#${o.id} · ${o.restaurant_name||'Drop'}</b><br>
+        <span class="small">${o.customer_name} · $${o.total.toFixed(2)}</span></div>
+        <div style="text-align:right"><span class="small">${o.scheduled_for.replace('T',' ').slice(0,16)}</span><br>
+        <button class="btn small ghost" style="width:auto;margin-top:4px" onclick="activateSched(${o.id})">▶ Activate</button></div>
+      </div>`).join('')}</div>`:'';
+  }catch(e){}
   const ids=orders.map(o=>o.id), mx=Math.max(0,...ids);
   if(!first && mx>lastSeen){
     const fresh=orders.filter(o=>o.id>lastSeen);
@@ -787,9 +813,31 @@ async function loadLive(){
   // activity feed
   await loadActivity();
   await loadDriverMap();
+  await loadBlastHist();
   if(liveTimer)clearInterval(liveTimer);
   liveTimer=setInterval(()=>{loadActivity();loadDriverMap();},15000);
 }
+async function loadBlastHist(){
+  const b=await (await fetch('/api/operator/blasts',{headers:H()})).json();
+  $('blasthist').innerHTML=b.map(x=>`
+    <div class="small" style="padding:4px 0;border-top:1px solid #222">
+      📢 ${x.message.replace(/</g,'&lt;')}<br>
+      <span style="opacity:.6">${x.sent_count} reached · ${x.created_at.slice(0,16).replace('T',' ')}</span>
+    </div>`).join('')||'<p class="small">No blasts yet.</p>';
+}
+document.addEventListener('click',async e=>{
+  if(e.target&&e.target.id==='blastgo'){
+    const msg=$('blastmsg').value.trim();
+    if(!msg){$('blaststatus').textContent='Type a message first.';return;}
+    if(!confirm(`Send this to all customers with push on?\n\n"${msg}"`))return;
+    $('blaststatus').textContent='Sending…';
+    const r=await fetch('/api/operator/blast',{method:'POST',headers:{...H(),'Content-Type':'application/json'},
+      body:JSON.stringify({message:msg})});
+    const j=await r.json();
+    $('blaststatus').textContent=r.ok?`✅ Sent to ${j.sent}!`:'Error: '+(j.detail||'failed');
+    $('blastmsg').value=''; loadBlastHist();
+  }
+});
 async function loadDriverMap(){
   // Leaflet via CDN
   if(!window.L){
