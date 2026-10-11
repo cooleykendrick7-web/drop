@@ -3,7 +3,18 @@
 <title>Drop — Operator</title>
 <link rel="icon" href="/static/logo-mark.jpg">
 <link rel="stylesheet" href="/static/styles.css">
-<style>.tabs{display:flex;gap:6px;margin:10px 0}.tabs button{flex:1;background:#2a2a33;color:#fff;border:0;border-radius:10px;padding:11px 4px;font-weight:700}.tabs button.on{background:var(--acc)}.tab{display:none}.tab.on{display:block}</style>
+<style>
+.tabs{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
+.tabs button{flex:1 1 30%;background:#1c1c22;color:#fff;border:1px solid #2a2a33;border-radius:12px;padding:10px 4px;font-weight:700;font-size:.85rem;white-space:nowrap}
+.tabs button.on{background:var(--acc);border-color:var(--acc)}
+.tab{display:none}.tab.on{display:block}
+.subtabs{display:flex;gap:6px;margin:0 0 12px;overflow-x:auto;padding-bottom:2px}
+.subtabs button{flex:0 0 auto;background:#1c1c22;color:#ccc;border:1px solid #2a2a33;border-radius:20px;padding:7px 14px;font-size:.8rem;font-weight:700}
+.subtabs button.on{background:#2a2a33;color:#fff;border-color:var(--acc)}
+.subtab{display:none}.subtab.on{display:block}
+.card{margin:10px 0;padding:14px}
+.card h2{font-size:1.15rem}.card h3{font-size:1rem;margin:8px 0}
+</style>
 </head><body>
 <header class="topbar"><a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg" alt="Drop"><b>Drop</b></a><span class="small">&nbsp;operator</span></header>
 <div class="alert" id="alert"></div>
@@ -21,23 +32,16 @@
     <button class="btn small ghost" id="logoutbtn" style="width:auto;padding:6px 14px">Log out</button>
   </div>
   <div class="tabs">
-    <button class="on" data-t="orders">Orders</button>
+    <button class="on" data-t="orders">📦 Orders</button>
     <button data-t="rides">🚗 Rides <span id="ridebadge"></span></button>
     <button data-t="money">💰 Money</button>
-    <button data-t="deals">🤝 Deals <span id="dealbadge"></span></button>
-    <button data-t="drv">Drivers <span id="drvbadge"></span></button>
-    <button data-t="biz">Drop More</button>
-    <button data-t="earn">Earnings</button>
-    <button data-t="menu">Menu</button>
-    <button data-t="promo">Promos</button>
-    <button data-t="upd">Updates <span id="updbadge"></span></button>
-    <button data-t="sup">Support <span id="tixbadge"></span></button>
-    <button data-t="stats">Stats</button>
-    <button data-t="inv">Investors <span id="invbadge"></span></button>
-    <button data-t="out">📧 Outreach <span id="outbadge"></span></button>
+    <button data-t="drv">👥 Drivers <span id="drvbadge"></span></button>
+    <button data-t="growth">📈 Growth <span id="growthbadge"></span></button>
+    <button data-t="menu">🍔 Menu <span id="updbadge"></span></button>
+    <button data-t="sup">💬 Support <span id="tixbadge"></span></button>
+    <button data-t="insights">📊 Insights</button>
     <button data-t="live">⚡ Live</button>
-    <button data-t="audit">Audit</button>
-    <button data-t="set">Settings</button>
+    <button data-t="set">⚙️ Settings</button>
   </div>
 
   <div class="tab on" id="t-orders">
@@ -71,7 +75,12 @@
   </div>
 
   <div class="tab" id="t-money">
-    <div class="card"><h2 style="margin:0">💰 Company money</h2>
+    <div class="subtabs">
+      <button class="on" data-s="m-overview">Overview</button>
+      <button data-s="m-earn">Earnings</button>
+    </div>
+    <div class="subtab on" id="s-m-overview">
+<div class="card"><h2 style="margin:0">💰 Company money</h2>
       <p class="small" id="finwarn" style="color:#f66"></p>
       <div class="statgrid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0">
         <div class="stat"><b id="f-rev">–</b><span class="small">Gross revenue</span></div>
@@ -96,26 +105,42 @@
     <div class="card"><h3>🔗 Stripe Connect</h3><div id="connectbox"><p class="small">Loading…</p></div></div>
     <h3>Per-order breakdown</h3>
     <div id="finorders"></div>
+    </div>
+    <div class="subtab" id="s-m-earn">
+<div class="card"><h2 style="margin:0">Delivery fees earned</h2>
+      <div class="total" id="etotal">$0.00</div>
+      <p class="small" id="ecount"></p></div>
+    <div id="ebyday"></div>
+    </div>
   </div>
-
-  <div class="tab" id="t-deals">
-    <div class="card"><b>🤝 Partnership pipeline</b>
+  <div class="tab" id="t-growth">
+    <div class="subtabs">
+      <button class="on" data-s="g-deals">🤝 Pipeline</button>
+      <button data-s="g-out">📧 Outreach</button>
+      <button data-s="g-biz">📦 Businesses</button>
+      <button data-s="g-promo">🎟️ Promos</button>
+      <button data-s="g-inv">💰 Investors</button>
+    </div>
+    <div class="subtab on" id="s-g-deals">
+<div class="card"><b>🤝 Partnership pipeline</b>
       <p class="small">Every deal moves: Submitted → Under Review → Financial Evaluation → Negotiation → Contract Review → Approved → Active. <b>You</b> approve every stage.</p></div>
     <div class="row" id="dealstages" style="flex-wrap:wrap;gap:6px;margin-bottom:10px"></div>
     <div id="deallist"></div>
-  </div>
-
-  <div class="tab" id="t-drv">
-    <div class="card"><b>🚗 Dropper applications</b>
-      <p class="small">Nobody drives without your approval. Review each application, then <b>Approve</b> or <b>Deny</b>.</p></div>
-    <h3>Pending review <span id="drvpend"></span></h3>
-    <div id="drvlist"></div>
-    <h3>Active drivers</h3>
-    <div id="drvactive"></div>
-  </div>
-
-  <div class="tab" id="t-biz">
-    <div class="card"><b>📦 Drop More businesses</b>
+    </div>
+    <div class="subtab" id="s-g-out">
+<div class="card"><b>📧 AI outreach</b>
+      <p class="small">AI drafts partnership emails. <b>You approve every one</b> before it sends. Nothing goes out automatically.</p></div>
+    <div class="card"><h3>Draft a new outreach email</h3>
+      <input id="o-email" placeholder="Business email" inputmode="email">
+      <input id="o-biz" placeholder="Business name">
+      <div class="row"><input id="o-contact" placeholder="Contact name (optional)" style="flex:1;margin-right:6px">
+      <input id="o-type" placeholder="Type (e.g. auto parts)" style="flex:1"></div>
+      <button class="btn" id="o-draft">✨ AI draft email</button>
+      <p class="small" id="o-msg"></p></div>
+    <div id="outlist"></div>
+    </div>
+    <div class="subtab" id="s-g-biz">
+<div class="card"><b>📦 Drop More businesses</b>
       <p class="small">Auto parts, clothing, supplies — the pickup points for courier orders.</p></div>
     <div id="bizlist"></div>
     <div class="card"><h3>Add business</h3>
@@ -123,25 +148,9 @@
       <input id="baddr" placeholder="Street address, Bismarck, ND">
       <input id="bphone" placeholder="Phone"><input id="bweb" placeholder="Website URL">
       <button class="btn" id="addbiz">Add business</button></div>
-  </div>
-
-  <div class="tab" id="t-earn">
-    <div class="card"><h2 style="margin:0">Delivery fees earned</h2>
-      <div class="total" id="etotal">$0.00</div>
-      <p class="small" id="ecount"></p></div>
-    <div id="ebyday"></div>
-  </div>
-
-  <div class="tab" id="t-menu">
-    <div id="rlist"></div>
-    <div class="card"><h3>Add restaurant</h3>
-      <input id="nname" placeholder="Name"><input id="ncuisine" placeholder="Cuisine">
-      <input id="nemoji" placeholder="Emoji (e.g. 🍔)">
-      <button class="btn" id="addrest">Add</button></div>
-  </div>
-
-  <div class="tab" id="t-promo">
-    <div class="card"><h3>Create promo code</h3>
+    </div>
+    <div class="subtab" id="s-g-promo">
+<div class="card"><h3>Create promo code</h3>
       <div class="row"><input id="pcode" placeholder="CODE (e.g. WELCOME5)" style="text-transform:uppercase">
       <select id="pkind" style="max-width:110px"><option value="fixed">$ off</option><option value="percent">% off</option></select></div>
       <div class="row"><input id="pvalue" placeholder="Value (5 or 10)" inputmode="decimal">
@@ -150,31 +159,72 @@
       <button class="btn small" id="pcreate" style="width:auto;padding:10px 20px">Create</button></div>
       <p class="small" id="pmsg"></p></div>
     <div id="plist"></div>
+    </div>
+    <div class="subtab" id="s-g-inv">
+<div class="card"><b>💰 Investor interest</b>
+      <p class="small">People who want to invest in Drop. Reach out personally — investment paperwork needs a lawyer.</p></div>
+    <div id="invlist"></div>
+    </div>
   </div>
 
-  <div class="tab" id="t-upd">
-    <div class="card"><b>🤖 AI menu watchdog</b>
+<div class="tab" id="t-drv">
+    <div class="card"><b>🚗 Dropper applications</b>
+      <p class="small">Nobody drives without your approval. Review each application, then <b>Approve</b> or <b>Deny</b>.</p></div>
+    <h3>Pending review <span id="drvpend"></span></h3>
+    <div id="drvlist"></div>
+    <h3>Active drivers</h3>
+    <div id="drvactive"></div>
+  </div>
+
+  
+
+  
+
+  <div class="tab" id="t-menu">
+    <div class="subtabs">
+      <button class="on" data-s="mn-rest">Restaurants</button>
+      <button data-s="mn-upd">🤖 AI Updates</button>
+    </div>
+    <div class="subtab on" id="s-mn-rest">
+<div id="rlist"></div>
+    <div class="card"><h3>Add restaurant</h3>
+      <input id="nname" placeholder="Name"><input id="ncuisine" placeholder="Cuisine">
+      <input id="nemoji" placeholder="Emoji (e.g. 🍔)">
+      <button class="btn" id="addrest">Add</button></div>
+    </div>
+    <div class="subtab" id="s-mn-upd">
+<div class="card"><b>🤖 AI menu watchdog</b>
       <p class="small">Once a week the AI checks every restaurant's menu online. When it spots a changed price, new item, or removed item, it lands here. Nothing changes on your menu until you tap <b>Approve</b>.</p></div>
     <div id="updlist"><p class="small">Loading…</p></div>
+    </div>
   </div>
 
-  <div class="tab" id="t-sup">
+<div class="tab" id="t-sup">
     <div id="tixlist"></div>
   </div>
 
-  <div class="tab" id="t-stats">
-    <div class="card"><h2 style="margin:0">Last 14 days</h2>
+  
+
+  
+
+    <div class="tab" id="t-insights">
+    <div class="subtabs">
+      <button class="on" data-s="i-stats">Stats</button>
+      <button data-s="i-audit">Audit log</button>
+    </div>
+    <div class="subtab on" id="s-i-stats">
+<div class="card"><h2 style="margin:0">Last 14 days</h2>
       <p class="small" id="statsum">Loading…</p>
       <div id="statbars"></div></div>
+    </div>
+    <div class="subtab" id="s-i-audit">
+<div class="card"><b>📋 Audit trail</b>
+      <p class="small">Every admin decision, recorded. Nothing happens in the dark.</p></div>
+    <div id="auditlist"></div>
+    </div>
   </div>
 
-  <div class="tab" id="t-inv">
-    <div class="card"><b>💰 Investor interest</b>
-      <p class="small">People who want to invest in Drop. Reach out personally — investment paperwork needs a lawyer.</p></div>
-    <div id="invlist"></div>
-  </div>
-
-  <div class="tab" id="t-live">
+<div class="tab" id="t-live">
     <div class="card"><b>🗺️ Live driver map</b>
       <p class="small">All your drivers, right now. Auto-refreshes every 15 seconds.</p>
       <div id="drivermap" style="height:300px;border-radius:12px;z-index:1"></div>
@@ -189,6 +239,7 @@
     <div class="card"><b>👀 Watcher chat <span id="watchbadge"></span></b>
       <p class="small">Messages from people with the watch code (5683). They can see but not touch.</p>
       <div id="watchchat" style="max-height:250px;overflow-y:auto;margin:8px 0"></div>
+    </div>
     <div class="card"><b>🤖 AI suggestions</b>
       <p class="small">What needs your attention right now, based on live data.</p>
       <div id="sugglist"><p class="small">Loading…</p></div></div>
@@ -197,24 +248,9 @@
       <div id="actlist"><p class="small">Loading…</p></div></div>
   </div>
 
-  <div class="tab" id="t-audit">
-    <div class="card"><b>📋 Audit trail</b>
-      <p class="small">Every admin decision, recorded. Nothing happens in the dark.</p></div>
-    <div id="auditlist"></div>
-  </div>
+  
 
-  <div class="tab" id="t-out">
-    <div class="card"><b>📧 AI outreach</b>
-      <p class="small">AI drafts partnership emails. <b>You approve every one</b> before it sends. Nothing goes out automatically.</p></div>
-    <div class="card"><h3>Draft a new outreach email</h3>
-      <input id="o-email" placeholder="Business email" inputmode="email">
-      <input id="o-biz" placeholder="Business name">
-      <div class="row"><input id="o-contact" placeholder="Contact name (optional)" style="flex:1;margin-right:6px">
-      <input id="o-type" placeholder="Type (e.g. auto parts)" style="flex:1"></div>
-      <button class="btn" id="o-draft">✨ AI draft email</button>
-      <p class="small" id="o-msg"></p></div>
-    <div id="outlist"></div>
-  </div>
+  
 
   <div class="tab" id="t-set">
     <div class="card"><h3>🟢 Accepting orders</h3>
@@ -268,11 +304,34 @@ function beep(){
 }
 function banner(t){const a=$('alert');a.textContent=t;a.style.display='block';setTimeout(()=>a.style.display='none',8000);}
 
+const _gbadge={deals:0,inv:0,out:0};
+function _gbadgeUpdate(){
+  const n=_gbadge.deals+_gbadge.inv+_gbadge.out;
+  const el=document.getElementById('growthbadge');
+  if(el) el.textContent=n?`(${n})`:'';
+}
 document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
   b.classList.add('on'); $('t-'+b.dataset.t).classList.add('on');
-  if(b.dataset.t==='earn') loadEarn(); if(b.dataset.t==='menu') loadMenu(); if(b.dataset.t==='set') loadSet(); if(b.dataset.t==='sup') loadTix(); if(b.dataset.t==='promo') loadPromos(); if(b.dataset.t==='stats') loadStats(); if(b.dataset.t==='upd') loadProposals(); if(b.dataset.t==='drv') loadDrivers(); if(b.dataset.t==='rides') loadRides(); if(b.dataset.t==='biz') loadBiz(); if(b.dataset.t==='inv') loadInv(); if(b.dataset.t==='money') loadMoney(); if(b.dataset.t==='deals') loadDeals(); if(b.dataset.t==='audit') loadAudit(); if(b.dataset.t==='out') loadOutreach(); if(b.dataset.t==='live') loadLive();
+  if(b.dataset.t==='money'){loadMoney();loadEarn();}
+  if(b.dataset.t==='growth'){loadDeals();loadOutreach();loadBiz();loadPromos();loadInv();}
+  if(b.dataset.t==='menu'){loadMenu();loadProposals();}
+  if(b.dataset.t==='insights'){loadStats();loadAudit();}
+  if(b.dataset.t==='set') loadSet(); if(b.dataset.t==='sup') loadTix();
+  if(b.dataset.t==='drv') loadDrivers(); if(b.dataset.t==='rides') loadRides(); if(b.dataset.t==='live') loadLive();
+});
+// sub-tab switching (wired once)
+document.querySelectorAll('.subtabs').forEach(st=>{
+  st.querySelectorAll('button').forEach(sb=>{
+    sb.onclick=()=>{
+      st.querySelectorAll('button').forEach(x=>x.classList.remove('on'));
+      sb.classList.add('on');
+      const tab=st.closest('.tab');
+      tab.querySelectorAll('.subtab').forEach(x=>x.classList.remove('on'));
+      tab.querySelector('#s-'+sb.dataset.s).classList.add('on');
+    };
+  });
 });
 
 async function loadStats(){
@@ -792,7 +851,7 @@ async function delBiz(id){
 /* --- Investor leads --- */
 async function loadInv(){
   const l=await (await fetch('/api/operator/investor-leads',{headers:H()})).json();
-  $('invbadge').textContent=l.length?`(${l.length})`:'';
+  _gbadge.inv=l.length||0; _gbadgeUpdate();
   const esc=s=>(s||'').replace(/</g,'&lt;');
   $('invlist').innerHTML=l.map(x=>`
     <div class="card"><div class="row"><b>${esc(x.name)}</b><span class="badge open">${esc(x.amount_range)||'—'}</span></div>
@@ -869,7 +928,7 @@ async function loadDeals(stage){
   const counts={};
   j.partners.forEach(p=>counts[p.status]=(counts[p.status]||0)+1);
   const newCount=(counts['submitted']||0);
-  $('dealbadge').textContent=newCount?`(${newCount})`:'';
+  _gbadge.deals=newCount||0; _gbadgeUpdate();
   $('dealstages').innerHTML=Object.entries(j.stages).map(([k,v])=>
     `<button class="btn small ${stage===k?'':'ghost'}" onclick="loadDeals('${k}')">${v}${counts[k]?` (${counts[k]})`:''}</button>`).join('')
     +`<button class="btn small ghost" onclick="loadDeals()">All</button>`;
@@ -941,7 +1000,7 @@ async function driverProfile(id){
 async function loadOutreach(){
   const list=await (await fetch('/api/operator/outreach',{headers:H()})).json();
   const drafts=list.filter(x=>x.status==='draft');
-  $('outbadge').textContent=drafts.length?`(${drafts.length})`:'';
+  _gbadge.out=drafts.length||0; _gbadgeUpdate();
   const esc=s=>(s||'').replace(/</g,'&lt;');
   $('outlist').innerHTML=list.map(e=>`
     <div class="card"><div class="row"><b>${esc(e.business_name)}</b>
