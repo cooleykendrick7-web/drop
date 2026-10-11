@@ -241,6 +241,24 @@ def init_db():
         title TEXT NOT NULL DEFAULT '',
         detail TEXT DEFAULT '',
         created_at TEXT NOT NULL)""")
+    # gift orders (added 2026-10-11)
+    ocols = [r[1] for r in c.execute("PRAGMA table_info(orders)").fetchall()]
+    for _col, _ddl in (("is_gift", "INTEGER DEFAULT 0"),
+                       ("gift_recipient", "TEXT DEFAULT ''"),
+                       ("gift_contact", "TEXT DEFAULT ''"),
+                       ("gift_message", "TEXT DEFAULT ''"),
+                       ("gift_sender", "TEXT DEFAULT ''")):
+        if _col not in ocols:
+            c.execute(f"ALTER TABLE orders ADD COLUMN {_col} {_ddl}")
+    c.execute("""CREATE TABLE IF NOT EXISTS gift_queue (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id INTEGER NOT NULL,
+        recipient TEXT NOT NULL DEFAULT '',
+        contact TEXT NOT NULL DEFAULT '',
+        message TEXT DEFAULT '',
+        sender TEXT DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'pending',
+        created_at TEXT NOT NULL)""")
     # DROP MORE marketplace: business partnerships (added 2026-10-11)
     c.execute("""CREATE TABLE IF NOT EXISTS business_partners (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -597,15 +615,32 @@ async def create_order(req: Request):
             promo_code = pcode.strip().upper()
             conn.execute("UPDATE promo_codes SET uses=uses+1 WHERE code=?", (promo_code,))
     total = round(food_total + fee + tip - discount, 2)
+    # gift order?
+    gift = body.get("gift") or {}
+    is_gift = 1 if gift.get("recipient_name") else 0
+    gift_recipient = (gift.get("recipient_name") or "").strip()[:80]
+    gift_contact = (gift.get("recipient_contact") or "").strip()[:120]
+    gift_message = (gift.get("message") or "").strip()[:500]
     cur = conn.execute(
         """INSERT INTO orders(restaurant_id, items_json, customer_name, phone, address,
                               notes, food_total, delivery_fee, tip, discount, promo_code,
-                              user_id, total, status, stripe_status, created_at, updated_at)
-           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'placed','pending',?,?)""",
+                              user_id, total, status, stripe_status, created_at, updated_at,
+                              is_gift, gift_recipient, gift_contact, gift_message, gift_sender)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'placed','pending',?,?, ?,?,?,?,?)""",
         (rid, json.dumps(priced), name, phone, address, notes,
-         food_total, fee, tip, discount, promo_code, user_id, total, now_iso(), now_iso()))
+         food_total, fee, tip, discount, promo_code, user_id, total, now_iso(), now_iso(),
+         is_gift, gift_recipient, gift_contact, gift_message, name if is_gift else ""))
     oid = cur.lastrowid
     conn.commit()
+    # queue gift notification (sent by background job from business Gmail)
+    if is_gift and gift_contact:
+        conn.execute(
+            "INSERT INTO gift_queue(order_id, recipient, contact, message, sender, status, created_at)"
+            " VALUES(?,?,?,?,?,'pending',?)",
+            (oid, gift_recipient, gift_contact, gift_message, name, now_iso()))
+        conn.commit()
+        log_event("gift", f"🎁 Gift order #{oid} queued",
+                  f"For {gift_recipient} from {name}")
     # pin the delivery address on the map (background — never slows the order)
     def _geocode_order():
         try:
@@ -2707,8 +2742,28 @@ def op_outreach_sent(eid: int, x_pin: str = Header(default="")):
     conn.commit()
     conn.close()
     audit("system", "outreach_sent", "outreach", eid, "")
-    log_event("email", f"📧 Outreach email sent to {e['to_email'][:40]}",
-              e["subject"][:80])
+    log_event("email", f"📧 Outreach email sent", f"ID {eid}")
+    return {"ok": True}
+
+
+@app.get("/api/operator/gift-queue")
+def op_gift_queue(x_pin: str = Header(default="")):
+    """Pending gift notifications for the background sender."""
+    check_pin(x_pin)
+    conn = db()
+    rows = conn.execute("SELECT * FROM gift_queue WHERE status='pending' ORDER BY id").fetchall()
+    out = [dict(r) for r in rows]
+    conn.close()
+    return out
+
+
+@app.post("/api/operator/gift-queue/{gid}/sent")
+def op_gift_sent(gid: int, x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    conn = db()
+    conn.execute("UPDATE gift_queue SET status='sent' WHERE id=?", (gid,))
+    conn.commit()
+    conn.close()
     return {"ok": True}
 
 
