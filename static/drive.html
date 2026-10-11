@@ -1,6 +1,6 @@
 <!DOCTYPE html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Drive for Drop — Now Hiring</title>
+<title>Drive for Drop — Now Hiring in Bismarck, ND</title>
 <link rel="icon" href="/static/logo-mark.jpg">
 <link rel="stylesheet" href="/static/styles.css">
 <style>.appform input,.appform textarea,.appform select{width:100%;margin:6px 0}
@@ -12,7 +12,7 @@
 
 <div class="hero" style="text-align:center;padding:28px 16px">
   <h1 style="margin:0">Drive for <span style="color:var(--acc)">Drop</span> 🚗</h1>
-  <p class="sub">Your city's own delivery team — <b>Droppers</b>.<br>
+  <p class="sub">Bismarck's own delivery team — <b>Droppers</b>.<br>
   Keep 100% of your tips. Get paid per delivery. Work when you want.</p>
 </div>
 
@@ -42,30 +42,14 @@
     <div style="flex:1"><label>Year</label><input id="d-year" inputmode="numeric" placeholder="2019"></div>
     <div style="flex:1"><label>Color</label><input id="d-color" placeholder="Blue"></div>
   </div>
+  <div class="row">
+    <div style="flex:1"><label>License plate # *</label><input id="d-plate" placeholder="ABC 123"></div>
+    <div style="flex:1"><label>VIN *</label><input id="d-vin" placeholder="17-character VIN"></div>
+  </div>
   <label>Availability <span class="small">(days / hours you can drive)</span></label>
   <input id="d-avail" placeholder="e.g. Weekdays 11am–8pm, weekends">
   <label>Delivery experience <span class="small">(optional)</span></label>
   <textarea id="d-exp" rows="2" placeholder="Any delivery or driving experience?"></textarea>
-  <div class="chk"><input type="checkbox" id="d-bg">
-    <span class="small">I consent to a background check and confirm I'm 18 or older with a valid license and insured vehicle. *</span></div>
-  <div class="card" style="background:linear-gradient(135deg,#0d0d10,#1a1405);border:1px solid #d4af37;margin:12px 0">
-    <div class="chk"><input type="checkbox" id="d-rides">
-      <span><b style="color:#d4af37">🚗 I also want to drive for Drop Rides</b><br>
-      <span class="small">Pick up passengers and drop them off. Requires a photo of you, a photo of your ride, and the rides waiver below.</span></span></div>
-    <div id="rides-extra" style="display:none">
-      <label>Rideshare insurance <span class="small">(company + policy # — must cover paid passenger rides)</span></label>
-      <input id="d-rins" placeholder="e.g. State Farm rideshare endorsement, policy #12345">
-      <p class="small">⚠️ <b>Important:</b> regular car insurance usually does <b>not</b> cover paid rides. You need a rideshare endorsement or commercial policy. We will verify before approving you.</p>
-      <h3>📋 Drop Rides waiver — read carefully</h3>
-      <p class="small">By driving for Drop Rides, you confirm and agree:<br><br>
-      🚗 <b>Your car, your responsibility.</b> You drive your own vehicle at your own risk. Drop provides only a booking service connecting you with riders.<br><br>
-      🛡️ <b>Drop is not liable</b> for anything that happens to your vehicle or to you while driving for Drop Rides — including accidents, injuries, damage, theft, or tickets. You accept full responsibility.<br><br>
-      👤 <b>Passenger safety.</b> You are responsible for your passengers' safety during the ride. Drive safely, follow all traffic laws, never drive impaired.<br><br>
-      📸 <b>Your profile is public to riders.</b> Your photo, first name, and car photo/description show on your driver profile so riders know who to expect.</p>
-      <div class="chk"><input type="checkbox" id="d-rwaiver">
-        <span class="small"><b>I have read and accept the Drop Rides waiver. Drop is not liable for my vehicle or my safety. *</b></span></div>
-    </div>
-  </div>
   <h3>📄 Required documents</h3>
   <p class="small"><b>All 5 documents are required.</b> Applications with missing documents may be denied.</p>
   <div id="docuploads">
@@ -98,7 +82,9 @@
       <p class="small" id="docstat-car"></p>
     </div>
   </div>
-    <div class="card" style="background:#141419;margin:12px 0">
+  <div class="chk"><input type="checkbox" id="d-bg">
+    <span class="small">I consent to a background check and confirm I'm 18 or older with a valid license and insured vehicle. *</span></div>
+  <div class="card" style="background:#141419;margin:12px 0">
     <h3>📋 Driver agreement — read carefully</h3>
     <p class="small">By applying to drive for DROP MORE, you confirm and agree:<br><br>
     🚗 <b>Your vehicle, your responsibility.</b> You maintain your own valid driver's license, vehicle registration, and insurance at all times.<br><br>
@@ -116,9 +102,6 @@
 
 <script>
 const $=id=>document.getElementById(id);
-$('d-rides').onchange=()=>{ $('rides-extra').style.display=$('d-rides').checked?'block':'none'; };
-// preselect when coming from the rides page
-if(new URLSearchParams(location.search).get('rides')==='1'){ $('d-rides').checked=true; $('rides-extra').style.display='block'; }
 const DOC_TYPES=['id_front','id_back','insurance','selfie','car'];
 async function uploadDoc(docType, phone){
   const input=$('doc-'+docType);
@@ -142,55 +125,39 @@ $('d-submit').onclick=async()=>{
     license_number:$('d-lic').value.trim(),license_state:$('d-licst').value.trim(),
     insurance:$('d-ins').value.trim(),vehicle_make:$('d-make').value.trim(),
     vehicle_model:$('d-model').value.trim(),vehicle_year:$('d-year').value.trim(),
-    vehicle_color:$('d-color').value.trim(),availability:$('d-avail').value.trim(),
-    experience:$('d-exp').value.trim(),background_consent:$('d-bg').checked,
-    wants_rides:$('d-rides').checked?1:0,
-    rideshare_insurance:$('d-rins')?$('d-rins').value.trim():'',
-    rides_waiver:$('d-rwaiver')?($('d-rwaiver').checked?1:0):0};
+    vehicle_color:$('d-color').value.trim(),license_plate:$('d-plate').value.trim(),
+    vin:$('d-vin').value.trim(),availability:$('d-avail').value.trim(),
+    experience:$('d-exp').value.trim(),background_consent:$('d-bg').checked};
   if(!body.name||!body.phone||body.password.length<6){$('d-msg').textContent='Name, phone, and a 6+ character password are required.';return;}
   if(!body.license_number||!body.license_state){$('d-msg').textContent="Please add your driver's license info.";return;}
+  if(!body.license_plate||!body.vin){$('d-msg').textContent='License plate and VIN are required.';return;}
+  if(!body.vehicle_make||!body.vehicle_model){$('d-msg').textContent='Vehicle make and model are required.';return;}
   if(!body.background_consent){$('d-msg').textContent='Background check consent is required.';return;}
   if(!$('d-agree').checked){$('d-msg').textContent='You must accept the driver agreement.';return;}
-  if(body.wants_rides&&!body.rides_waiver){$('d-msg').textContent='You must accept the Drop Rides waiver.';return;}
+  // ALL documents required — no exceptions
   const missing=DOC_TYPES.filter(t=>!$('doc-'+t).files[0]);
   if(missing.length){
-    $('d-msg').textContent=`⚠️ Missing ${missing.length} document${missing.length>1?'s':''} — all 5 are required. Applications with missing documents may be denied.`;
-    if(!confirm('You\'re missing documents. Submit anyway? (You may be denied)'))return;
+    $('d-msg').textContent=`❌ All 5 documents are required: ID front, ID back, insurance card, selfie, and car photo. You're missing ${missing.length}.`;
+    return;
   }
-  $('d-msg').textContent='Submitting…';
+  $('d-msg').textContent='Uploading documents…';
+  // upload docs FIRST (backend requires them before creating the application)
+  let okCount=0;
+  for(const t of DOC_TYPES){
+    if(await uploadDoc(t, body.phone))okCount++;
+  }
+  if(okCount<5){$('d-msg').textContent='❌ Some documents failed to upload. Please try again.';return;}
+  $('d-msg').textContent='Submitting application…';
   const r=await fetch('/api/drivers/apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   const j=await r.json();
   if(r.ok){
-    $('d-msg').textContent='Uploading documents…';
-    let okCount=0;
-    for(const t of DOC_TYPES){
-      if($('doc-'+t).files[0] && await uploadDoc(t, body.phone))okCount++;
-    }
-    let extra=`<p class="small">📄 ${okCount}/5 documents uploaded</p>`;
-    if(body.wants_rides){
-      extra=`<div class="card" style="margin-top:12px;background:#0d0d10;border:1px solid #d4af37">
-        <h3 style="color:#d4af37">📸 Drop Rides: upload your photos</h3>
-        <p class="small">We need a clear photo of <b>you</b> and a clear photo of <b>your car</b>. They'll show on your driver profile.</p>
-        <label class="small">Photo of you</label><input type="file" id="up-selfie" accept="image/*">
-        <label class="small">Photo of your car</label><input type="file" id="up-car" accept="image/*">
-        <button class="btn" id="up-go" style="margin-top:8px">Upload photos</button>
-        <p class="small" id="up-msg"></p></div>
-        <scr`+`ipt>
-        document.getElementById('up-go').onclick=async()=>{
-          const m=document.getElementById('up-msg'); m.textContent='Uploading…';
-          for(const [tid,ty] of [['up-selfie','selfie'],['up-car','car']]){
-            const f=document.getElementById(tid).files[0]; if(!f)continue;
-            const fd=new FormData(); fd.append('driver_id','${j.id}'); fd.append('type',ty); fd.append('file',f);
-            const rr=await fetch('/api/drivers/photo',{method:'POST',body:fd});
-            if(!rr.ok){m.textContent='Upload failed: '+((await rr.json()).detail||'try again');return;}
-          }
-          m.textContent='✅ Photos uploaded — we\'ll review everything together.';
-        };
-        </scr`+`ipt>`;
-    }
-    $('appform').innerHTML=`<h2>✅ Application received!</h2>
-      <p>Thanks, ${body.name.split(' ')[0]} — we'll review your application and reach out at <b>${body.phone}</b> once you're approved. Then you'll get your Dropper portal login.</p>
-      <p class="small">Application #${j.id}</p>`+extra;
+    const approved=j.ai_approved;
+    $('appform').innerHTML=`<h2>${approved?'🎉 You\'re approved!':'✅ Application received!'}</h2>
+      <p>${approved
+        ? `Welcome aboard, ${body.name.split(' ')[0]}! Our AI reviewed your application (score: ${j.ai_score}/100) and you're good to go. Check your <b>driver portal</b> to get started.`
+        : `Thanks, ${body.name.split(' ')[0]} — our team will review your application (AI score: ${j.ai_score}/100) and reach out at <b>${body.phone}</b>.`}</p>
+      <p class="small">Application #${j.driver_id} · 5/5 documents uploaded</p>
+      ${approved?'<a href="/driver.html" class="btn" style="display:inline-block;margin-top:12px">Open driver portal →</a>':''}`;
   } else $('d-msg').textContent='Error: '+(j.detail||'could not submit');
 };
 </script>
