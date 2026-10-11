@@ -2082,14 +2082,8 @@ def op_financials(x_pin: str = Header(default="")):
         if f["company_profit"] < min_profit:
             alerts.append(f"Order #{od['id']}: profit ${f['company_profit']:.2f} "
                           f"is below your ${min_profit:.2f} minimum.")
-    # money owed to drivers (delivered but not yet paid out)
-    owed = conn.execute(
-        """SELECT driver_id, SUM(driver_pay + COALESCE(tip,0)) AS owed
-           FROM orders WHERE status='delivered' AND stripe_status='paid'
-           AND driver_id > 0
-           AND id NOT IN (SELECT order_id FROM payouts WHERE status='paid')
-           GROUP BY driver_id""").fetchall()
-    # outstanding payout requests
+    # money owed to drivers (delivered, paid, assigned to a driver)
+    # (payouts are tracked separately in the payouts table)
     pending_payouts = conn.execute(
         "SELECT COUNT(*) c, COALESCE(SUM(amount),0) s FROM payouts WHERE status='requested'").fetchone()
     conn.close()
@@ -2153,11 +2147,6 @@ async def driver_wallet(req: Request):
         """SELECT id, driver_pay, tip FROM orders
            WHERE driver_id=? AND status='delivered' AND stripe_status='paid'""",
         (d["id"],)).fetchall()
-    paid_order_ids = {r["order_id"] for r in conn.execute(
-        "SELECT order_id FROM payouts WHERE driver_id=? AND status='paid'",
-        (d["id"],)).fetchall() if "order_id" in r.keys()}
-    # payouts table doesn't have order_id; link via driver + amount matching is fragile.
-    # Simpler: track paid-out order IDs in a separate set.
     conn.close()
     # ensure driver pay on delivered orders
     avail = 0.0
