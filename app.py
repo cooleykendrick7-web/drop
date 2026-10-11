@@ -2985,10 +2985,42 @@ def op_approve_driver(did: int, x_pin: str = Header(default="")):
                 daemon=True).start()
     except Exception:
         pass
+    # Queue PIN email from business Gmail (sent by outreach cron within 15 min)
+    try:
+        driver_email = (d["email"] or "").strip()
+        if driver_email and "@" in driver_email:
+            conn.execute(
+                """INSERT INTO outreach_emails
+                   (to_email, to_name, subject, body, business_name, status, created_at, sent_at)
+                   VALUES (?, ?, ?, ?, ?, 'approved', ?, '')""",
+                (driver_email, d["name"],
+                 f"🚗 Your Drop Driver Hub PIN is {pin}",
+                 f"""Hi {d['name']},
+
+Great news — you've been approved as a Drop driver! 🎉
+
+Your Driver Hub login PIN is: {pin}
+
+Here's how to get started:
+
+1. Go to https://drop-52yj.onrender.com/hub.html
+2. Enter your 6-digit PIN: {pin}
+3. Set up push notifications (instructions in the Hub)
+4. Start accepting deliveries!
+
+Your PIN is unique to you — keep it safe.
+
+Welcome to the Drop team!
+— Drop Services LLC""",
+                 "Driver PIN",
+                 datetime.now(timezone.utc).isoformat()))
+            conn.commit()
+    except Exception:
+        pass
     conn.close()
     audit("operator", "driver_approved", "driver", did, f"{d['name']} PIN:{pin}")
     log_event("driver", f"✅ Driver #{did} approved", f"{d['name']} — PIN {pin}")
-    return {"ok": True, "pin": pin, "message": f"Driver approved! Their login PIN is {pin}. Share it with them securely."}
+    return {"ok": True, "pin": pin, "message": f"Driver approved! Their login PIN is {pin}. PIN email queued to {d['email'] or 'no email on file'}."}
 
 
 @app.post("/api/operator/drivers/{did}/photo-approve")
