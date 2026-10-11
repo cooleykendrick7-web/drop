@@ -56,7 +56,8 @@
   <h2>💰 Fare calculator</h2>
   <p class="small">Real pricing, right now. This is exactly what you'll pay.</p>
   <label>Pickup address</label>
-  <input class="lux-input" id="c-from" placeholder="Where do we get you?">
+  <div style="display:flex;gap:8px"><input class="lux-input" id="c-from" placeholder="Where do we get you?" style="flex:1">
+  <button class="lux-btn ghost" id="c-loc" style="width:auto;padding:12px 14px;white-space:nowrap" title="Use my current location">📍</button></div>
   <label>Dropoff address</label>
   <input class="lux-input" id="c-to" placeholder="Where are you headed?">
   <button class="lux-btn ghost" id="c-go">Calculate my fare</button>
@@ -75,7 +76,8 @@
   <h2>🚗 Book your ride</h2>
   <div id="book-form">
     <label>Pickup address</label>
-    <input class="lux-input" id="b-from" placeholder="Where do we get you?">
+    <div style="display:flex;gap:8px"><input class="lux-input" id="b-from" placeholder="Where do we get you?" style="flex:1">
+    <button class="lux-btn ghost" id="b-loc" style="width:auto;padding:12px 14px;white-space:nowrap" title="Use my current location">📍</button></div>
     <label>Dropoff address</label>
     <input class="lux-input" id="b-to" placeholder="Where are you headed?">
     <label>Your name</label>
@@ -112,6 +114,30 @@
 const LAUNCH_AT = new Date('2026-10-13T10:00:00-05:00').getTime();
 const $=id=>document.getElementById(id);
 let tip=0, lastQuote=null;
+// GPS coords when the customer taps "use my location" — most accurate distance
+let gps={cFrom:null, bFrom:null};
+
+async function useMyLocation(inputId, key){
+  const btn=document.getElementById(key==='cFrom'?'c-loc':'b-loc');
+  if(!navigator.geolocation){alert('Your browser does not share location. Type the address instead.');return;}
+  btn.textContent='…';
+  navigator.geolocation.getCurrentPosition(async pos=>{
+    const lat=pos.coords.latitude, lng=pos.coords.longitude;
+    gps[key]={lat,lng};
+    try{
+      const r=await(await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`,{headers:{'User-Agent':'DropApp'}})).json();
+      document.getElementById(inputId).value=r.display_name?r.display_name.split(',').slice(0,3).join(','):`${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+    }catch(e){ document.getElementById(inputId).value=`${lat.toFixed(5)}, ${lng.toFixed(5)}`; }
+    btn.textContent='✅';
+  }, err=>{
+    btn.textContent='📍';
+    alert('Could not get your location — check that location access is on, or type the address.');
+  }, {enableHighAccuracy:true, timeout:10000});
+}
+document.getElementById('c-loc').onclick=()=>useMyLocation('c-from','cFrom');
+document.getElementById('b-loc').onclick=()=>useMyLocation('b-from','bFrom');
+document.getElementById('c-from').oninput=()=>{gps.cFrom=null;document.getElementById('c-loc').textContent='📍';};
+document.getElementById('b-from').oninput=()=>{gps.bFrom=null;document.getElementById('b-loc').textContent='📍';};
 
 // countdown
 function tick(){
@@ -137,9 +163,11 @@ document.querySelectorAll('.tipbtn').forEach(b=>{
     b.style.borderColor='#f6e27a'; renderQuote(); };
 });
 
-async function getQuote(from,to){
-  const r=await(await fetch(`/api/rides/quote?pickup_address=${encodeURIComponent(from)}&dropoff_address=${encodeURIComponent(to)}`)).json();
-  if(!r.fare && r.detail) throw new Error(r.detail);
+async function getQuote(from,to,coords){
+  let url=`/api/rides/quote?pickup_address=${encodeURIComponent(from)}&dropoff_address=${encodeURIComponent(to)}`;
+  if(coords) url+=`&plat=${coords.lat}&plng=${coords.lng}`;
+  const r=await(await fetch(url)).json();
+  if(r.detail) throw new Error(r.detail);
   return r;
 }
 
@@ -150,7 +178,7 @@ function fareHTML(q, showTip){
     ${showTip?`<div class="fare-row"><span class="small">Driver tip</span><b>$${tip.toFixed(2)}</b></div>`:''}
     <div class="fare-row fare-total"><span><b>You'll pay</b></span><b class="gold">$${(q.total+(showTip?tip:0)).toFixed(2)}</b></div>
     ${q.ai_note?`<div class="ai-note">🤖 ${q.ai_note}</div>`:''}
-    ${!q.geocoded?`<p class="small">⚠️ Couldn't map one address — price shown is the base estimate.</p>`:''}`;
+    ${q.too_far?`<div class="ai-note">⚠️ This ride is ${q.miles} miles — beyond our ${q.max_miles}-mile service area. Contact us for a custom long-distance quote.</div>`:''}`;
 }
 
 $('c-go').onclick=async()=>{
@@ -158,7 +186,7 @@ $('c-go').onclick=async()=>{
   if(!f||!t){$('c-out').innerHTML='<p class="small">Enter both addresses.</p>';return;}
   $('c-out').innerHTML='<p class="small">Calculating…</p>';
   try{
-    const q=await getQuote(f,t);
+    const q=await getQuote(f,t,gps.cFrom);
     $('c-out').innerHTML=fareHTML(q,false);
   }catch(e){$('c-out').innerHTML=`<p class="small">Error: ${e.message}</p>`;}
 };
@@ -168,9 +196,9 @@ $('b-quote-btn').onclick=async()=>{
   if(!f||!t){$('b-msg').textContent='Enter pickup and dropoff first.';return;}
   $('b-quote').innerHTML='<p class="small">Calculating…</p>';
   try{
-    lastQuote=await getQuote(f,t);
+    lastQuote=await getQuote(f,t,gps.bFrom);
     renderQuote();
-    $('b-go').style.display='block';
+    $('b-go').style.display=lastQuote.too_far?'none':'block';
   }catch(e){$('b-msg').textContent='Error: '+e.message;}
 };
 
@@ -184,6 +212,7 @@ $('b-go').onclick=async()=>{
   const body={
     pickup_address:$('b-from').value.trim(),
     dropoff_address:$('b-to').value.trim(),
+    ...(gps.bFrom?{pickup_lat:gps.bFrom.lat, pickup_lng:gps.bFrom.lng}:{}),
     customer_name:$('b-name').value.trim(),
     phone:$('b-phone').value.trim(),
     notes:$('b-notes').value.trim(),

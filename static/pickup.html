@@ -20,7 +20,8 @@
   <input id="raddr" placeholder="Street address">
 
   <label>Your delivery address</label>
-  <input id="daddr" placeholder="Where should we bring it?">
+  <div style="display:flex;gap:8px"><input id="daddr" placeholder="Where should we bring it?" style="flex:1">
+  <button class="btn small ghost" id="dloc" style="width:auto" title="Use my current location">📍</button></div>
 
   <label>Order details <span class="small">(confirmation #, name on the order)</span></label>
   <input id="odetail" placeholder="e.g. Order #1234 under Mike">
@@ -82,6 +83,20 @@ function updateTotals(){
   $('qtotal').textContent='$'+(fee+gas+tip).toFixed(2);
 }
 
+let gpsDl=null;
+$('dloc').onclick=()=>{
+  if(!navigator.geolocation){alert('Location not available — type the address instead.');return;}
+  $('dloc').textContent='…';
+  navigator.geolocation.getCurrentPosition(async pos=>{
+    gpsDl={lat:pos.coords.latitude,lng:pos.coords.longitude};
+    try{
+      const r=await(await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${gpsDl.lat}&lon=${gpsDl.lng}&format=json`,{headers:{'User-Agent':'DropApp'}})).json();
+      $('daddr').value=r.display_name?r.display_name.split(',').slice(0,3).join(','):`${gpsDl.lat.toFixed(5)}, ${gpsDl.lng.toFixed(5)}`;
+    }catch(e){$('daddr').value=`${gpsDl.lat.toFixed(5)}, ${gpsDl.lng.toFixed(5)}`;}
+    $('dloc').textContent='✅';
+  },()=>{$('dloc').textContent='📍';alert('Could not get your location.');},{enableHighAccuracy:true,timeout:10000});
+};
+$('daddr').oninput=()=>{gpsDl=null;$('dloc').textContent='📍';};
 $('quote').onclick=async()=>{
   const from=$('raddr').value.trim(), to=$('daddr').value.trim();
   if(!from||!to){$('msg').textContent='Enter the restaurant address and your delivery address first.';return;}

@@ -308,7 +308,8 @@ def init_db():
     for _k, _v in (("ride_base_fare", "4.99"), ("ride_per_mile", "2.00"),
                    ("ride_wait_per_min", "0.50"), ("ride_wait_free_min", "5"),
                    ("ride_driver_base", "4.00"), ("ride_driver_per_mile", "1.50"),
-                   ("rides_launch_at", "2026-10-13T10:00:00-05:00")):
+                   ("rides_launch_at", "2026-10-13T10:00:00-05:00"),
+                   ("ride_max_miles", "150")):
         c.execute("INSERT OR IGNORE INTO settings(key, value) VALUES(?, ?)", (_k, _v))
     # Business accounts (Drop More B2B)
     c.execute("""CREATE TABLE IF NOT EXISTS business_accounts (
@@ -2656,6 +2657,7 @@ def op_get_settings(x_pin: str = Header(default="")):
             "ride_per_mile": float(get_setting("ride_per_mile") or 2.00),
             "ride_wait_per_min": float(get_setting("ride_wait_per_min") or 0.50),
             "ride_wait_free_min": int(get_setting("ride_wait_free_min") or 5),
+            "ride_max_miles": float(get_setting("ride_max_miles") or 150),
             "tagline": get_setting("tagline")}
 
 
@@ -2718,6 +2720,10 @@ async def op_put_settings(req: Request, x_pin: str = Header(default="")):
         _w = max(0, min(60, int(body["ride_wait_free_min"])))
         set_setting("ride_wait_free_min", str(_w))
         out["ride_wait_free_min"] = _w
+    if "ride_max_miles" in body:
+        _mm = max(10, min(3000, float(body["ride_max_miles"])))
+        set_setting("ride_max_miles", str(_mm))
+        out["ride_max_miles"] = _mm
     if "tagline" in body:
         set_setting("tagline", str(body["tagline"]).strip()[:80])
         out["tagline"] = "updated"
@@ -7050,15 +7056,27 @@ def watchpage():
     with open(os.path.join(BASE, "static", "watch.html")) as f:
         return f.read()
 
+_geocode_cache = {}
+
 def _geocode(addr):
-    """Return (lat, lng) or (0.0, 0.0). Shared by courier + rides."""
+    """Return (lat, lng) or (0.0, 0.0). Cached 1hr — Nominatim throttles
+    rapid repeat lookups, and a throttled lookup must never silently
+    become a $5 base-fare quote."""
+    import time
+    key = addr.strip().lower()
+    now = time.time()
+    hit = _geocode_cache.get(key)
+    if hit and now - hit[2] < 3600:
+        return hit[0], hit[1]
     try:
         import urllib.request, urllib.parse, json
         url = f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(addr)}&format=json&limit=1"
         rq = urllib.request.Request(url, headers={"User-Agent": "DropApp/1.0"})
         geo = json.loads(urllib.request.urlopen(rq, timeout=10).read())
         if geo:
-            return float(geo[0]["lat"]), float(geo[0]["lon"])
+            lat, lng = float(geo[0]["lat"]), float(geo[0]["lon"])
+            _geocode_cache[key] = (lat, lng, now)
+            return lat, lng
     except Exception:
         pass
     return 0.0, 0.0
@@ -7106,12 +7124,21 @@ def rides_open():
         return True
 
 
-def ride_fare_quote(pickup_addr, dropoff_addr):
-    """Shared fare math for quotes and requests. Returns dict with full breakdown."""
+def ride_fare_quote(pickup_addr, dropoff_addr, plat=None, plng=None, dlat=None, dlng=None):
+    """Shared fare math for quotes and requests. Returns dict with full breakdown.
+    Raises ValueError if an address can't be mapped — a ride must NEVER be
+    quoted a base fare on a failed lookup."""
     import math
-    plat, plng = _geocode(pickup_addr)
-    dlat, dlng = _geocode(dropoff_addr)
+    if plat is None:
+        plat, plng = _geocode(pickup_addr)
+    if dlat is None:
+        dlat, dlng = _geocode(dropoff_addr)
+    if not all([plat, plng, dlat, dlng]):
+        raise ValueError("Couldn't map one of those addresses — check the spelling and try again.")
     miles = driving_miles(plat, plng, dlat, dlng)
+    if not miles:
+        raise ValueError("Couldn't calculate the driving distance — try again in a moment.")
+    max_miles = float(get_setting("ride_max_miles") or 150)
     base = float(get_setting("ride_base_fare") or 4.99)
     per_mile = float(get_setting("ride_per_mile") or 2.00)
     mileage_charge = round(miles * per_mile, 2)
@@ -7130,21 +7157,37 @@ def ride_fare_quote(pickup_addr, dropoff_addr):
         min_p = 1.00
     ai_note = ("✅ Good fare — healthy margin." if profit >= min_p
                else f"⚠️ Thin margin (${profit:.2f}). Consider a higher per-mile rate.")
+    too_far = miles > max_miles
     return {"miles": round(miles, 1), "base_fare": base, "per_mile": per_mile,
             "mileage_charge": mileage_charge, "fare": fare,
             "gas_pct": gas_pct, "gas_fee": gas_fee,
             "total": round(fare + gas_fee, 2),
             "driver_pay_est": driver_pay, "company_profit_est": profit,
-            "ai_note": ai_note, "geocoded": bool(miles),
+            "ai_note": ai_note, "geocoded": True,
+            "too_far": too_far, "max_miles": max_miles,
             "plat": plat, "plng": plng, "dlat": dlat, "dlng": dlng}
 
 
 @app.get("/api/rides/quote")
-def rides_quote(pickup_address: str = "", dropoff_address: str = ""):
-    """Public fare calculator: distance + base + gas + AI profit note."""
-    if not pickup_address.strip() or not dropoff_address.strip():
-        raise HTTPException(400, "Pickup and dropoff addresses are required")
-    q = ride_fare_quote(pickup_address.strip()[:200], dropoff_address.strip()[:200])
+def rides_quote(pickup_address: str = "", dropoff_address: str = "",
+                plat: float = None, plng: float = None,
+                dlat: float = None, dlng: float = None):
+    """Public fare calculator: distance + base + gas + AI profit note.
+    Accepts raw GPS coords (from 'use my location') to skip geocoding."""
+    def _f(v):
+        try:
+            return float(v) if v not in (None, "") else None
+        except (TypeError, ValueError):
+            return None
+    plat, plng, dlat, dlng = _f(plat), _f(plng), _f(dlat), _f(dlng)
+    has_coords = all(v is not None for v in (plat, plng, dlat, dlng))
+    if not has_coords and (not pickup_address.strip() or not dropoff_address.strip()):
+        raise HTTPException(400, "Pickup and dropoff are required")
+    try:
+        q = ride_fare_quote(pickup_address.strip()[:200], dropoff_address.strip()[:200],
+                            plat=plat, plng=plng, dlat=dlat, dlng=dlng)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     q["rides_open"] = rides_open()
     return q
 
@@ -7164,9 +7207,25 @@ async def rides_request(req: Request):
         tip = round(max(0.0, min(100.0, float(body.get("tip", 0)))), 2)
     except (TypeError, ValueError):
         tip = 0.0
-    if not pickup_addr or not dropoff_addr or not name:
-        raise HTTPException(400, "Pickup, dropoff, and your name are required")
-    q = ride_fare_quote(pickup_addr, dropoff_addr)
+    def _g(v):
+        try:
+            return float(v) if v not in (None, "") else None
+        except (TypeError, ValueError):
+            return None
+    plat = _g(body.get("pickup_lat")); plng = _g(body.get("pickup_lng"))
+    dlat = _g(body.get("dropoff_lat")); dlng = _g(body.get("dropoff_lng"))
+    has_coords = all(v is not None for v in (plat, plng, dlat, dlng))
+    if not has_coords and (not pickup_addr or not dropoff_addr):
+        raise HTTPException(400, "Pickup and dropoff are required")
+    if not name:
+        raise HTTPException(400, "Your name is required")
+    try:
+        q = ride_fare_quote(pickup_addr, dropoff_addr, plat=plat, plng=plng, dlat=dlat, dlng=dlng)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if q.get("too_far"):
+        raise HTTPException(400,
+            f"This ride is {q['miles']} miles — beyond our {q['max_miles']}-mile service area.")
     total = round(q["total"] + tip, 2)
     me = get_session_user(req)
     user_id = me["id"] if me else 0

@@ -60,7 +60,8 @@
       <div style="flex:1"><label class="small">Per mile $</label><input id="rmile" inputmode="decimal"></div></div>
       <div class="row" style="margin-top:8px">
       <div style="flex:1"><label class="small">Wait free min</label><input id="rwaitfree" inputmode="numeric"></div>
-      <div style="flex:1"><label class="small">Wait $/min</label><input id="rwaitmin" inputmode="decimal"></div></div>
+      <div style="flex:1"><label class="small">Wait $/min</label><input id="rwaitmin" inputmode="decimal"></div>
+      <div style="flex:1"><label class="small">Max miles</label><input id="rmaxmi" inputmode="numeric"></div></div>
       <button class="btn small" id="rsave" style="margin-top:8px">Save ride pricing</button>
       <p class="small" id="rmsg"></p></div>
   </div>
@@ -614,7 +615,7 @@ async function loadRides(){
   // pricing
   const s=await (await fetch('/api/operator/settings',{headers:H()})).json();
   $('rbase').value=s.ride_base_fare||4.99; $('rmile').value=s.ride_per_mile||2;
-  $('rwaitfree').value=s.ride_wait_free_min||5; $('rwaitmin').value=s.ride_wait_per_min||0.5;
+  $('rwaitfree').value=s.ride_wait_free_min||5; $('rwaitmin').value=s.ride_wait_per_min||0.5; $('rmaxmi').value=s.ride_max_miles||150;
 }
 async function rideDecide(id,action){
   const driverId=action==='accept'?(document.getElementById('rd-'+id)||{}).value||0:0;
@@ -636,7 +637,8 @@ document.addEventListener('click',e=>{
       const body={ride_base_fare:parseFloat($('rbase').value)||4.99,
         ride_per_mile:parseFloat($('rmile').value)||2,
         ride_wait_free_min:parseInt($('rwaitfree').value)||5,
-        ride_wait_per_min:parseFloat($('rwaitmin').value)||0.5};
+        ride_wait_per_min:parseFloat($('rwaitmin').value)||0.5,
+        ride_max_miles:parseFloat($('rmaxmi').value)||150};
       const r=await fetch('/api/operator/settings',{method:'PUT',
         headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify(body)});
       $('rmsg').textContent=r.ok?'Saved ✓':'Error saving';
