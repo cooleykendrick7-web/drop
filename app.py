@@ -4996,6 +4996,11 @@ def pickuppage():
         return f.read()
 
 
+@app.get("/watch.html", response_class=HTMLResponse)
+def watchpage():
+    with open(os.path.join(BASE, "static", "watch.html")) as f:
+        return f.read()
+
 @app.post("/api/pickup/request")
 async def pickup_request(req: Request):
     """Customer already ordered food, Drop just picks it up and delivers. Works anywhere."""
