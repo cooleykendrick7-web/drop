@@ -966,7 +966,7 @@ async function loadDriverMap(){
   if(!driverMap){
     driverMap=L.map('drivermap').setView([46.8083,-100.7837],12);
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,
-      {attribution:'©OpenStreetMap ©CARTO',maxZoom:19}).addTo(driverMap);
+      attribution:'© OpenStreetMap'}).addTo(driverMap);
   }
   // clear old markers
   Object.values(driverMarkers).forEach(m=>driverMap.removeLayer(m));
