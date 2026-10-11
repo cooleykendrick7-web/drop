@@ -48,10 +48,19 @@ async function load(){
         <span class="small">${new Date(o.created_at).toLocaleDateString()} · ${o.status.replace(/_/g,' ')}</span>
       </a>`).join('')||'<p class="small">No orders yet — <a href="/">fix that 🧡</a></p>'}</div>
     <button class="btn ghost" id="logout" style="margin-top:14px">Log out</button>
+    <button class="btn small" id="delacct" style="background:#e74c3c;margin-top:8px">🗑️ Delete my account</button>
     <h2 style="margin-top:20px">💳 Saved cards</h2>
     <div id="cards"></div>`;
   loadCards();
   $('logout').onclick=async()=>{await fetch('/api/auth/logout',{method:'POST'});location.href='/';};
+  $('delacct').onclick=async()=>{
+    if(!confirm('⚠️ Delete your account? This removes your profile and saved cards.')) return;
+    if(!confirm('Really delete? This cannot be undone.')) return;
+    const phone = localStorage.getItem('drop_phone')||'';
+    const r=await(await fetch(`/api/user/account?phone=${encodeURIComponent(phone)}`,{method:'DELETE'})).json();
+    if(r.ok){ alert('Account deleted.'); localStorage.removeItem('drop_phone'); location.href='/'; }
+    else alert('Failed.');
+  };
 }
 async function loadCards(){
   const phone = localStorage.getItem('drop_phone')||'';

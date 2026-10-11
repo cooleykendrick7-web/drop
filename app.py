@@ -1398,6 +1398,140 @@ def op_driver_monitor(x_pin: str = Header(default="")):
     return [dict(r) for r in rows]
 
 
+    return [dict(r) for r in rows]
+
+
+@app.post("/api/drivers/ntfy-test")
+async def driver_ntfy_test(req: Request):
+    """Send a test push notification."""
+    body = await req.json()
+    topic = (body.get("topic") or "").strip()
+    if not topic:
+        raise HTTPException(400, "Topic required")
+    try:
+        import urllib.request, urllib.parse
+        msg = "🔔 Test from Drop Driver Hub! If you see this, push notifications are working."
+        r2 = urllib.request.Request(
+            f"https://ntfy.sh/{urllib.parse.quote(topic)}",
+            data=msg.encode(), headers={"Title": "Drop test"}, method="POST")
+        urllib.request.urlopen(r2, timeout=10).read()
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:100]}
+
+
+@app.post("/api/drivers/ntfy")
+async def driver_ntfy_save(req: Request):
+    body = await req.json()
+    topic = (body.get("topic") or "").strip()[:100]
+    driver_id = int(body.get("driver_id") or 0)
+    if driver_id:
+        conn = db()
+        conn.execute("UPDATE drivers SET ntfy_topic=? WHERE id=?", (topic, driver_id))
+        conn.commit()
+        conn.close()
+    return {"ok": True}
+
+
+@app.delete("/api/drivers/account")
+async def driver_delete_account(req: Request):
+    """Driver deletes their own account."""
+    body = await req.json()
+    driver_id = int(body.get("driver_id") or 0)
+    pin = (body.get("pin") or "").strip()
+    if not driver_id or not pin:
+        raise HTTPException(400, "driver_id and PIN required")
+    conn = db()
+    d = conn.execute("SELECT * FROM drivers WHERE id=? AND login_pin=?",
+                     (driver_id, pin)).fetchone()
+    if not d:
+        conn.close()
+        raise HTTPException(401, "Invalid credentials")
+    # Soft delete: mark as deleted, keep record for audit
+    conn.execute("UPDATE drivers SET status='deleted', login_pin='' WHERE id=?", (driver_id,))
+    conn.commit()
+    conn.close()
+    audit("driver", "account_deleted", "driver", driver_id, d["name"])
+    return {"ok": True}
+
+
+@app.delete("/api/user/account")
+async def user_delete_account(phone: str = ""):
+    """Customer deletes their own account."""
+    if not phone:
+        raise HTTPException(400, "Phone required")
+    conn = db()
+    conn.execute("DELETE FROM user_profiles WHERE phone=?", (phone,))
+    conn.execute("DELETE FROM saved_cards WHERE phone=?", (phone,))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.post("/api/drivers/orders/{oid}/deny")
+async def driver_deny_order(oid: int, req: Request):
+    """Driver declines an assigned order."""
+    body = await req.json()
+    driver_id = int(body.get("driver_id") or 0)
+    reason = (body.get("reason") or "").strip()[:200]
+    conn = db()
+    # Verify this driver has the order
+    o = conn.execute("SELECT * FROM orders WHERE id=? AND driver_id=?",
+                     (oid, driver_id)).fetchone()
+    if not o:
+        conn.close()
+        raise HTTPException(404, "Order not found or not assigned to you")
+    # Release the order back to unassigned
+    conn.execute("UPDATE orders SET driver_id=0, status='new' WHERE id=?", (oid,))
+    conn.commit()
+    conn.close()
+    log_event("order", f"❌ Driver #{driver_id} declined order #{oid}", reason)
+    return {"ok": True}
+
+
+@app.post("/api/drivers/orders/{oid}/pass")
+async def driver_pass_order(oid: int, req: Request):
+    """Driver passes order to another nearby driver."""
+    import math
+    body = await req.json()
+    driver_id = int(body.get("driver_id") or 0)
+    conn = db()
+    o = conn.execute("SELECT * FROM orders WHERE id=? AND driver_id=?",
+                     (oid, driver_id)).fetchone()
+    if not o:
+        conn.close()
+        raise HTTPException(404, "Order not found")
+    # Find nearby available drivers (excluding current)
+    plat, plng = o["pickup_lat"] or 0, o["pickup_lng"] or 0
+    drivers = conn.execute(
+        "SELECT id, name, ntfy_topic, lat, lng FROM drivers"
+        " WHERE status='approved' AND id != ? AND lat != 0", (driver_id,)).fetchall()
+    notified = 0
+    for d in drivers:
+        if plat and plng and d["lat"] and d["lng"]:
+            dist = math.hypot(d["lat"] - plat, d["lng"] - plng) * 69
+            if dist <= 15 and d["ntfy_topic"]:
+                try:
+                    import urllib.request, urllib.parse, threading
+                    msg = f"📦 Order #{oid} available near you! Tap to accept in Driver Hub."
+                    r2 = urllib.request.Request(
+                        f"https://ntfy.sh/{urllib.parse.quote(d['ntfy_topic'])}",
+                        data=msg.encode(),
+                        headers={"Title": "Drop: Order available"}, method="POST")
+                    threading.Thread(
+                        target=lambda r=r2: urllib.request.urlopen(r, timeout=5).read(),
+                        daemon=True).start()
+                    notified += 1
+                except Exception:
+                    pass
+    # Release order
+    conn.execute("UPDATE orders SET driver_id=0, status='new' WHERE id=?", (oid,))
+    conn.commit()
+    conn.close()
+    log_event("order", f"🔄 Driver #{driver_id} passed order #{oid}", f"{notified} drivers notified")
+    return {"ok": True, "notified": notified}
+
+
 @app.get("/api/operator/complaints")
 def op_complaints(x_pin: str = Header(default="")):
     """Ken sees all complaints with AI suggestions."""

@@ -38,10 +38,23 @@
   <div class="tab" id="t-msg">
     <div class="card"><h3>📬 Messages</h3><div id="msglist"><p class="small">Loading…</p></div></div>
     <div class="card"><h3>🔔 Push notifications</h3>
-      <p class="small">Enter your ntfy topic to get instant alerts for new deliveries, messages, and safety warnings.</p>
+      <p class="small">Get instant alerts for new deliveries, your login PIN, messages, and safety warnings.</p>
+      <div class="card" style="background:#1a1a2e;margin:10px 0">
+        <h4 style="margin:8px 0">📲 Setup (2 minutes):</h4>
+        <ol class="small" style="text-align:left;padding-left:20px">
+          <li>Download <b>ntfy</b> from App Store (iPhone) or Play Store (Android) — it's free</li>
+          <li>Open ntfy, tap <b>+</b> to subscribe to a topic</li>
+          <li>Enter a secret topic name (e.g. <code>drop-driver-yourname-123</code>) — make it unique!</li>
+          <li>Come back here and enter that same topic name below</li>
+          <li>Tap Save — you'll now get push alerts instantly</li>
+        </ol>
+        <p class="small" style="color:#f39c12">⚠️ Keep your topic secret — anyone with it can send you notifications.</p>
+      </div>
       <div class="row"><input id="ntfy" placeholder="your-secret-topic" style="flex:1;margin-right:6px">
       <button class="btn small" id="ntfysave" style="width:auto">Save</button></div>
-      <p class="small" id="ntfymsg"></p></div>
+      <p class="small" id="ntfymsg"></p>
+      <button class="btn small ghost" id="ntfytest" style="margin-top:8px">🧪 Send test notification</button>
+    </div>
   </div>
 
   <div class="tab" id="t-earn">
@@ -87,7 +100,8 @@
     <div class="card"><h2 style="margin:0" id="mname"></h2>
       <p class="small" id="mstats"></p>
       <p class="small" id="mvehicle"></p>
-      <button class="btn small ghost" id="logout">Log out</button></div>
+      <button class="btn small ghost" id="logout">Log out</button>
+      <button class="btn small" id="deleteacct" style="background:#e74c3c;margin-top:8px">🗑️ Delete my account</button></div>
     <div class="card"><h3>📸 Profile Photos</h3>
       <p class="small">Customers see your selfie and car. AI checks quality, Ken approves.</p>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
@@ -155,8 +169,24 @@ async function uploadPhoto(type){
 $('selfiebtn').onclick=()=>uploadPhoto('selfiefile');
 $('carbtn').onclick=()=>uploadPhoto('carfile');
 $('logout').onclick=async()=>{
-  await fetch('/api/drivers/logout',{method:'POST'});
+  try{ localStorage.removeItem('driver_pin'); }catch(e){}
   location.reload();
+};
+document.getElementById('deleteacct').onclick=async()=>{
+  if(!confirm('⚠️ Delete your driver account? This cannot be undone.')) return;
+  if(!confirm('Really delete? You will lose access to the Driver Hub.')) return;
+  const pin = prompt('Enter your PIN to confirm deletion:');
+  if(!pin) return;
+  const r=await(await fetch('/api/drivers/account',{method:'DELETE',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({driver_id:DID, pin})})).json();
+  if(r.ok){
+    alert('Account deleted. Good luck!');
+    try{ localStorage.removeItem('driver_pin'); }catch(e){}
+    location.reload();
+  }else{
+    alert('Failed. Check your PIN.');
+  }
 };
 
 async function loadOrders(){
@@ -181,8 +211,29 @@ async function loadOrders(){
         ${NEXT[o.status]?`<button class="btn small" onclick="setStatus(${o.id},'${NEXT[o.status]}')">${NEXTLBL[NEXT[o.status]]}</button>`:''}
         ${o.status==='confirmed'?`<button class="btn small" onclick="setStatus(${o.id},'picked_up')">🛍️ Picked up</button>`:''}
       </div>
+      <div style="margin-top:8px;display:flex;gap:8px">
+        <button class="btn small ghost" onclick="denyOrder(${o.id})" style="flex:1">❌ Decline</button>
+        <button class="btn small ghost" onclick="passOrder(${o.id})" style="flex:1">🔄 Pass to another driver</button>
+      </div>
     </div>`;
   }).join('')||'<p class="small">No deliveries assigned right now. New orders will appear here.</p>');
+}
+async function denyOrder(oid){
+  const reason = prompt('Why are you declining this order? (optional)');
+  if(reason===null) return;
+  const r=await(await fetch(`/api/drivers/orders/${oid}/deny`,{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({driver_id:DID, reason:reason||''})})).json();
+  if(r.ok){ alert('Order declined.'); loadOrders(); }
+  else alert('Failed.');
+}
+async function passOrder(oid){
+  if(!confirm('Pass this order to another nearby driver? They will be notified.')) return;
+  const r=await(await fetch(`/api/drivers/orders/${oid}/pass`,{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({driver_id:DID})})).json();
+  if(r.ok){ alert(`Order passed! ${r.notified} nearby drivers notified.`); loadOrders(); }
+  else alert('Failed.');
 }
 async function setStatus(id,s){
   await fetch('/api/drivers/orders/'+id+'/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:s})});
@@ -235,8 +286,15 @@ async function loadMsgs(){
 $('ntfysave').onclick=async()=>{
   const t=$('ntfy').value.trim();
   await fetch('/api/drivers/ntfy',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({topic:t})});
+    body:JSON.stringify({topic:t, driver_id:DID})});
   $('ntfymsg').textContent=t?'✅ Saved! You\'ll get push alerts.':'Cleared.';
+};
+document.getElementById('ntfytest').onclick=async()=>{
+  const t=$('ntfy').value.trim();
+  if(!t){$('ntfymsg').textContent='Enter your topic first.';return;}
+  const r=await(await fetch('/api/drivers/ntfy-test',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({topic:t})})).json();
+  $('ntfymsg').textContent=r.ok?'✅ Test sent! Check your ntfy app.':'❌ Failed. Check your topic name.';
 };
 
 // GPS sharing
