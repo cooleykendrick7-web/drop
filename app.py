@@ -1901,6 +1901,16 @@ def op_investor_leads(x_pin: str = Header(default="")):
     return out
 
 
+@app.delete("/api/operator/investor-leads/{lid}")
+def op_del_investor_lead(lid: int, x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    conn = db()
+    conn.execute("DELETE FROM investor_leads WHERE id=?", (lid,))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
 @app.post("/api/operator/restaurants")
 async def op_add_restaurant(req: Request, x_pin: str = Header(default="")):
     check_pin(x_pin)
