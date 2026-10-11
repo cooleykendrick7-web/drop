@@ -2753,36 +2753,43 @@ def op_suggestions(x_pin: str = Header(default="")):
     conn = db()
     out = []
 
+    def safe_count(query):
+        try:
+            return conn.execute(query).fetchone()["n"]
+        except Exception:
+            return 0
+
     # 1. Unreviewed partnership applications
-    new_deals = conn.execute(
-        "SELECT COUNT(*) as n FROM business_partners WHERE status='submitted'").fetchone()["n"]
+    new_deals = safe_count("SELECT COUNT(*) as n FROM business_partners WHERE status='submitted'")
     if new_deals:
         out.append({"icon": "🤝", "priority": "high",
                     "text": f"{new_deals} partnership application(s) waiting for review.",
                     "action": "Open the Deals tab and evaluate them."})
 
     # 2. Pending driver applications
-    pend_drv = conn.execute(
-        "SELECT COUNT(*) as n FROM drivers WHERE status='pending'").fetchone()["n"]
+    pend_drv = safe_count("SELECT COUNT(*) as n FROM drivers WHERE status='pending'")
     if pend_drv:
         out.append({"icon": "🚗", "priority": "high",
                     "text": f"{pend_drv} driver application(s) need your approval.",
                     "action": "Check the Drivers tab — nobody drives without your OK."})
 
     # 3. Drivers missing documents
-    bad_docs = conn.execute(
+    bad_docs = safe_count(
         """SELECT COUNT(*) as n FROM drivers WHERE status='approved'
            AND (gov_id_status != 'verified' OR insurance_status != 'verified'
-                OR vehicle_reg_status != 'verified')""").fetchone()["n"]
+                OR vehicle_reg_status != 'verified')""")
     if bad_docs:
         out.append({"icon": "📄", "priority": "medium",
                     "text": f"{bad_docs} active driver(s) have unverified documents.",
                     "action": "Review their profiles and request missing paperwork."})
 
     # 4. Speed warnings
-    speeders = conn.execute(
-        "SELECT name, speed_warnings FROM drivers WHERE speed_warnings > 0"
-        " AND status='approved' ORDER BY speed_warnings DESC LIMIT 3").fetchall()
+    try:
+        speeders = conn.execute(
+            "SELECT name, speed_warnings FROM drivers WHERE speed_warnings > 0"
+            " AND status='approved' ORDER BY speed_warnings DESC LIMIT 3").fetchall()
+    except Exception:
+        speeders = []
     for s in speeders:
         out.append({"icon": "⚠️", "priority": "medium",
                     "text": f"{s['name']} has {s['speed_warnings']} speeding warning(s).",
@@ -2807,25 +2814,26 @@ def op_suggestions(x_pin: str = Header(default="")):
         pass
 
     # 6. Draft outreach emails waiting
-    drafts = conn.execute(
-        "SELECT COUNT(*) as n FROM outreach_emails WHERE status='draft'").fetchone()["n"]
+    drafts = safe_count("SELECT COUNT(*) as n FROM outreach_emails WHERE status='draft'")
     if drafts:
         out.append({"icon": "📧", "priority": "low",
                     "text": f"{drafts} outreach email draft(s) waiting for your approval.",
                     "action": "Review them in the Outreach tab."})
 
     # 7. Open support tickets
-    open_tix = conn.execute(
-        "SELECT COUNT(*) as n FROM tickets WHERE status='open'").fetchone()["n"]
+    open_tix = safe_count("SELECT COUNT(*) as n FROM tickets WHERE status='open'")
     if open_tix:
         out.append({"icon": "💬", "priority": "medium",
                     "text": f"{open_tix} customer message(s) need a reply.",
                     "action": "Open the Support tab."})
 
     # 8. Idle drivers who deserve a boost
-    idle = conn.execute(
-        "SELECT id, name FROM drivers WHERE status='approved' AND deliveries >= 5"
-        " ORDER BY RANDOM() LIMIT 1").fetchone()
+    try:
+        idle = conn.execute(
+            "SELECT id, name FROM drivers WHERE status='approved' AND deliveries >= 5"
+            " ORDER BY RANDOM() LIMIT 1").fetchone()
+    except Exception:
+        idle = None
     if idle and len(out) < 6:
         out.append({"icon": "💪", "priority": "low",
                     "text": f"{idle['name']} has been delivering consistently.",
