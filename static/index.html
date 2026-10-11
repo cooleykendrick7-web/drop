@@ -198,7 +198,7 @@ async function load(){
         const osm = await (await fetch(`/api/osm/restaurants?city=${encodeURIComponent(ccity)}&state=${encodeURIComponent(cstate)}`)).json();
         if(osm.results && osm.results.length>0){
           document.getElementById('count').textContent = osm.results.length + ` real spots in ${ccity}`;
-          document.getElementById('rlist').innerHTML = osm.results.map(p=>`
+          document.getElementById('list').innerHTML = osm.results.map(p=>`
             <div class="card rest">
               <div class="rbody">
                 <div class="emoji">🍽️</div>
@@ -211,7 +211,7 @@ async function load(){
         const gp = await (await fetch(`/api/places/search?city=${encodeURIComponent(ccity)}&state=${encodeURIComponent(cstate)}`)).json();
         if(gp.active && gp.results && gp.results.length>0){
           document.getElementById('count').textContent = gp.results.length + ` real spots in ${ccity} (via Google)`;
-          document.getElementById('rlist').innerHTML = gp.results.map(p=>`
+          document.getElementById('list').innerHTML = gp.results.map(p=>`
             <div class="card rest">
               <div class="rbody">
                 <div class="emoji">🍽️</div>
@@ -224,7 +224,7 @@ async function load(){
       }catch(e){}
       // Fallback: expansion prompt
       document.getElementById('count').textContent = `Drop is coming to ${ccity}!`;
-      document.getElementById('rlist').innerHTML = `
+      document.getElementById('list').innerHTML = `
         <div class="card" style="text-align:center;padding:32px 16px">
           <div style="font-size:3rem">🚀</div>
           <h3>We're not in ${ccity} yet</h3>
