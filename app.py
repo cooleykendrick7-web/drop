@@ -527,6 +527,23 @@ def order_dict(row):
     return d
 
 
+def send_ntfy(topic, title, msg):
+    """Send a push notification to any ntfy topic."""
+    if not topic or not topic.strip():
+        return
+    try:
+        req = urllib.request.Request(
+            f"https://ntfy.sh/{urllib.parse.quote(topic.strip())}",
+            data=msg.encode(),
+            headers={"Title": title, "Tags": "car"},
+            method="POST")
+        threading.Thread(
+            target=lambda: urllib.request.urlopen(req, timeout=10),
+            daemon=True).start()
+    except Exception:
+        pass
+
+
 def notify_ken(order):
     """Best-effort push to Ken's phone via ntfy.sh (free, no signup)."""
     topic = get_setting("ntfy_topic").strip()
@@ -3172,6 +3189,224 @@ def search_city(city: str = "", state: str = ""):
     except Exception as e:
         return {"city": city, "state": state, "source": "error",
                 "restaurants": [], "error": str(e)[:100]}
+
+
+# ---------------- Rides table + full ride flow ----------------
+def init_rides_table():
+    conn = db()
+    conn.execute("""CREATE TABLE IF NOT EXISTS rides (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        rider_name TEXT NOT NULL, rider_phone TEXT NOT NULL,
+        pickup_address TEXT NOT NULL, pickup_lat REAL, pickup_lng REAL,
+        dropoff_address TEXT NOT NULL, dropoff_lat REAL, dropoff_lng REAL,
+        miles REAL DEFAULT 0, fare REAL DEFAULT 0, tip REAL DEFAULT 0,
+        total REAL DEFAULT 0, driver_pay REAL DEFAULT 0,
+        company_profit REAL DEFAULT 0,
+        driver_id INTEGER DEFAULT 0, driver_name TEXT DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'requested',
+        rider_rating INTEGER DEFAULT 0, rider_review TEXT DEFAULT '',
+        stripe_payment_id TEXT DEFAULT '', stripe_status TEXT DEFAULT 'pending',
+        notes TEXT DEFAULT '',
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL)""")
+    conn.commit()
+    conn.close()
+
+init_rides_table()
+
+
+@app.post("/api/rides/request")
+async def rides_request(req: Request):
+    """Book a ride. Returns order_id for checkout."""
+    body = await req.json()
+    pickup = (body.get("pickup_address") or "").strip()
+    dropoff = (body.get("dropoff_address") or "").strip()
+    name = (body.get("customer_name") or "").strip()
+    phone = (body.get("phone") or "").strip()
+    notes = (body.get("notes") or "").strip()
+    tip = float(body.get("tip") or 0)
+
+    if not pickup or not dropoff or not name or not phone:
+        raise HTTPException(400, "Pickup, dropoff, name, and phone required")
+
+    # get fare
+    p_lat = body.get("pickup_lat") or 0
+    p_lng = body.get("pickup_lng") or 0
+    d_lat = body.get("dropoff_lat") or 0
+    d_lng = body.get("dropoff_lng") or 0
+    if not p_lat:
+        p_lat, p_lng = geocode(pickup, {})
+    if not d_lat:
+        d_lat, d_lng = geocode(dropoff, {})
+
+    miles = driving_miles(p_lat, p_lng, d_lat, d_lng) if p_lat and d_lat else 0
+    base_fare = fin_setting("ride_base_fare", 4.99)
+    per_mile = fin_setting("ride_per_mile", 2.00)
+    gas_pct = fin_setting("ride_gas_pct", 10.0)
+    fare = round(base_fare + miles * per_mile, 2)
+    gas_fee = round(fare * gas_pct / 100, 2)
+    total = round(fare + gas_fee + tip, 2)
+    driver_pay = round(fare * 0.70 + tip, 2)  # 70% + full tip
+    company_profit = round(total - driver_pay - gas_fee, 2)
+
+    now = datetime.now(timezone.utc).isoformat()
+    conn = db()
+    cur = conn.execute(
+        """INSERT INTO rides (rider_name, rider_phone, pickup_address, pickup_lat,
+           pickup_lng, dropoff_address, dropoff_lat, dropoff_lng, miles, fare,
+           tip, total, driver_pay, company_profit, notes, created_at, updated_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (name, phone, pickup, p_lat, p_lng, dropoff, d_lat, d_lng,
+         miles, fare, tip, total, driver_pay, company_profit, notes, now, now))
+    rid = cur.lastrowid
+    conn.commit()
+    conn.close()
+
+    log_event("ride", f"🚗 Ride request #{rid}", f"{name}: {pickup} → {dropoff}")
+    return {"ok": True, "order_id": rid, "ride_id": rid, "total": total}
+
+
+@app.get("/api/rides/{ride_id}")
+def get_ride(ride_id: int):
+    """Get ride details (for tracking page)."""
+    conn = db()
+    r = conn.execute("SELECT * FROM rides WHERE id=?", (ride_id,)).fetchone()
+    conn.close()
+    if not r:
+        raise HTTPException(404, "Ride not found")
+    return dict(r)
+
+
+@app.post("/api/rides/{ride_id}/rider-in-car")
+async def rider_in_car(ride_id: int, req: Request):
+    """Rider confirms they're in the vehicle."""
+    conn = db()
+    r = conn.execute("SELECT * FROM rides WHERE id=?", (ride_id,)).fetchone()
+    if not r:
+        conn.close()
+        raise HTTPException(404, "Ride not found")
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute("UPDATE rides SET status='in_progress', updated_at=? WHERE id=?",
+                 (now, ride_id))
+    conn.commit()
+    conn.close()
+    log_event("ride", f"✅ Rider in car — ride #{ride_id}", "")
+    # notify driver via ntfy
+    try:
+        drv = get_driver(r["driver_id"]) if r["driver_id"] else None
+        if drv and drv.get("ntfy_topic"):
+            send_ntfy(drv["ntfy_topic"], "Rider confirmed",
+                      f"Rider is in your car! Head to: {r['dropoff_address']}")
+    except Exception:
+        pass
+    return {"ok": True, "status": "in_progress"}
+
+
+@app.post("/api/rides/{ride_id}/rate")
+async def rate_ride(ride_id: int, req: Request):
+    """Rider rates driver and optionally adds tip."""
+    body = await req.json()
+    rating = int(body.get("rating") or 0)
+    review = (body.get("review") or "").strip()
+    extra_tip = float(body.get("extra_tip") or 0)
+    if rating < 1 or rating > 5:
+        raise HTTPException(400, "Rating must be 1-5")
+    conn = db()
+    r = conn.execute("SELECT * FROM rides WHERE id=?", (ride_id,)).fetchone()
+    if not r:
+        conn.close()
+        raise HTTPException(404, "Ride not found")
+    now = datetime.now(timezone.utc).isoformat()
+    new_tip = r["tip"] + extra_tip
+    new_total = r["total"] + extra_tip
+    new_driver_pay = r["driver_pay"] + extra_tip  # 100% of extra tip to driver
+    conn.execute(
+        "UPDATE rides SET rider_rating=?, rider_review=?, tip=?, total=?,"
+        " driver_pay=?, updated_at=? WHERE id=?",
+        (rating, review, new_tip, new_total, new_driver_pay, now, ride_id))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.post("/api/rides/{ride_id}/complete")
+async def complete_ride(ride_id: int, req: Request, x_pin: str = Header(default="")):
+    """Driver or operator marks ride complete."""
+    check_pin(x_pin)
+    conn = db()
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute("UPDATE rides SET status='completed', updated_at=? WHERE id=?",
+                 (now, ride_id))
+    conn.commit()
+    conn.close()
+    log_event("ride", f"🏁 Ride #{ride_id} completed", "")
+    return {"ok": True}
+
+
+@app.get("/api/rides/driver/{driver_id}")
+def driver_rides(driver_id: int, req: Request):
+    """Driver's ride history with earnings."""
+    # verify driver PIN or operator PIN
+    pin = req.headers.get("x-pin", "")
+    conn = db()
+    drv = conn.execute("SELECT * FROM drivers WHERE id=?", (driver_id,)).fetchone()
+    if not drv:
+        conn.close()
+        raise HTTPException(404, "Driver not found")
+    # allow if PIN matches driver PIN or operator PIN
+    if pin != drv["pin"] and pin != get_setting("pin"):
+        conn.close()
+        raise HTTPException(401, "Bad PIN")
+    rides = conn.execute(
+        "SELECT * FROM rides WHERE driver_id=? ORDER BY id DESC LIMIT 50",
+        (driver_id,)).fetchall()
+    total_earned = sum(r["driver_pay"] for r in rides if r["status"] == "completed")
+    conn.close()
+    return {
+        "rides": [dict(r) for r in rides],
+        "total_earned": round(total_earned, 2),
+        "ride_count": len([r for r in rides if r["status"] == "completed"]),
+    }
+
+
+@app.get("/api/operator/rides")
+def operator_rides(req: Request, x_pin: str = Header(default="")):
+    """All rides for operator dashboard."""
+    check_pin(x_pin)
+    conn = db()
+    rides = conn.execute(
+        "SELECT * FROM rides ORDER BY id DESC LIMIT 100").fetchall()
+    conn.close()
+    return [dict(r) for r in rides]
+
+
+@app.post("/api/operator/rides/{ride_id}/assign")
+async def assign_ride_driver(ride_id: int, req: Request, x_pin: str = Header(default="")):
+    """Assign a driver to a ride."""
+    check_pin(x_pin)
+    body = await req.json()
+    driver_id = body.get("driver_id")
+    conn = db()
+    drv = conn.execute("SELECT * FROM drivers WHERE id=?", (driver_id,)).fetchone()
+    if not drv:
+        conn.close()
+        raise HTTPException(404, "Driver not found")
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        "UPDATE rides SET driver_id=?, driver_name=?, status='assigned', updated_at=?"
+        " WHERE id=?", (driver_id, drv["name"], now, ride_id))
+    conn.commit()
+    r = conn.execute("SELECT * FROM rides WHERE id=?", (ride_id,)).fetchone()
+    conn.close()
+    # notify driver
+    try:
+        if drv.get("ntfy_topic"):
+            send_ntfy(drv["ntfy_topic"], "🚗 New ride assigned!",
+                      f"Pickup: {r['pickup_address']}\nDropoff: {r['dropoff_address']}\n"
+                      f"Fare: ${r['driver_pay']:.2f} for you")
+    except Exception:
+        pass
+    log_event("ride", f"👨‍✈️ Driver {drv['name']} assigned to ride #{ride_id}", "")
+    return {"ok": True}
 
 
 # ---------------- Rides (passenger) quote ----------------
