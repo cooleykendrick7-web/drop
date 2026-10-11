@@ -26,6 +26,8 @@
     <input id="su-phone" inputmode="tel" placeholder="(262) 555-1234">
     <label>Password (6+ characters)</label>
     <input id="su-pw" type="password" placeholder="Pick a password">
+    <label>Referral code (optional)</label>
+    <input id="su-ref" placeholder="Friend's code — you both get $5">
     <button class="btn" id="su-go">Create my Drop account</button>
     <p class="small">Get a virtual Drop Rewards card — every 10th delivery fee is free. 🧡</p>
     <p class="small" id="su-msg"></p>
@@ -41,14 +43,31 @@ async function post(path,body){
 }
 $('li-go').onclick=async()=>{
   const {ok,j}=await post('/api/auth/login',{phone:$('li-phone').value,password:$('li-pw').value});
-  if(ok){try{localStorage.setItem('drop_phone',$('li-phone').value.trim());}catch(e){}location.href='/account.html';}
+  if(ok){location.href='/account.html';}
   else $('li-msg').textContent='Error: '+(j.detail||'login failed');
 };
 $('su-go').onclick=async()=>{
   const {ok,j}=await post('/api/auth/signup',{name:$('su-name').value,phone:$('su-phone').value,password:$('su-pw').value});
-  if(ok){try{localStorage.setItem('drop_phone',$('su-phone').value.trim());}catch(e){}location.href='/account.html';}
+  if(ok){
+    // apply referral code if they have one
+    const ref=$('su-ref').value.trim();
+    if(ref){
+      await fetch('/api/referral/apply',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({code:ref})});
+    }
+    location.href='/account.html';
+  }
   else $('su-msg').textContent='Error: '+(j.detail||'signup failed');
 };
+// pre-fill referral code from ?ref= link
+(function(){
+  const ref=new URLSearchParams(location.search).get('ref');
+  if(ref){
+    $('su-ref').value=ref.toUpperCase();
+    $('tab-signup').click();
+    $('su-msg').textContent='🎉 You got a referral code — you and your friend both get $5!';
+  }
+})();
 // already logged in? go to account
 fetch('/api/auth/me').then(r=>{if(r.ok)location.href='/account.html';}).catch(()=>{});
 </script>

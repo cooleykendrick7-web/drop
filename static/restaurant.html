@@ -7,6 +7,7 @@
 <header class="topbar"><a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg" alt="Drop"><b>Drop</b></a><a class="acct" href="/account.html">👤 Account</a></header>
 <a href="/" class="small">← All restaurants</a>
 <div id="head"></div>
+<div id="reviews-sec"></div>
 <div id="menu"></div>
 <div class="cartbar" id="cartbar" style="display:none">
   <div class="row">
@@ -40,6 +41,7 @@ async function load(){
   document.getElementById('head').innerHTML =
     `${rest.photo?`<div class="hero-photo" style="background-image:url('${rest.photo}')"></div>`:''}
      <h1>${rest.logo?`<img class="rlogo-lg" src="${rest.logo}" alt="">`:rest.emoji} ${rest.name}</h1><p class="sub">${rest.cuisine} · Delivery $${fee.toFixed(2)} · ${rest.open?'Open now':'Closed'}</p>`;
+  loadReviews();
   if(menu.length===0){
     document.getElementById('menu').innerHTML =
       `<div class="card" style="text-align:center;padding:28px 16px">
@@ -84,6 +86,46 @@ document.getElementById('clearcart').onclick=()=>{
   menu.forEach(m=>{const q=document.getElementById('q'+m.id); if(q)q.textContent='0';});
   draw();
 };
+
+// reviews
+async function loadReviews(){
+  const j=await (await fetch('/api/reviews/'+rid)).json();
+  const stars=n=>'★'.repeat(Math.round(n))+'☆'.repeat(5-Math.round(n));
+  document.getElementById('reviews-sec').innerHTML=`
+    <div class="card">
+      <div class="row"><b>⭐ Reviews</b>
+        <span class="small">${j.count?stars(j.avg)+' '+j.avg+' ('+j.count+')':'No reviews yet'}</span></div>
+      <div id="revlist">${j.reviews.map(r=>`
+        <div style="border-top:1px solid #222;padding:8px 0">
+          <b class="small">${'★'.repeat(r.rating)}${'☆'.repeat(5-r.rating)}</b>
+          <span class="small" style="opacity:.7"> · ${(r.name||'Drop customer').replace(/</g,'&lt;')}</span>
+          ${r.text?`<p class="small" style="margin:4px 0">${r.text.replace(/</g,'&lt;')}</p>`:''}
+        </div>`).join('')}</div>
+      <div style="margin-top:10px">
+        <label class="small">Leave a review</label>
+        <div class="row" style="gap:4px;margin:6px 0" id="starpick">
+          ${[1,2,3,4,5].map(n=>`<button class="btn small ghost" data-s="${n}" style="width:auto;font-size:1.3rem">☆</button>`).join('')}
+        </div>
+        <textarea id="revtext" rows="2" placeholder="How was it? (optional)" style="width:100%"></textarea>
+        <button class="btn small" id="revgo" style="margin-top:8px">Post review</button>
+        <p class="small" id="revmsg"></p>
+      </div>
+    </div>`;
+  let picked=0;
+  document.querySelectorAll('#starpick button').forEach(b=>b.onclick=()=>{
+    picked=+b.dataset.s;
+    document.querySelectorAll('#starpick button').forEach(x=>
+      x.textContent=+x.dataset.s<=picked?'★':'☆');
+  });
+  document.getElementById('revgo').onclick=async()=>{
+    if(!picked){document.getElementById('revmsg').textContent='Pick a star rating first.';return;}
+    const r=await fetch('/api/reviews',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({restaurant_id:+rid,rating:picked,text:document.getElementById('revtext').value})});
+    const j2=await r.json();
+    document.getElementById('revmsg').textContent=r.ok?'✅ Thanks for the review!':'Error: '+(j2.detail||'log in first');
+    if(r.ok)loadReviews();
+  };
+}
 load();
 </script>
 <script src="/static/chat.js"></script></body></html>

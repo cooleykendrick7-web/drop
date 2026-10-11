@@ -238,6 +238,51 @@ def init_db():
         driver_appeal TEXT DEFAULT '',
         resolution TEXT DEFAULT '', decided_by TEXT DEFAULT '',
         created_at TEXT NOT NULL, resolved_at TEXT DEFAULT '')""")
+    # Boost features: referrals, scheduled orders, reviews, promo blasts (added 2026-10-11)
+    ocols_b = [r[1] for r in c.execute("PRAGMA table_info(orders)").fetchall()]
+    for _col, _ddl in (("is_gift", "INTEGER DEFAULT 0"),
+                       ("gift_recipient", "TEXT DEFAULT ''"),
+                       ("gift_contact", "TEXT DEFAULT ''"),
+                       ("gift_message", "TEXT DEFAULT ''"),
+                       ("gift_sender", "TEXT DEFAULT ''"),
+                       ("scheduled_for", "TEXT DEFAULT ''"),
+                       ("credit_used", "REAL DEFAULT 0")):
+        if _col not in ocols_b:
+            c.execute(f"ALTER TABLE orders ADD COLUMN {_col} {_ddl}")
+    c.execute("""CREATE TABLE IF NOT EXISTS gift_queue (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id INTEGER NOT NULL,
+        recipient TEXT NOT NULL DEFAULT '',
+        contact TEXT NOT NULL DEFAULT '',
+        message TEXT DEFAULT '',
+        sender TEXT DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'pending',
+        created_at TEXT NOT NULL)""")
+    c.execute("""CREATE TABLE IF NOT EXISTS referrals (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        referrer_id INTEGER NOT NULL,
+        referred_id INTEGER NOT NULL,
+        code TEXT NOT NULL,
+        credit_given INTEGER DEFAULT 0,
+        created_at TEXT NOT NULL)""")
+    ucols_b = [r[1] for r in c.execute("PRAGMA table_info(users)").fetchall()]
+    for _col, _ddl in (("credit", "REAL DEFAULT 0"),
+                       ("referral_code", "TEXT DEFAULT ''"),
+                       ("ntfy_topic", "TEXT DEFAULT ''")):
+        if _col not in ucols_b:
+            c.execute(f"ALTER TABLE users ADD COLUMN {_col} {_ddl}")
+    c.execute("""CREATE TABLE IF NOT EXISTS reviews (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        restaurant_id INTEGER NOT NULL,
+        user_id INTEGER NOT NULL,
+        rating INTEGER NOT NULL,
+        text TEXT DEFAULT '',
+        created_at TEXT NOT NULL)""")
+    c.execute("""CREATE TABLE IF NOT EXISTS blasts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        message TEXT NOT NULL,
+        sent_count INTEGER DEFAULT 0,
+        created_at TEXT NOT NULL)""")
     # Business accounts (Drop More B2B)
     c.execute("""CREATE TABLE IF NOT EXISTS business_accounts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2133,15 +2178,42 @@ async def create_order(req: Request):
             promo_code = pcode.strip().upper()
             conn.execute("UPDATE promo_codes SET uses=uses+1 WHERE code=?", (promo_code,))
     total = round(food_total + fee + tip - discount, 2)
+    # referral/store credit (added 2026-10-11)
+    credit_used = 0.0
+    if me and body.get("use_credit"):
+        credit = conn.execute("SELECT credit FROM users WHERE id=?", (me["id"],)).fetchone()["credit"] or 0
+        credit_used = round(min(credit, total), 2)
+        if credit_used > 0:
+            conn.execute("UPDATE users SET credit=credit-? WHERE id=?", (credit_used, me["id"]))
+            total = round(total - credit_used, 2)
+    # gift order?
+    gift = body.get("gift") or {}
+    is_gift = 1 if gift.get("recipient_name") else 0
+    gift_recipient = (gift.get("recipient_name") or "").strip()[:80]
+    gift_contact = (gift.get("recipient_contact") or "").strip()[:120]
+    gift_message = (gift.get("message") or "").strip()[:500]
     cur = conn.execute(
         """INSERT INTO orders(restaurant_id, items_json, customer_name, phone, address,
                               notes, food_total, delivery_fee, tip, discount, promo_code,
-                              user_id, total, status, stripe_status, created_at, updated_at)
-           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'placed','pending',?,?)""",
+                              user_id, total, status, stripe_status, created_at, updated_at,
+                              is_gift, gift_recipient, gift_contact, gift_message, gift_sender,
+                              credit_used)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'placed','pending',?,?, ?,?,?,?,? ,?)""",
         (rid, json.dumps(priced), name, phone, address, notes,
-         food_total, fee, tip, discount, promo_code, user_id, total, now_iso(), now_iso()))
+         food_total, fee, tip, discount, promo_code, user_id, total, now_iso(), now_iso(),
+         is_gift, gift_recipient, gift_contact, gift_message, name if is_gift else "",
+         credit_used))
     oid = cur.lastrowid
     conn.commit()
+    # queue gift notification (sent by background job from business Gmail)
+    if is_gift and gift_contact:
+        conn.execute(
+            "INSERT INTO gift_queue(order_id, recipient, contact, message, sender, status, created_at)"
+            " VALUES(?,?,?,?,?,'pending',?)",
+            (oid, gift_recipient, gift_contact, gift_message, name, now_iso()))
+        conn.commit()
+        log_event("gift", f"🎁 Gift order #{oid} queued",
+                  f"For {gift_recipient} from {name}")
     # pin the delivery address on the map (background — never slows the order)
     def _geocode_order():
         try:
@@ -2174,6 +2246,19 @@ async def checkout(req: Request):
         raise HTTPException(404, "Order not found")
     if o["stripe_status"] == "paid":
         return {"already_paid": True, "track_url": f"/track.html?id={oid}"}
+    # referral credit applied at order time — no Stripe needed if it covers everything
+    try:
+        _credit_used = o["credit_used"] or 0
+    except Exception:
+        _credit_used = 0
+    if round(o["total"] or 0, 2) <= 0 and _credit_used > 0:
+        conn = db()
+        conn.execute("UPDATE orders SET stripe_status='paid', stripe_payment_id='credit',"
+                     " updated_at=? WHERE id=?", (now_iso(), oid))
+        conn.commit()
+        conn.close()
+        return {"already_paid": True, "track_url": f"/track.html?id={oid}",
+                "note": "Paid with referral credit"}
     if STRIPE_LIVE:
         base = str(req.base_url).rstrip("/")
         line_items = [{
@@ -2353,6 +2438,21 @@ async def op_set_status(oid: int, req: Request, x_pin: str = Header(default=""))
     punch = None
     if status == "delivered" and (o["user_id"] or 0) and new_stripe_status == "paid":
         punch = award_punch(o["user_id"])
+    # customer push notification (added 2026-10-11)
+    try:
+        if o["user_id"]:
+            _msgs = {
+                "confirmed": ("✅ Order confirmed", "The restaurant is making your food!"),
+                "picked_up": ("🛍️ Picked up", "Your driver has your food and is heading your way!"),
+                "on_the_way": ("🚗 On the way!", "Your driver is on the way to you!"),
+                "delivered": ("📦 Delivered!", "Your food was dropped at your door. Enjoy!"),
+                "cancelled": ("❌ Order cancelled", "Your order was cancelled. Refund on the way if you paid."),
+            }
+            if status in _msgs:
+                t, m = _msgs[status]
+                push_to_customer(o["user_id"], t, f"Order #{oid}: {m}")
+    except Exception:
+        pass
     conn.close()
     return {"ok": True, "status": status, "label": STATUS_LABELS[status],
             "refunded": refunded, "rewards": punch}
@@ -3720,6 +3820,19 @@ async def driver_set_status(oid: int, req: Request):
         conn.execute("UPDATE drivers SET deliveries=deliveries+1, on_time=on_time+1 WHERE id=?",
                      (d["id"],))
     conn.commit()
+    # customer push notification (added 2026-10-11)
+    try:
+        if o["user_id"]:
+            _msgs = {
+                "picked_up": ("🛍️ Picked up", "Your driver has your food and is heading your way!"),
+                "on_the_way": ("🚗 On the way!", "Your driver is on the way to you!"),
+                "delivered": ("📦 Delivered!", "Your food was dropped at your door. Enjoy!"),
+            }
+            if status in _msgs:
+                t, m = _msgs[status]
+                push_to_customer(o["user_id"], t, f"Order #{oid}: {m}")
+    except Exception:
+        pass
     conn.close()
     return {"ok": True}
 
@@ -5130,6 +5243,320 @@ def op_outreach_sent(eid: int, x_pin: str = Header(default="")):
     log_event("email", f"📧 Outreach email sent to {e['to_email'][:40]}",
               e["subject"][:80])
     return {"ok": True}
+
+
+# Render redeploy trigger 2026-10-11 00:40 CDT — ensure gift-queue endpoints live
+@app.get("/api/operator/gift-queue")
+def op_gift_queue(x_pin: str = Header(default="")):
+    """Pending gift notifications for the background sender."""
+    check_pin(x_pin)
+    conn = db()
+    rows = conn.execute("SELECT * FROM gift_queue WHERE status='pending' ORDER BY id").fetchall()
+    out = [dict(r) for r in rows]
+    conn.close()
+    return out
+
+
+@app.get("/api/operator/drivers/live")
+def op_drivers_live(x_pin: str = Header(default="")):
+    """Live GPS positions of all drivers for the operator map."""
+    check_pin(x_pin)
+    conn = db()
+    rows = conn.execute(
+        """SELECT d.id, d.name, d.status, d.last_lat as lat, d.last_lng as lng,
+                  d.last_gps_at,
+                  (SELECT COUNT(*) FROM orders o WHERE o.driver_id=d.id
+                   AND o.status IN ('confirmed','picked_up','on_the_way')) as active_orders
+           FROM drivers d WHERE d.status='approved' ORDER BY d.name""").fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        # human-friendly "updated X ago"
+        upd = ""
+        if d["last_gps_at"]:
+            try:
+                from datetime import datetime
+                dt = (datetime.now(timezone.utc) -
+                      datetime.fromisoformat(d["last_gps_at"])).total_seconds()
+                if dt < 90:
+                    upd = "live now"
+                elif dt < 3600:
+                    upd = f"{int(dt/60)}m ago"
+                else:
+                    upd = f"{int(dt/3600)}h ago"
+            except Exception:
+                pass
+        d["updated"] = upd
+        d["status"] = f"{d['active_orders']} active" if d["active_orders"] else "idle"
+        # only show recent positions (last 30 min)
+        if d["last_gps_at"]:
+            try:
+                from datetime import datetime
+                dt = (datetime.now(timezone.utc) -
+                      datetime.fromisoformat(d["last_gps_at"])).total_seconds()
+                if dt > 1800:
+                    d["lat"] = None
+                    d["lng"] = None
+            except Exception:
+                pass
+        out.append(d)
+    conn.close()
+    return out
+
+
+@app.post("/api/operator/gift-queue/{gid}/sent")
+def op_gift_sent(gid: int, x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    conn = db()
+    conn.execute("UPDATE gift_queue SET status='sent' WHERE id=?", (gid,))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+
+# ---------------- Referrals, scheduled orders, reviews, blasts ----------------
+import random as _rand
+import string as _str
+
+
+def get_referral_code(user_id):
+    """Get or create a user's referral code."""
+    conn = db()
+    u = conn.execute("SELECT referral_code FROM users WHERE id=?", (user_id,)).fetchone()
+    code = u["referral_code"] if u else ""
+    if not code:
+        code = "DROP-" + "".join(_rand.choices(_str.ascii_uppercase + _str.digits, k=6))
+        conn.execute("UPDATE users SET referral_code=? WHERE id=?", (code, user_id))
+        conn.commit()
+    conn.close()
+    return code
+
+
+@app.get("/api/referral/code")
+async def referral_code(req: Request):
+    me = get_session_user(req)
+    if not me:
+        raise HTTPException(401, "Log in first")
+    code = get_referral_code(me["id"])
+    conn = db()
+    count = conn.execute("SELECT COUNT(*) as n FROM referrals WHERE referrer_id=?",
+                         (me["id"],)).fetchone()["n"]
+    credit = conn.execute("SELECT credit FROM users WHERE id=?", (me["id"],)).fetchone()["credit"] or 0
+    conn.close()
+    return {"code": code, "referrals": count, "credit": round(credit, 2),
+            "link": f"https://drop-52yj.onrender.com/login.html?ref={code}"}
+
+
+@app.post("/api/referral/apply")
+async def referral_apply(req: Request):
+    """New user applies a referral code at signup. Both get $5 credit."""
+    me = get_session_user(req)
+    if not me:
+        raise HTTPException(401, "Log in first")
+    body = await req.json()
+    code = (body.get("code") or "").strip().upper()
+    if not code:
+        raise HTTPException(400, "Code required")
+    conn = db()
+    # already referred?
+    if conn.execute("SELECT id FROM referrals WHERE referred_id=?", (me["id"],)).fetchone():
+        conn.close()
+        raise HTTPException(400, "You already used a referral code")
+    ref = conn.execute("SELECT id FROM users WHERE referral_code=?", (code,)).fetchone()
+    if not ref or ref["id"] == me["id"]:
+        conn.close()
+        raise HTTPException(400, "Invalid code")
+    conn.execute("INSERT INTO referrals(referrer_id, referred_id, code, credit_given, created_at)"
+                 " VALUES(?,?,?,?,?)", (ref["id"], me["id"], code, 1, now_iso()))
+    conn.execute("UPDATE users SET credit=credit+5 WHERE id=?", (ref["id"],))
+    conn.execute("UPDATE users SET credit=credit+5 WHERE id=?", (me["id"],))
+    conn.commit()
+    conn.close()
+    # notify the referrer
+    try:
+        conn = db()
+        r = conn.execute("SELECT ntfy_topic FROM users WHERE id=?", (ref["id"],)).fetchone()
+        conn.close()
+        if r and r["ntfy_topic"]:
+            import urllib.request, urllib.parse, threading
+            msg = "🎉 Someone used your referral code! $5 credit added to your account."
+            rq = urllib.request.Request(
+                f"https://ntfy.sh/{urllib.parse.quote(r['ntfy_topic'])}",
+                data=msg.encode(), headers={"Title": "Drop referral"}, method="POST")
+            threading.Thread(target=lambda: urllib.request.urlopen(rq, timeout=5).read(),
+                             daemon=True).start()
+    except Exception:
+        pass
+    audit("system", "referral_completed", "user", me["id"], f"code {code}")
+    return {"ok": True, "credit": 5}
+
+
+# ---------------- Scheduled orders ----------------
+@app.post("/api/orders/schedule")
+async def schedule_order(req: Request):
+    """Schedule an order for later — validates the time, then creates as scheduled."""
+    body = await req.json()
+    sched = (body.get("scheduled_for") or "").strip()
+    if not sched:
+        raise HTTPException(400, "Pick a date and time")
+    # validate it's in the future
+    try:
+        from datetime import datetime
+        dt = datetime.fromisoformat(sched.replace("Z", "+00:00"))
+        if dt < datetime.now(dt.tzinfo):
+            raise HTTPException(400, "Pick a future time")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(400, "Invalid date format")
+    # Temporarily stash scheduled_for, create the order, then mark it scheduled.
+    # We do this by inserting directly (mirrors create_order's essential fields).
+    # Simplest reliable path: call create_order with a fresh Request.
+    # Instead, we validate here and let the frontend call /api/orders then
+    # /api/orders/{id}/schedule. This endpoint just validates the time.
+    return {"ok": True, "scheduled_for": sched}
+
+
+@app.post("/api/orders/{oid}/schedule")
+async def mark_scheduled(oid: int, req: Request):
+    """Mark an existing placed order as scheduled for later."""
+    body = await req.json()
+    sched = (body.get("scheduled_for") or "").strip()
+    if not sched:
+        raise HTTPException(400, "Time required")
+    conn = db()
+    conn.execute("UPDATE orders SET scheduled_for=?, status='scheduled' WHERE id=?",
+                 (sched, oid))
+    conn.commit()
+    conn.close()
+    log_event("schedule", f"📅 Order #{oid} scheduled for {sched}", "")
+    return {"ok": True}
+
+
+@app.get("/api/operator/scheduled")
+def op_scheduled(x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    conn = db()
+    rows = conn.execute(
+        "SELECT o.*, r.name as restaurant_name FROM orders o "
+        "LEFT JOIN restaurants r ON r.id=o.restaurant_id "
+        "WHERE o.status='scheduled' ORDER BY o.scheduled_for").fetchall()
+    out = [dict(r) for r in rows]
+    conn.close()
+    return out
+
+
+# ---------------- Reviews ----------------
+@app.post("/api/reviews")
+async def submit_review(req: Request):
+    me = get_session_user(req)
+    if not me:
+        raise HTTPException(401, "Log in to review")
+    body = await req.json()
+    rid = int(body.get("restaurant_id") or 0)
+    rating = int(body.get("rating") or 0)
+    text = (body.get("text") or "").strip()[:500]
+    if not rid or rating < 1 or rating > 5:
+        raise HTTPException(400, "Restaurant and 1-5 star rating required")
+    conn = db()
+    # one review per user per restaurant (update if exists)
+    ex = conn.execute("SELECT id FROM reviews WHERE restaurant_id=? AND user_id=?",
+                      (rid, me["id"])).fetchone()
+    if ex:
+        conn.execute("UPDATE reviews SET rating=?, text=?, created_at=? WHERE id=?",
+                     (rating, text, now_iso(), ex["id"]))
+    else:
+        conn.execute("INSERT INTO reviews(restaurant_id, user_id, rating, text, created_at)"
+                     " VALUES(?,?,?,?,?)", (rid, me["id"], rating, text, now_iso()))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.get("/api/reviews/{rid}")
+def get_reviews(rid: int):
+    conn = db()
+    rows = conn.execute(
+        "SELECT r.rating, r.text, r.created_at, u.name FROM reviews r "
+        "LEFT JOIN users u ON u.id=r.user_id "
+        "WHERE r.restaurant_id=? ORDER BY r.id DESC LIMIT 20", (rid,)).fetchall()
+    avg = conn.execute("SELECT AVG(rating) as a, COUNT(*) as n FROM reviews WHERE restaurant_id=?",
+                       (rid,)).fetchone()
+    conn.close()
+    return {"reviews": [dict(r) for r in rows],
+            "avg": round(avg["a"] or 0, 1), "count": avg["n"] or 0}
+
+
+# ---------------- Customer push notifications ----------------
+@app.post("/api/account/ntfy")
+async def account_ntfy(req: Request):
+    me = get_session_user(req)
+    if not me:
+        raise HTTPException(401, "Log in first")
+    body = await req.json()
+    topic = (body.get("topic") or "").strip()[:80]
+    conn = db()
+    conn.execute("UPDATE users SET ntfy_topic=? WHERE id=?", (topic, me["id"]))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+def push_to_customer(user_id, title, message):
+    """Send ntfy push to a customer."""
+    try:
+        conn = db()
+        u = conn.execute("SELECT ntfy_topic FROM users WHERE id=?", (user_id,)).fetchone()
+        conn.close()
+        if u and u["ntfy_topic"]:
+            import urllib.request, urllib.parse, threading
+            rq = urllib.request.Request(
+                f"https://ntfy.sh/{urllib.parse.quote(u['ntfy_topic'])}",
+                data=message.encode(), headers={"Title": title}, method="POST")
+            threading.Thread(target=lambda: urllib.request.urlopen(rq, timeout=5).read(),
+                             daemon=True).start()
+            return True
+    except Exception:
+        pass
+    return False
+
+
+# ---------------- Promo blast ----------------
+@app.post("/api/operator/blast")
+async def op_blast(req: Request, x_pin: str = Header(default="")):
+    """Ken sends a promo message to all customers with ntfy topics."""
+    check_pin(x_pin)
+    body = await req.json()
+    message = (body.get("message") or "").strip()[:300]
+    if not message:
+        raise HTTPException(400, "Message required")
+    conn = db()
+    users = conn.execute("SELECT id, ntfy_topic FROM users WHERE ntfy_topic != ''").fetchall()
+    conn.close()
+    sent = 0
+    for u in users:
+        if push_to_customer(u["id"], "🧡 Drop deals", message):
+            sent += 1
+    conn = db()
+    conn.execute("INSERT INTO blasts(message, sent_count, created_at) VALUES(?,?,?)",
+                 (message, sent, now_iso()))
+    conn.commit()
+    conn.close()
+    audit("operator", "promo_blast", "blast", 0, f"sent to {sent}: {message[:60]}")
+    log_event("blast", f"📢 Promo blast sent to {sent} customers", message[:80])
+    return {"ok": True, "sent": sent}
+
+
+@app.get("/api/operator/blasts")
+def op_blasts(x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    conn = db()
+    rows = conn.execute("SELECT * FROM blasts ORDER BY id DESC LIMIT 20").fetchall()
+    out = [dict(r) for r in rows]
+    conn.close()
+    return out
+
 
 
 # ---------------- Live activity feed + AI suggestions ----------------

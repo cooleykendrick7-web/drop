@@ -78,13 +78,22 @@ async function load(){
         <div class="row"><b>#${o.id} · ${o.restaurant_name||'Drop'}</b><b>$${o.total.toFixed(2)}</b></div>
         <span class="small">${new Date(o.created_at).toLocaleDateString()} · ${o.status.replace(/_/g,' ')}</span>
       </a>`).join('')||'<p class="small">No orders yet — <a href="/">fix that 🧡</a></p>'}</div>
+    <h2>💸 Referrals — give $5, get $5</h2>
+    <div class="card" id="refcard"><p class="small">Loading…</p></div>
+    <h2>🔔 Push notifications</h2>
+    <div class="card">
+      <p class="small">Get order updates on your phone (confirmed → picked up → on the way → delivered).</p>
+      <div class="row"><input id="ntfy" placeholder="your-secret-topic" style="flex:1;margin-right:6px">
+      <button class="btn small" id="ntfysave" style="width:auto">Save</button></div>
+      <p class="small">1. Install the <b>ntfy</b> app (free) &nbsp;2. Subscribe to a secret topic &nbsp;3. Paste it here</p>
+      <p class="small" id="ntfymsg"></p></div>
     <button class="btn ghost" id="logout" style="margin-top:14px">Log out</button>
     <button class="btn small" id="delacct" style="background:#e74c3c;margin-top:8px">🗑️ Delete my account</button>
     <h2 style="margin-top:20px">💳 Saved cards</h2>
     <div id="cards"></div>`;
-  loadCards();
-  wireDriverCard();
   $('logout').onclick=async()=>{await fetch('/api/auth/logout',{method:'POST'});location.href='/';};
+  wireDriverCard();
+  loadCards();
   $('delacct').onclick=async()=>{
     if(!confirm('⚠️ Delete your account? This removes your profile, login, rewards, and saved cards.')) return;
     if(!confirm('Really delete? This cannot be undone.')) return;
@@ -102,23 +111,51 @@ async function load(){
     }
     else alert('Delete failed: '+(j.detail||'please try again'));
   };
+  loadReferral(); loadNtfy();
 }
 async function loadCards(){
   const phone = localStorage.getItem('drop_phone')||'';
   if(!phone) return;
-  const cards = await(await fetch(`/api/user/cards?phone=${encodeURIComponent(phone)}`)).json();
-  document.getElementById('cards').innerHTML = cards.map(c=>`
-    <div class="card" style="margin:8px 0">
-      <div class="row"><b>💳 •••• ${c.last4}</b><span class="small">${c.brand} ${c.exp_month}/${c.exp_year}</span></div>
-      <button class="btn small ghost" onclick="removeCard(${c.id})">Remove</button>
-    </div>`).join('')||'<p class="small">No saved cards. Cards you use at checkout will appear here.</p>';
+  try{
+    const cards = await(await fetch(`/api/user/cards?phone=${encodeURIComponent(phone)}`)).json();
+    document.getElementById('cards').innerHTML = cards.map(c=>
+      `<div class="card small">💳 •••• ${c.last4} <span class="small">${c.brand||''}</span></div>`).join('')
+      || '<p class="small">No saved cards.</p>';
+  }catch(e){}
 }
-async function removeCard(id){
-  const phone = localStorage.getItem('drop_phone')||'';
-  await fetch(`/api/user/cards/${id}?phone=${encodeURIComponent(phone)}`,{method:'DELETE'});
-  loadCards();
+
+async function loadReferral(){
+  const r=await fetch('/api/referral/code');
+  if(!r.ok)return;
+  const j=await r.json();
+  $('refcard').innerHTML=`
+    <p>Your code: <b style="font-size:1.2rem">${j.code}</b></p>
+    <p class="small">Share this link — friends get <b>$5 off</b> their first order, you get <b>$5 credit</b> when they order.</p>
+    <div class="row"><input id="reflink" readonly value="${j.link}" style="flex:1;margin-right:6px">
+      <button class="btn small" style="width:auto" onclick="navigator.clipboard.writeText('${j.link}');this.textContent='✅ Copied'">Copy</button></div>
+    <p class="small">👥 ${j.referrals} friend${j.referrals===1?'':'s'} joined · 💰 $${j.credit.toFixed(2)} credit</p>
+    ${j.referrals===0?`<div class="row"><input id="refapply" placeholder="Have a friend's code? Enter it" style="flex:1;margin-right:6px">
+      <button class="btn small" id="refgo" style="width:auto">Apply</button></div><p class="small" id="refmsg"></p>`:''}`;
+  const go=$('refgo');
+  if(go)go.onclick=async()=>{
+    const r2=await fetch('/api/referral/apply',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({code:$('refapply').value})});
+    const j2=await r2.json();
+    $('refmsg').textContent=r2.ok?'🎉 $5 credit added!':'Error: '+(j2.detail||'failed');
+    if(r2.ok)loadReferral();
+  };
+}
+async function loadNtfy(){
+  const r=await fetch('/api/auth/me');
+  const j=await r.json();
+  if(j.user.ntfy_topic)$('ntfy').value=j.user.ntfy_topic;
+  $('ntfysave').onclick=async()=>{
+    const t=$('ntfy').value.trim();
+    const r2=await fetch('/api/account/ntfy',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({topic:t})});
+    $('ntfymsg').textContent=r2.ok?'✅ Saved! You\'ll get order updates.':'Failed.';
+  };
 }
 load();
 </script>
-<script src="/static/chat.js"></script><script src="/static/drop-live.js"></script>
-</body></html>
+<script src="/static/chat.js"></script></body></html>
