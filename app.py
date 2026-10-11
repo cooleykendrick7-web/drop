@@ -296,6 +296,32 @@ def init_db():
                        ("stripe_account_id", "TEXT DEFAULT ''")):
         if _col not in dcols:
             c.execute(f"ALTER TABLE drivers ADD COLUMN {_col} {_ddl}")
+    # driver notifications + safety (added 2026-10-11)
+    dcols2 = [r[1] for r in c.execute("PRAGMA table_info(drivers)").fetchall()]
+    for _col, _ddl in (("ntfy_topic", "TEXT DEFAULT ''"),
+                       ("last_lat", "REAL DEFAULT 0"),
+                       ("last_lng", "REAL DEFAULT 0"),
+                       ("last_gps_at", "TEXT DEFAULT ''"),
+                       ("speed_warnings", "INTEGER DEFAULT 0")):
+        if _col not in dcols2:
+            c.execute(f"ALTER TABLE drivers ADD COLUMN {_col} {_ddl}")
+    c.execute("""CREATE TABLE IF NOT EXISTS driver_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        driver_id INTEGER NOT NULL REFERENCES drivers(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL DEFAULT 'boost',
+        title TEXT NOT NULL DEFAULT '',
+        body TEXT NOT NULL DEFAULT '',
+        read INTEGER DEFAULT 0,
+        created_at TEXT NOT NULL)""")
+    # AI outreach emails (added 2026-10-11)
+    c.execute("""CREATE TABLE IF NOT EXISTS outreach_emails (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        to_email TEXT NOT NULL, to_name TEXT DEFAULT '',
+        subject TEXT NOT NULL, body TEXT NOT NULL,
+        business_name TEXT DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'draft',
+        created_at TEXT NOT NULL,
+        sent_at TEXT DEFAULT '')""")
     defaults = {
         "delivery_fee": "3.99",
         "pin": "1234",
@@ -1763,12 +1789,23 @@ def op_list_drivers(x_pin: str = Header(default=""), status: str = ""):
 
 @app.post("/api/operator/drivers/{did}/approve")
 def op_approve_driver(did: int, x_pin: str = Header(default="")):
-    """Ken approves -> driver can log into their portal."""
+    """Ken approves -> driver can log into their portal.
+    BLOCKED without insurance info + safety/policy acknowledgment."""
     check_pin(x_pin)
     conn = db()
+    d = conn.execute("SELECT * FROM drivers WHERE id=?", (did,)).fetchone()
+    if not d:
+        conn.close()
+        raise HTTPException(404, "Driver not found")
+    if not (d["insurance"] or "").strip():
+        conn.close()
+        raise HTTPException(400,
+            "Cannot approve: driver has not provided insurance information. "
+            "Insurance is required — no exceptions.")
     conn.execute("UPDATE drivers SET status='approved' WHERE id=?", (did,))
     conn.commit()
     conn.close()
+    audit("operator", "driver_approved", "driver", did, d["name"])
     return {"ok": True}
 
 
@@ -1894,7 +1931,7 @@ async def driver_set_status(oid: int, req: Request):
 
 @app.post("/api/drivers/location")
 async def driver_location(req: Request):
-    """A dropper's phone posts GPS — updates their assigned orders."""
+    """A dropper's phone posts GPS — updates orders + detects speeding."""
     d = get_driver(req)
     if not d:
         raise HTTPException(401, "Not logged in")
@@ -1904,11 +1941,50 @@ async def driver_location(req: Request):
         lng = float(body.get("lng"))
     except (TypeError, ValueError):
         raise HTTPException(400, "lat/lng required")
+    now = now_iso()
     conn = db()
+    prev = conn.execute("SELECT last_lat, last_lng, last_gps_at FROM drivers WHERE id=?",
+                        (d["id"],)).fetchone()
+    speed_mph = 0
+    if prev and prev["last_lat"] and prev["last_gps_at"]:
+        try:
+            from datetime import datetime
+            dt = (datetime.fromisoformat(now) - datetime.fromisoformat(prev["last_gps_at"])).total_seconds()
+            if dt > 5:
+                dist = haversine_miles(prev["last_lat"], prev["last_lng"], lat, lng)
+                speed_mph = round(dist / (dt / 3600), 1)
+        except Exception:
+            pass
+    conn.execute("UPDATE drivers SET last_lat=?, last_lng=?, last_gps_at=? WHERE id=?",
+                 (lat, lng, now, d["id"]))
     conn.execute("""UPDATE orders SET driver_lat=?, driver_lng=?, driver_updated=?
                     WHERE driver_id=? AND status IN ('confirmed','picked_up','on_the_way')""",
-                 (lat, lng, now_iso(), d["id"]))
+                 (lat, lng, now, d["id"]))
     conn.commit()
+    conn.close()
+    if speed_mph > 80:
+        conn = db()
+        conn.execute("UPDATE drivers SET speed_warnings=speed_warnings+1 WHERE id=?", (d["id"],))
+        conn.commit()
+        conn.close()
+        driver_inbox_add(d["id"], "warning", "⚠️ Slow down",
+            f"Our system clocked you at {speed_mph} mph. Please slow down — "
+            f"safety first. Arriving safely matters more than arriving fast.")
+        audit("system", "speed_warning", "driver", d["id"], f"{speed_mph} mph")
+    # delay detection: on_the_way for too long?
+    conn = db()
+    slow = conn.execute(
+        """SELECT id, updated_at FROM orders WHERE driver_id=? AND status='on_the_way'
+           AND updated_at < datetime('now', '-45 minutes')""", (d["id"],)).fetchall()
+    for s in slow:
+        # only nudge once per order
+        already = conn.execute(
+            "SELECT id FROM driver_messages WHERE driver_id=? AND kind='delay_check'"
+            " AND body LIKE ?", (d["id"], f"%#{s['id']}%")).fetchone()
+        if not already:
+            driver_inbox_add(d["id"], "delay_check", "⏰ Taking a while?",
+                f"Order #{s['id']} has been on the way for a while. "
+                f"Is everything OK? Reply here if you need help — traffic, wrong address, anything.")
     conn.close()
     return {"ok": True}
 
@@ -1938,7 +2014,7 @@ async def op_assign_order(oid: int, req: Request, x_pin: str = Header(default=""
     driver_id = int(body.get("driver_id") or 0)
     conn = db()
     if driver_id:
-        dr = conn.execute("SELECT id FROM drivers WHERE id=? AND status='approved'",
+        dr = conn.execute("SELECT id, name FROM drivers WHERE id=? AND status='approved'",
                           (driver_id,)).fetchone()
         if not dr:
             conn.close()
@@ -1947,6 +2023,13 @@ async def op_assign_order(oid: int, req: Request, x_pin: str = Header(default=""
                  (driver_id, now_iso(), oid))
     conn.commit()
     conn.close()
+    audit("operator", "order_assigned", "order", oid, f"driver {driver_id}")
+    if driver_id:
+        o = db().execute("SELECT * FROM orders WHERE id=?", (oid,)).fetchone()
+        label = o["pickup_name"] if (o["kind"] or "food") == "courier" else "restaurant"
+        driver_inbox_add(driver_id, "info", "📦 New delivery assigned",
+            f"Order #{oid}: pick up from {o['pickup_name'] or label}, deliver to {o['address']}. "
+            f"Open your Dropper portal for details and navigation.")
     return {"ok": True}
 
 
@@ -2426,6 +2509,194 @@ def op_audit(x_pin: str = Header(default=""), limit: int = 100):
     out = [dict(r) for r in rows]
     conn.close()
     return out
+
+
+# ---------------- Driver notifications, safety & motivation ----------------
+def push_to_driver(driver_id, title, message):
+    """Send an ntfy push to a driver's personal topic + save to their inbox."""
+    conn = db()
+    d = conn.execute("SELECT ntfy_topic, name FROM drivers WHERE id=?", (driver_id,)).fetchone()
+    if not d:
+        conn.close()
+        return False
+    topic = (d["ntfy_topic"] or "").strip()
+    conn.close()
+    if topic:
+        try:
+            r = urllib.request.Request(
+                f"https://ntfy.sh/{urllib.parse.quote(topic)}",
+                data=message.encode(), headers={"Title": title}, method="POST")
+            threading.Thread(
+                target=lambda: urllib.request.urlopen(r, timeout=5).read(),
+                daemon=True).start()
+        except Exception:
+            pass
+    return bool(topic)
+
+
+def driver_inbox_add(driver_id, kind, title, body):
+    """Save a message to the driver's in-portal inbox."""
+    conn = db()
+    conn.execute("INSERT INTO driver_messages(driver_id, kind, title, body, created_at)"
+                 " VALUES(?,?,?,?,?)", (driver_id, kind, title, body, now_iso()))
+    conn.commit()
+    conn.close()
+    push_to_driver(driver_id, title, body[:200])
+
+
+@app.post("/api/drivers/ntfy")
+async def driver_set_ntfy(req: Request):
+    """Driver sets their own ntfy topic for push alerts."""
+    d = get_driver(req)
+    if not d:
+        raise HTTPException(401, "Not logged in")
+    body = await req.json()
+    topic = (body.get("topic") or "").strip()[:80]
+    conn = db()
+    conn.execute("UPDATE drivers SET ntfy_topic=? WHERE id=?", (topic, d["id"]))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.get("/api/drivers/messages")
+async def driver_messages(req: Request):
+    """Driver's inbox: boosts, warnings, AI messages."""
+    d = get_driver(req)
+    if not d:
+        raise HTTPException(401, "Not logged in")
+    conn = db()
+    rows = conn.execute("SELECT * FROM driver_messages WHERE driver_id=? ORDER BY id DESC LIMIT 30",
+                        (d["id"],)).fetchall()
+    out = [dict(r) for r in rows]
+    conn.execute("UPDATE driver_messages SET read=1 WHERE driver_id=?", (d["id"],))
+    conn.commit()
+    conn.close()
+    return out
+
+
+@app.post("/api/operator/drivers/{did}/boost")
+async def op_driver_boost(did: int, req: Request, x_pin: str = Header(default="")):
+    """Ken sends a motivational boost to a driver."""
+    check_pin(x_pin)
+    body = await req.json()
+    msg = (body.get("message") or "").strip()[:500]
+    if not msg:
+        # AI-generated encouragement
+        import random
+        options = [
+            "Great work out there! Your on-time deliveries are what makes Drop the best in Bismarck. Keep it up! 🧡",
+            "Thank you for representing Drop so well. Customers notice the difference. You're appreciated! 🙏",
+            "Another great shift! Your reliability keeps businesses coming back. Proud to have you on the team! ⭐",
+            "You're crushing it! Fast, friendly, on-time — that's the Drop way. Thank you! 🚗💨",
+        ]
+        msg = random.choice(options)
+    driver_inbox_add(did, "boost", "💪 Message from Drop", msg)
+    audit("operator", "driver_boost", "driver", did, msg[:80])
+    return {"ok": True, "message": msg}
+
+
+# ---------------- AI outreach emails ----------------
+# Ken approves every email before it sends. Nothing goes out automatically.
+
+@app.post("/api/operator/outreach/draft")
+async def op_outreach_draft(req: Request, x_pin: str = Header(default="")):
+    """AI drafts a partnership outreach email. Ken reviews before sending."""
+    check_pin(x_pin)
+    body = await req.json()
+    to_email = (body.get("to_email") or "").strip()
+    biz_name = (body.get("business_name") or "").strip()
+    biz_type = (body.get("business_type") or "").strip()
+    contact = (body.get("contact_name") or "").strip()
+    if "@" not in to_email or not biz_name:
+        raise HTTPException(400, "Email and business name required")
+    greeting = f"Hi {contact}," if contact else "Hello,"
+    subject = f"Delivery partnership for {biz_name} — from DROP MORE (Bismarck)"
+    email_body = f"""{greeting}
+
+I'm reaching out from DROP MORE, Bismarck's local delivery company. We help businesses like yours with fast, reliable pickups and deliveries — auto parts, retail, supplies, documents, whatever you need moved.
+
+Here's what we offer {biz_name}:
+• Dedicated local drivers (not gig-app roulette)
+• Recurring pickup routes on your schedule
+• Live GPS tracking on every delivery
+• Transparent pricing — you propose the deal, we make the math work
+• $3.99 flat delivery fee for one-offs, custom rates for partners
+
+We're already delivering across Bismarck and looking to partner with great local businesses. Would you be open to a quick 10-minute call next week to explore fit?
+
+You can also apply directly here: https://drop-52yj.onrender.com/partner.html
+
+Looking forward to connecting.
+
+Best,
+The DROP MORE Team
+Bismarck, ND
+wearedropservicesllc@gmail.com | (262) 977-7869"""
+    conn = db()
+    cur = conn.execute(
+        "INSERT INTO outreach_emails(to_email, to_name, subject, body, business_name, status, created_at)"
+        " VALUES(?,?,?,?,?,'draft',?)",
+        (to_email, contact, subject, email_body, biz_name, now_iso()))
+    eid = cur.lastrowid
+    conn.commit()
+    conn.close()
+    audit("operator", "outreach_drafted", "outreach", eid, f"to {biz_name}")
+    return {"ok": True, "id": eid, "subject": subject, "body": email_body}
+
+
+@app.get("/api/operator/outreach")
+def op_outreach_list(x_pin: str = Header(default=""), status: str = ""):
+    check_pin(x_pin)
+    conn = db()
+    if status:
+        rows = conn.execute("SELECT * FROM outreach_emails WHERE status=? ORDER BY id DESC",
+                            (status,)).fetchall()
+    else:
+        rows = conn.execute("SELECT * FROM outreach_emails ORDER BY id DESC").fetchall()
+    out = [dict(r) for r in rows]
+    conn.close()
+    return out
+
+
+@app.post("/api/operator/outreach/{eid}/send")
+async def op_outreach_send(eid: int, req: Request, x_pin: str = Header(default="")):
+    """Ken approved → send the email via Gmail. (Uses the connected Gmail account.)"""
+    check_pin(x_pin)
+    conn = db()
+    e = conn.execute("SELECT * FROM outreach_emails WHERE id=?", (eid,)).fetchone()
+    conn.close()
+    if not e or e["status"] != "draft":
+        raise HTTPException(400, "Email not found or already sent")
+    # Send via Gmail skill CLI
+    import subprocess as sp
+    try:
+        result = sp.run(
+            ["hatch_gmail", "send", "--to", e["to_email"],
+             "--subject", e["subject"], "--body", e["body"]],
+            capture_output=True, text=True, timeout=60)
+        if result.returncode != 0:
+            raise HTTPException(500, f"Gmail send failed: {result.stderr[:200]}")
+    except FileNotFoundError:
+        raise HTTPException(500, "Gmail CLI not available. Connect Gmail first.")
+    conn = db()
+    conn.execute("UPDATE outreach_emails SET status='sent', sent_at=? WHERE id=?",
+                 (now_iso(), eid))
+    conn.commit()
+    conn.close()
+    audit("operator", "outreach_sent", "outreach", eid, f"to {e['to_email']}")
+    return {"ok": True}
+
+
+@app.post("/api/operator/outreach/{eid}/discard")
+def op_outreach_discard(eid: int, x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    conn = db()
+    conn.execute("UPDATE outreach_emails SET status='discarded' WHERE id=?", (eid,))
+    conn.commit()
+    conn.close()
+    audit("operator", "outreach_discarded", "outreach", eid, "")
+    return {"ok": True}
 
 
 # ---------------- Drop Investors ----------------
