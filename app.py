@@ -4654,6 +4654,70 @@ def courierpage():
         return f.read()
 
 
+@app.get("/pickup.html", response_class=HTMLResponse)
+def pickuppage():
+    with open(os.path.join(BASE, "static", "pickup.html")) as f:
+        return f.read()
+
+
+@app.post("/api/pickup/request")
+async def pickup_request(req: Request):
+    """Customer already ordered food, Drop just picks it up and delivers. Works anywhere."""
+    body = await req.json()
+    restaurant = (body.get("restaurant") or "").strip()[:100]
+    pickup_addr = (body.get("pickup_address") or "").strip()[:200]
+    delivery_addr = (body.get("delivery_address") or "").strip()[:200]
+    order_details = (body.get("order_details") or "").strip()[:300]
+    name = (body.get("customer_name") or "").strip()[:80]
+    phone = (body.get("phone") or "").strip()[:30]
+    if not restaurant or not pickup_addr or not delivery_addr or not name:
+        raise HTTPException(400, "Restaurant, both addresses, and your name are required")
+    # Geocode pickup for driver matching
+    lat, lng = 0.0, 0.0
+    try:
+        import urllib.request, urllib.parse, json
+        geo_url = f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(pickup_addr)}&format=json&limit=1"
+        geo_req = urllib.request.Request(geo_url, headers={"User-Agent": "DropApp/1.0"})
+        geo = json.loads(urllib.request.urlopen(geo_req, timeout=10).read())
+        if geo:
+            lat, lng = float(geo[0]["lat"]), float(geo[0]["lon"])
+    except Exception:
+        pass
+    fee = float(get_setting("delivery_fee") or 3.99)
+    conn = db()
+    # Create as a courier-type order (food already paid, just pickup + deliver)
+    cur = conn.execute(
+        """INSERT INTO orders(restaurant_id, items_json, customer_name, phone, address,
+                              notes, food_total, delivery_fee, tip, total, status,
+                              stripe_status, created_at, updated_at, kind,
+                              pickup_name, pickup_address, pickup_lat, pickup_lng)
+           VALUES(0, '[]', ?, ?, ?, ?, 0, ?, 0, ?, 'new', 'pending', ?, ?, 'pickup',
+                   ?, ?, ?, ?)""",
+        (name, phone, delivery_addr,
+         f"Pickup from {restaurant}. {order_details}",
+         fee, fee, now_iso(), now_iso(),
+         restaurant, pickup_addr, lat, lng))
+    oid = cur.lastrowid
+    conn.commit()
+    conn.close()
+    log_event("order", f"🛵 Pickup request #{oid}", f"{restaurant} → {delivery_addr[:40]}")
+    # Notify Ken
+    try:
+        topic = get_setting("ntfy_topic")
+        if topic:
+            import urllib.request, urllib.parse, threading
+            msg = f"🛵 PICKUP #{oid}\n{restaurant}\n→ {delivery_addr[:60]}"
+            r2 = urllib.request.Request(
+                f"https://ntfy.sh/{urllib.parse.quote(topic)}",
+                data=msg.encode(), headers={"Title": "Drop pickup request"}, method="POST")
+            threading.Thread(
+                target=lambda: urllib.request.urlopen(r2, timeout=5).read(),
+                daemon=True).start()
+    except Exception:
+        pass
+    return {"ok": True, "order_id": oid}
+
+
 @app.get("/partner.html", response_class=HTMLResponse)
 def partnerpage():
     with open(os.path.join(BASE, "static", "partner.html")) as f:

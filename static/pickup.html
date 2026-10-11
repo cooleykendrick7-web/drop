@@ -1,0 +1,71 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Drop — Food Pickup</title>
+<link rel="icon" href="/static/logo-mark.jpg">
+<link rel="stylesheet" href="/static/styles.css">
+</head><body>
+<header class="topbar">
+  <a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg" alt="Drop"><b>Drop</b></a>
+  <a class="acct" href="/account.html">👤 Account</a>
+</header>
+
+<div class="card" style="max-width:500px;margin:20px auto">
+  <h2 style="margin-top:0">🛵 Food Pickup</h2>
+  <p class="small">Already ordered? We'll pick it up and bring it to you. Works anywhere.</p>
+
+  <label>Restaurant name</label>
+  <input id="rname" placeholder="e.g. McDonald's">
+
+  <label>Restaurant address</label>
+  <input id="raddr" placeholder="Street address">
+
+  <label>Your delivery address</label>
+  <input id="daddr" placeholder="Where should we bring it?">
+
+  <label>Order details <span class="small">(confirmation #, name on order, etc.)</span></label>
+  <input id="odetail" placeholder="e.g. Order #1234 under Mike">
+
+  <label>Your name</label>
+  <input id="cname" placeholder="Your name">
+
+  <label>Your phone</label>
+  <input id="cphone" placeholder="For driver updates" inputmode="tel">
+
+  <div class="row" style="margin-top:12px">
+    <span><b>Delivery fee</b><br><span class="small" id="fee">$3.99</span></span>
+    <button class="btn" id="go" style="width:auto">Request pickup →</button>
+  </div>
+  <p class="small" id="msg"></p>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+$('go').onclick=async()=>{
+  const body={
+    restaurant:$('rname').value.trim(),
+    pickup_address:$('raddr').value.trim(),
+    delivery_address:$('daddr').value.trim(),
+    order_details:$('odetail').value.trim(),
+    customer_name:$('cname').value.trim(),
+    phone:$('cphone').value.trim(),
+  };
+  if(!body.restaurant||!body.pickup_address||!body.delivery_address||!body.customer_name){
+    $('msg').textContent='Please fill in restaurant, both addresses, and your name.';
+    return;
+  }
+  $('go').disabled=true; $('go').textContent='Sending…';
+  try{
+    const r=await(await fetch('/api/pickup/request',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+    if(r.ok){
+      location.href='/track.html?id='+r.order_id;
+    } else {
+      $('msg').textContent=r.detail||'Failed. Try again.';
+      $('go').disabled=false; $('go').textContent='Request pickup →';
+    }
+  }catch(e){
+    $('msg').textContent='Network error. Try again.';
+    $('go').disabled=false; $('go').textContent='Request pickup →';
+  }
+};
+</script></body></html>
