@@ -6992,7 +6992,7 @@ async def drop_request(req: Request):
     except Exception:
         pass
     # Price: $1.50/mile, min $3.99
-    miles = math.hypot(dlat - plat, dlng - plng) * 69 if all([plat, plng, dlat, dlng]) else 0
+    miles = driving_miles(plat, plng, dlat, dlng)
     fee = round(max(3.99, miles * 1.50), 2) if miles > 0 else (quoted if quoted > 0 else 3.99)
     gas_pct = float(get_setting("gas_pct") or 10)
     gas_fee = round(fee * gas_pct / 100, 2)
@@ -7064,6 +7064,37 @@ def _geocode(addr):
     return 0.0, 0.0
 
 
+_driving_cache = {}
+
+def driving_miles(plat, plng, dlat, dlng):
+    """Real ROAD distance in miles via OSRM routing (not straight-line).
+    Falls back to straight-line x 1.35 circuity factor if routing is unreachable,
+    so fares never undercount. Cached 10 min per coordinate pair."""
+    import math, time
+    if not all([plat, plng, dlat, dlng]):
+        return 0.0
+    key = (round(plat, 4), round(plng, 4), round(dlat, 4), round(dlng, 4))
+    now = time.time()
+    hit = _driving_cache.get(key)
+    if hit and now - hit[1] < 600:
+        return hit[0]
+    miles = 0.0
+    try:
+        import urllib.request, json
+        url = (f"https://router.project-osrm.org/route/v1/driving/"
+               f"{plng},{plat};{dlng},{dlat}?overview=false")
+        rq = urllib.request.Request(url, headers={"User-Agent": "DropApp/1.0"})
+        data = json.loads(urllib.request.urlopen(rq, timeout=8).read())
+        if data.get("routes"):
+            miles = round(data["routes"][0]["distance"] / 1609.34, 1)
+    except Exception:
+        pass
+    if not miles:
+        miles = round(math.hypot(dlat - plat, dlng - plng) * 69 * 1.35, 1)
+    _driving_cache[key] = (miles, now)
+    return miles
+
+
 def rides_open():
     """True once the launch countdown has passed."""
     try:
@@ -7080,7 +7111,7 @@ def ride_fare_quote(pickup_addr, dropoff_addr):
     import math
     plat, plng = _geocode(pickup_addr)
     dlat, dlng = _geocode(dropoff_addr)
-    miles = math.hypot(dlat - plat, dlng - plng) * 69 if all([plat, plng, dlat, dlng]) else 0
+    miles = driving_miles(plat, plng, dlat, dlng)
     base = float(get_setting("ride_base_fare") or 4.99)
     per_mile = float(get_setting("ride_per_mile") or 2.00)
     mileage_charge = round(miles * per_mile, 2)
@@ -7343,6 +7374,23 @@ def op_ride_wait_charge(rid: int, x_pin: str = Header(default="")):
     return {"ok": True, "url": session.url, "amount": wf}
 
 
+@app.get("/api/pickup/quote")
+def pickup_quote(pickup_address: str = "", delivery_address: str = ""):
+    """Server-side exact quote: real road miles + fee + gas. The frontend
+    calls this so the displayed price always matches what the server charges."""
+    if not pickup_address.strip() or not delivery_address.strip():
+        raise HTTPException(400, "Both addresses are required")
+    plat, plng = _geocode(pickup_address.strip()[:200])
+    dlat, dlng = _geocode(delivery_address.strip()[:200])
+    miles = driving_miles(plat, plng, dlat, dlng)
+    base_fee = float(get_setting("delivery_fee") or 3.99)
+    fee = round(max(base_fee, miles * 1.50), 2) if miles > 0 else base_fee
+    gas_pct = float(get_setting("gas_pct") or 10)
+    gas_fee = round(fee * gas_pct / 100, 2)
+    return {"miles": miles, "fee": fee, "gas_pct": gas_pct, "gas_fee": gas_fee,
+            "total": round(fee + gas_fee, 2), "geocoded": bool(miles)}
+
+
 @app.post("/api/pickup/request")
 async def pickup_request(req: Request):
     """Courier model: customer ordered food directly from the restaurant,
@@ -7378,7 +7426,7 @@ async def pickup_request(req: Request):
         pass
     # Fee: base + $1.50/mile (same smart pricing as courier)
     base_fee = float(get_setting("delivery_fee") or 3.99)
-    miles = math.hypot(dlat - plat, dlng - plng) * 69 if all([plat, plng, dlat, dlng]) else 0
+    miles = driving_miles(plat, plng, dlat, dlng)
     fee = round(max(base_fee, miles * 1.50), 2) if miles > 0 else base_fee
     # Gas fund: small % of the delivery fee
     gas_pct = float(get_setting("gas_pct") or 10)

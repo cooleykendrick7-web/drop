@@ -56,12 +56,13 @@ async function geocode(addr){
 $('quote').onclick=async()=>{
   const from=$('from').value.trim(), to=$('to').value.trim();
   if(!from||!to){$('msg').textContent='Enter both addresses first.';return;}
-  $('price').textContent='Calculating…';
-  const f=await geocode(from), t=await geocode(to);
-  if(!f||!t){$('price').textContent='Could not locate addresses.';return;}
-  const miles=Math.hypot(t.lat-f.lat,t.lng-f.lng)*69;
-  quoted=Math.max(3.99, Math.round(miles*1.50*100)/100);
-  $('price').textContent=`$${quoted.toFixed(2)} (${miles.toFixed(1)} mi × $1.50)`;
+  $('price').textContent='Calculating real road distance…';
+  try{
+    const q=await(await fetch(`/api/pickup/quote?pickup_address=${encodeURIComponent(from)}&delivery_address=${encodeURIComponent(to)}`)).json();
+    if(q.detail) throw new Error(q.detail);
+    quoted=q.fee+q.gas_fee;
+    $('price').textContent=`$${quoted.toFixed(2)} (${q.miles} road mi · fee $${q.fee.toFixed(2)} + ⛽ $${q.gas_fee.toFixed(2)})`;
+  }catch(e){$('price').textContent='Quote failed — try again.';}
 };
 
 $('go').onclick=async()=>{

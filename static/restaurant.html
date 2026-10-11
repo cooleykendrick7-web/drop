@@ -90,15 +90,18 @@ $('quote').onclick=async()=>{
   const to=$('daddr').value.trim();
   if(!to){$('msg').textContent='Enter your delivery address first.';return;}
   if(!rest){return;}
-  $('qnote').textContent='Calculating…';
+  $('qnote').textContent='Calculating real road distance…';
   const from=`${rest.address||''} ${rest.city||''} ${rest.state||''}`.trim();
-  const f=await geocode(from), t=await geocode(to);
-  if(!f||!t){$('qnote').textContent='Could not locate addresses — we will still honor a fair price.';quotedFee=3.99;quotedGas=quotedFee*gasPct/100;updateTotals();return;}
-  const miles=Math.hypot(t.lat-f.lat,t.lng-f.lng)*69;
-  quotedFee=Math.max(3.99, Math.round(miles*1.50*100)/100);
-  quotedGas=Math.round(quotedFee*gasPct/100*100)/100;
-  $('qnote').textContent=`${miles.toFixed(1)} miles from ${rest.name} to you.`;
-  updateTotals();
+  try{
+    const q=await(await fetch(`/api/pickup/quote?pickup_address=${encodeURIComponent(from)}&delivery_address=${encodeURIComponent(to)}`)).json();
+    if(q.detail) throw new Error(q.detail);
+    quotedFee=q.fee; quotedGas=q.gas_fee;
+    $('qnote').textContent=`${q.miles} road miles from ${rest.name} to you.`;
+    if(!q.geocoded) $('qnote').textContent+=' (estimate — we will honor a fair price)';
+    updateTotals();
+  }catch(e){
+    $('qnote').textContent='Quote failed — try again.';
+  }
 };
 
 $('go').onclick=async()=>{
