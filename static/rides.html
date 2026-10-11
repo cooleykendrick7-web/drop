@@ -117,11 +117,32 @@ let tip=0, lastQuote=null;
 // GPS coords when the customer taps "use my location" — most accurate distance
 let gps={cFrom:null, bFrom:null};
 
+function locStatus(key, msg, ok){
+  let el=document.getElementById(key==='cFrom'?'c-locmsg':'b-locmsg');
+  if(!el){
+    el=document.createElement('p'); el.className='small';
+    el.id=key==='cFrom'?'c-locmsg':'b-locmsg';
+    document.getElementById(key==='cFrom'?'c-from':'b-from').after(el);
+  }
+  el.textContent=msg; el.style.color=ok?'#4ade80':'#fbbf24';
+}
 async function useMyLocation(inputId, key){
   const btn=document.getElementById(key==='cFrom'?'c-loc':'b-loc');
-  if(!navigator.geolocation){alert('Your browser does not share location. Type the address instead.');return;}
+  locStatus(key,'');
+  if(!navigator.geolocation){
+    locStatus(key,'❌ This browser does not share location. Type the address instead.');
+    return;
+  }
   btn.textContent='…';
+  locStatus(key,'📡 Getting your GPS location…');
+  let done=false;
+  const timer=setTimeout(()=>{
+    if(done)return;
+    btn.textContent='📍';
+    locStatus(key,'❌ Timed out waiting for GPS. Make sure Location Services are ON for your browser (iPhone: Settings → Privacy → Location Services), then tap 📍 again.');
+  },12000);
   navigator.geolocation.getCurrentPosition(async pos=>{
+    done=true; clearTimeout(timer);
     const lat=pos.coords.latitude, lng=pos.coords.longitude;
     gps[key]={lat,lng};
     try{
@@ -129,10 +150,16 @@ async function useMyLocation(inputId, key){
       document.getElementById(inputId).value=r.display_name?r.display_name.split(',').slice(0,3).join(','):`${lat.toFixed(5)}, ${lng.toFixed(5)}`;
     }catch(e){ document.getElementById(inputId).value=`${lat.toFixed(5)}, ${lng.toFixed(5)}`; }
     btn.textContent='✅';
+    locStatus(key,`✅ GPS locked (±${Math.round(pos.coords.accuracy||0)}m) — most accurate fare.`,true);
   }, err=>{
+    done=true; clearTimeout(timer);
     btn.textContent='📍';
-    alert('Could not get your location — check that location access is on, or type the address.');
-  }, {enableHighAccuracy:true, timeout:10000});
+    let why='location request was denied or failed';
+    if(err&&err.code===1) why='permission DENIED — turn it on: iPhone Settings → Privacy & Security → Location Services → (your browser) → Allow';
+    else if(err&&err.code===2) why='position unavailable — are Location Services turned on?';
+    else if(err&&err.code===3) why='timed out — try again outside or near a window';
+    locStatus(key,`❌ GPS ${why}. You can also just type the address.`);
+  }, {enableHighAccuracy:true, timeout:10000, maximumAge:60000});
 }
 document.getElementById('c-loc').onclick=()=>useMyLocation('c-from','cFrom');
 document.getElementById('b-loc').onclick=()=>useMyLocation('b-from','bFrom');

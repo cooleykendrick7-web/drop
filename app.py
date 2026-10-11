@@ -7058,27 +7058,58 @@ def watchpage():
 
 _geocode_cache = {}
 
+def _nominatim(addr):
+    import urllib.request, urllib.parse, json
+    url = f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(addr)}&format=json&limit=1"
+    rq = urllib.request.Request(url, headers={"User-Agent": "DropApp/1.0"})
+    geo = json.loads(urllib.request.urlopen(rq, timeout=10).read())
+    if geo:
+        return float(geo[0]["lat"]), float(geo[0]["lon"])
+    return None
+
+def _photon(addr):
+    """Fallback geocoder (Komoot Photon) — no key, generous limits."""
+    import urllib.request, urllib.parse, json
+    url = f"https://photon.komoot.io/api/?q={urllib.parse.quote(addr)}&limit=1"
+    rq = urllib.request.Request(url, headers={"User-Agent": "DropApp/1.0"})
+    data = json.loads(urllib.request.urlopen(rq, timeout=10).read())
+    feats = data.get("features") or []
+    if feats:
+        lng, lat = feats[0]["geometry"]["coordinates"]
+        return float(lat), float(lng)
+    return None
+
 def _geocode(addr):
-    """Return (lat, lng) or (0.0, 0.0). Cached 1hr — Nominatim throttles
-    rapid repeat lookups, and a throttled lookup must never silently
-    become a $5 base-fare quote."""
-    import time
+    """Return (lat, lng) or (0.0, 0.0). Tries hard before giving up:
+    Nominatim -> Photon fallback -> simplified address retry.
+    Cached 1hr (success) / 5min (failure) so throttling never silently
+    becomes a fake base-fare quote."""
+    import time, re
     key = addr.strip().lower()
     now = time.time()
     hit = _geocode_cache.get(key)
-    if hit and now - hit[2] < 3600:
-        return hit[0], hit[1]
-    try:
-        import urllib.request, urllib.parse, json
-        url = f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(addr)}&format=json&limit=1"
-        rq = urllib.request.Request(url, headers={"User-Agent": "DropApp/1.0"})
-        geo = json.loads(urllib.request.urlopen(rq, timeout=10).read())
-        if geo:
-            lat, lng = float(geo[0]["lat"]), float(geo[0]["lon"])
-            _geocode_cache[key] = (lat, lng, now)
+    if hit:
+        (lat, lng, ts, ok) = hit
+        if ok and now - ts < 3600:
             return lat, lng
-    except Exception:
-        pass
+        if not ok and now - ts < 300:
+            return 0.0, 0.0
+    # address variants: full, then without unit/apt/suite (those confuse geocoders)
+    variants = [addr.strip()]
+    simple = re.sub(r"[,\s]+(apt|apartment|unit|suite|ste|#)\.?\s*[\w-]+", "", addr, flags=re.I).strip(" ,")
+    if simple and simple.lower() != key:
+        variants.append(simple)
+    for v in variants:
+        for fn in (_nominatim, _photon):
+            try:
+                r = fn(v)
+                if r:
+                    _geocode_cache[key] = (r[0], r[1], now, True)
+                    return r
+            except Exception:
+                pass
+            time.sleep(0.3)
+    _geocode_cache[key] = (0.0, 0.0, now, False)
     return 0.0, 0.0
 
 
