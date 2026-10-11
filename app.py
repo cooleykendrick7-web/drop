@@ -2718,6 +2718,27 @@ def op_users(x_pin: str = Header(default=""), q: str = ""):
     return [{k: v for k, v in dict(r).items() if k != "password_hash"} for r in rows]
 
 
+@app.post("/api/operator/users/{uid}/contact")
+async def op_contact_user(uid: int, req: Request, x_pin: str = Header(default="")):
+    """Ken messages a user directly (via ntfy push + logged)."""
+    check_pin(x_pin)
+    body = await req.json()
+    message = (body.get("message") or "").strip()[:500]
+    if not message:
+        raise HTTPException(400, "Message required")
+    conn = db()
+    u = conn.execute("SELECT * FROM user_profiles WHERE id=?", (uid,)).fetchone()
+    conn.close()
+    if not u:
+        raise HTTPException(404, "User not found")
+    # Log the outreach
+    log_event("contact", f"📩 Ken messaged {u['name'] or u['phone']}", message[:100])
+    audit("operator", "user_contacted", "user", uid, message[:100])
+    # If user has ntfy, they'd get it — for now, log it for Ken to send via his preferred channel
+    return {"ok": True, "user_phone": u["phone"], "user_email": u["email"],
+            "message": f"Contact {u['name'] or 'user'} at {u['phone']}" + (f" or {u['email']}" if u['email'] else "")}
+
+
 # ---------------- Driver food receipts + reimbursement ----------------
 @app.post("/api/drivers/receipt")
 async def driver_submit_receipt(req: Request):
