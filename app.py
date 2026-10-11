@@ -1262,6 +1262,13 @@ async def op_edit_restaurant(rid: int, req: Request, x_pin: str = Header(default
         if k in body:
             fields.append(f"{k}=?")
             vals.append(str(body[k]).strip()[:500])
+    for k in ("lat", "lng"):
+        if k in body:
+            try:
+                fields.append(f"{k}=?")
+                vals.append(float(body[k]))
+            except (TypeError, ValueError):
+                pass
     if "address" in body:
         addr = str(body["address"]).strip()[:200]
         fields.append("address=?")
