@@ -234,6 +234,68 @@ def init_db():
                    ("min_profit_per_order", "1.00")):
         if c.execute("SELECT value FROM settings WHERE key=?", (_k,)).fetchone() is None:
             c.execute("INSERT INTO settings(key, value) VALUES(?, ?)", (_k, _v))
+    # DROP MORE marketplace: business partnerships (added 2026-10-11)
+    c.execute("""CREATE TABLE IF NOT EXISTS business_partners (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        legal_name TEXT NOT NULL, dba TEXT DEFAULT '',
+        contact_name TEXT NOT NULL, contact_title TEXT DEFAULT '',
+        email TEXT NOT NULL, phone TEXT DEFAULT '',
+        website TEXT DEFAULT '', address TEXT DEFAULT '',
+        business_type TEXT DEFAULT '', products TEXT DEFAULT '',
+        locations INTEGER DEFAULT 1,
+        est_deliveries TEXT DEFAULT '',
+        service_areas TEXT DEFAULT '',
+        shipment_info TEXT DEFAULT '',
+        proposed_rates TEXT DEFAULT '',
+        payment_terms TEXT DEFAULT '',
+        commission TEXT DEFAULT '',
+        contract_duration TEXT DEFAULT '',
+        start_date TEXT DEFAULT '',
+        requirements TEXT DEFAULT '',
+        comments TEXT DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'submitted',
+        profit_score REAL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL)""")
+    c.execute("""CREATE TABLE IF NOT EXISTS deal_notes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        partner_id INTEGER NOT NULL REFERENCES business_partners(id) ON DELETE CASCADE,
+        author TEXT NOT NULL DEFAULT 'operator',
+        note TEXT NOT NULL,
+        created_at TEXT NOT NULL)""")
+    c.execute("""CREATE TABLE IF NOT EXISTS business_users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        partner_id INTEGER NOT NULL REFERENCES business_partners(id) ON DELETE CASCADE,
+        name TEXT NOT NULL, email TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        created_at TEXT NOT NULL)""")
+    c.execute("""CREATE TABLE IF NOT EXISTS business_sessions (
+        token TEXT PRIMARY KEY,
+        business_user_id INTEGER NOT NULL REFERENCES business_users(id) ON DELETE CASCADE,
+        expires_at TEXT NOT NULL)""")
+    # audit trail: every admin decision, recorded
+    c.execute("""CREATE TABLE IF NOT EXISTS audit_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        actor TEXT NOT NULL DEFAULT 'operator',
+        action TEXT NOT NULL,
+        entity_type TEXT NOT NULL DEFAULT '',
+        entity_id INTEGER DEFAULT 0,
+        details TEXT DEFAULT '',
+        created_at TEXT NOT NULL)""")
+    # driver compliance fields
+    dcols = [r[1] for r in c.execute("PRAGMA table_info(drivers)").fetchall()]
+    for _col, _ddl in (("gov_id_status", "TEXT DEFAULT 'pending'"),
+                       ("insurance_status", "TEXT DEFAULT 'pending'"),
+                       ("vehicle_reg_status", "TEXT DEFAULT 'pending'"),
+                       ("safety_ack", "INTEGER DEFAULT 0"),
+                       ("policy_ack", "INTEGER DEFAULT 0"),
+                       ("photo_url", "TEXT DEFAULT ''"),
+                       ("service_areas", "TEXT DEFAULT ''"),
+                       ("perf_score", "REAL DEFAULT 0"),
+                       ("perf_notes", "TEXT DEFAULT ''"),
+                       ("stripe_account_id", "TEXT DEFAULT ''")):
+        if _col not in dcols:
+            c.execute(f"ALTER TABLE drivers ADD COLUMN {_col} {_ddl}")
     defaults = {
         "delivery_fee": "3.99",
         "pin": "1234",
@@ -2011,6 +2073,361 @@ def driver_connect_link(did: int, x_pin: str = Header(default="")):
     raise HTTPException(501, "Connect onboarding activates after Ken completes setup.")
 
 
+# ---------------- DROP MORE marketplace: partnerships ----------------
+DEAL_STAGES = ["submitted", "under_review", "financial_eval", "negotiation",
+               "contract_review", "approved", "active", "rejected", "withdrawn"]
+DEAL_LABELS = {"submitted": "📥 Submitted", "under_review": "👀 Under Review",
+               "financial_eval": "💰 Financial Evaluation", "negotiation": "🤝 Negotiation",
+               "contract_review": "📝 Contract Review", "approved": "✅ Approved",
+               "active": "🚀 Active Partnership", "rejected": "❌ Rejected",
+               "withdrawn": "↩️ Withdrawn"}
+
+
+def audit(actor, action, entity_type="", entity_id=0, details=""):
+    """Every admin decision gets recorded. Nothing happens in the dark."""
+    try:
+        conn = db()
+        conn.execute("INSERT INTO audit_log(actor, action, entity_type, entity_id, details, created_at)"
+                     " VALUES(?,?,?,?,?,?)",
+                     (actor, action, entity_type, entity_id, details[:1000], now_iso()))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+@app.post("/api/partners/apply")
+async def partner_apply(req: Request):
+    """Public: business partnership application."""
+    body = await req.json()
+    legal = (body.get("legal_name") or "").strip()
+    contact = (body.get("contact_name") or "").strip()
+    email = (body.get("email") or "").strip()
+    if not legal or not contact or "@" not in email:
+        raise HTTPException(400, "Legal name, contact name, and valid email required")
+    conn = db()
+    cur = conn.execute(
+        """INSERT INTO business_partners(
+           legal_name, dba, contact_name, contact_title, email, phone, website, address,
+           business_type, products, locations, est_deliveries, service_areas, shipment_info,
+           proposed_rates, payment_terms, commission, contract_duration, start_date,
+           requirements, comments, status, created_at, updated_at)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'submitted', ?, ?)""",
+        (legal, (body.get("dba") or "").strip()[:120], contact,
+         (body.get("contact_title") or "").strip()[:80], email,
+         (body.get("phone") or "").strip()[:30], (body.get("website") or "").strip()[:300],
+         (body.get("address") or "").strip()[:200], (body.get("business_type") or "").strip()[:80],
+         (body.get("products") or "").strip()[:500],
+         int(body.get("locations") or 1),
+         (body.get("est_deliveries") or "").strip()[:200],
+         (body.get("service_areas") or "").strip()[:300],
+         (body.get("shipment_info") or "").strip()[:500],
+         (body.get("proposed_rates") or "").strip()[:500],
+         (body.get("payment_terms") or "").strip()[:300],
+         (body.get("commission") or "").strip()[:300],
+         (body.get("contract_duration") or "").strip()[:100],
+         (body.get("start_date") or "").strip()[:40],
+         (body.get("requirements") or "").strip()[:1000],
+         (body.get("comments") or "").strip()[:1000],
+         now_iso(), now_iso()))
+    pid = cur.lastrowid
+    conn.commit()
+    conn.close()
+    audit("system", "partner_applied", "business_partner", pid, legal)
+    try:
+        topic = get_setting("ntfy_topic").strip()
+        if topic:
+            msg = f"🤝 NEW PARTNERSHIP APPLICATION #{pid}\n{legal} — {contact}"
+            r2 = urllib.request.Request(
+                f"https://ntfy.sh/{urllib.parse.quote(topic)}",
+                data=msg.encode(), headers={"Title": "Drop partnership"}, method="POST")
+            threading.Thread(
+                target=lambda: urllib.request.urlopen(r2, timeout=5).read(),
+                daemon=True).start()
+    except Exception:
+        pass
+    return {"ok": True, "id": pid}
+
+
+@app.get("/api/operator/partners")
+def op_partners(x_pin: str = Header(default=""), status: str = ""):
+    """Ken's deal pipeline. Filter by stage."""
+    check_pin(x_pin)
+    conn = db()
+    if status:
+        rows = conn.execute("SELECT * FROM business_partners WHERE status=? ORDER BY id DESC",
+                            (status,)).fetchall()
+    else:
+        rows = conn.execute("SELECT * FROM business_partners ORDER BY id DESC").fetchall()
+    out = [dict(r) for r in rows]
+    conn.close()
+    return {"partners": out, "stages": DEAL_LABELS}
+
+
+@app.post("/api/operator/partners/{pid}/stage")
+async def op_partner_stage(pid: int, req: Request, x_pin: str = Header(default="")):
+    """Move a deal through the pipeline. Ken only."""
+    check_pin(x_pin)
+    body = await req.json()
+    stage = body.get("stage")
+    if stage not in DEAL_STAGES:
+        raise HTTPException(400, "Bad stage")
+    conn = db()
+    conn.execute("UPDATE business_partners SET status=?, updated_at=? WHERE id=?",
+                 (stage, now_iso(), pid))
+    conn.commit()
+    conn.close()
+    audit("operator", f"deal_stage->{stage}", "business_partner", pid, "")
+    return {"ok": True}
+
+
+@app.post("/api/operator/partners/{pid}/note")
+async def op_partner_note(pid: int, req: Request, x_pin: str = Header(default="")):
+    """Negotiation history / internal notes."""
+    check_pin(x_pin)
+    body = await req.json()
+    note = (body.get("note") or "").strip()[:2000]
+    if not note:
+        raise HTTPException(400, "Note required")
+    conn = db()
+    conn.execute("INSERT INTO deal_notes(partner_id, author, note, created_at)"
+                 " VALUES(?, 'operator', ?, ?)", (pid, note, now_iso()))
+    conn.commit()
+    conn.close()
+    audit("operator", "deal_note", "business_partner", pid, note[:100])
+    return {"ok": True}
+
+
+@app.get("/api/operator/partners/{pid}/notes")
+def op_partner_notes(pid: int, x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    conn = db()
+    rows = conn.execute("SELECT * FROM deal_notes WHERE partner_id=? ORDER BY id",
+                        (pid,)).fetchall()
+    out = [dict(r) for r in rows]
+    conn.close()
+    return out
+
+
+@app.post("/api/operator/partners/{pid}/evaluate")
+def op_partner_evaluate(pid: int, x_pin: str = Header(default="")):
+    """Profitability review: estimates the deal's value using the pricing engine."""
+    check_pin(x_pin)
+    conn = db()
+    p = conn.execute("SELECT * FROM business_partners WHERE id=?", (pid,)).fetchone()
+    conn.close()
+    if not p:
+        raise HTTPException(404, "Not found")
+    import re
+    txt = (p["est_deliveries"] or "").lower()
+    nums = re.findall(r"[\d,]+", txt)
+    per_month = 0
+    if nums:
+        n = int(nums[0].replace(",", ""))
+        if "day" in txt or "daily" in txt:
+            per_month = n * 30
+        elif "week" in txt:
+            per_month = n * 4.33
+        elif "month" in txt:
+            per_month = n
+        else:
+            per_month = n
+    rate_nums = re.findall(r"\$?([\d.]+)", p["proposed_rates"] or "")
+    rev_per = float(rate_nums[0]) if rate_nums else fin_setting("price_base_fee", 3.99)
+    driver_per = fin_setting("driver_base_pay", 3.00) + fin_setting("driver_per_mile", 1.00) * 3
+    stripe_per = rev_per * 0.029 + 0.30
+    contrib_per = round(rev_per - driver_per - stripe_per, 2)
+    monthly = round(contrib_per * per_month, 2)
+    annual = round(monthly * 12, 2)
+    min_p = fin_setting("min_profit_per_order", 1.00)
+    verdict = "✅ MEETS TARGETS" if contrib_per >= min_p and per_month > 0 else (
+        "⚠️ BELOW TARGETS — renegotiate pricing or decline" if per_month > 0
+        else "❓ NEEDS VOLUME INFO — ask for estimated deliveries")
+    result = {
+        "est_deliveries_month": round(per_month),
+        "revenue_per_delivery": round(rev_per, 2),
+        "driver_cost_per": round(driver_per, 2),
+        "stripe_per": round(stripe_per, 2),
+        "contribution_per_delivery": contrib_per,
+        "est_monthly_profit": monthly,
+        "est_annual_profit": annual,
+        "verdict": verdict,
+    }
+    conn = db()
+    conn.execute("UPDATE business_partners SET profit_score=? WHERE id=?",
+                 (contrib_per, pid))
+    conn.commit()
+    conn.close()
+    audit("operator", "deal_evaluated", "business_partner", pid,
+          f"${contrib_per}/delivery, ${monthly}/mo")
+    return result
+
+
+# ---------------- Business accounts ----------------
+def get_biz_user(req):
+    token = req.cookies.get("drop_biz", "")
+    if not token:
+        return None
+    conn = db()
+    s = conn.execute("SELECT business_user_id FROM business_sessions WHERE token=?",
+                     (token,)).fetchone()
+    if not s:
+        conn.close()
+        return None
+    u = conn.execute("SELECT bu.*, bp.legal_name, bp.status FROM business_users bu "
+                     "JOIN business_partners bp ON bp.id = bu.partner_id "
+                     "WHERE bu.id=?", (s["business_user_id"],)).fetchone()
+    conn.close()
+    return dict(u) if u else None
+
+
+@app.post("/api/biz/register")
+async def biz_register(req: Request):
+    """Business creates a login linked to their partnership application."""
+    body = await req.json()
+    email = (body.get("email") or "").strip().lower()
+    password = body.get("password") or ""
+    partner_id = int(body.get("partner_id") or 0)
+    if "@" not in email or len(password) < 6 or not partner_id:
+        raise HTTPException(400, "Valid email, 6+ char password, and application ID required")
+    conn = db()
+    p = conn.execute("SELECT id, email FROM business_partners WHERE id=?", (partner_id,)).fetchone()
+    if not p or p["email"].lower() != email:
+        conn.close()
+        raise HTTPException(400, "Email must match your partnership application")
+    if conn.execute("SELECT id FROM business_users WHERE email=?", (email,)).fetchone():
+        conn.close()
+        raise HTTPException(400, "An account with this email already exists")
+    cur = conn.execute(
+        "INSERT INTO business_users(partner_id, name, email, password_hash, created_at)"
+        " VALUES(?,?,?, ?,?)",
+        (partner_id, (body.get("name") or p["email"]).strip()[:80], email,
+         hash_pw(password), now_iso()))
+    uid = cur.lastrowid
+    conn.commit()
+    conn.close()
+    audit("system", "biz_registered", "business_partner", partner_id, email)
+    return {"ok": True, "id": uid}
+
+
+@app.post("/api/biz/login")
+async def biz_login(req: Request):
+    body = await req.json()
+    email = (body.get("email") or "").strip().lower()
+    password = body.get("password") or ""
+    conn = db()
+    u = conn.execute("SELECT * FROM business_users WHERE email=?", (email,)).fetchone()
+    conn.close()
+    if not u or not check_pw(password, u["password_hash"]):
+        raise HTTPException(401, "Wrong email or password")
+    token = secrets.token_urlsafe(32)
+    exp = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+    conn = db()
+    conn.execute("INSERT INTO business_sessions(token, business_user_id, expires_at)"
+                 " VALUES(?,?,?)", (token, u["id"], exp))
+    conn.commit()
+    conn.close()
+    resp = JSONResponse({"ok": True})
+    resp.set_cookie("drop_biz", token, max_age=30*86400, httponly=True, samesite="lax")
+    return resp
+
+
+@app.get("/api/biz/me")
+async def biz_me(req: Request):
+    u = get_biz_user(req)
+    if not u:
+        raise HTTPException(401, "Not logged in")
+    u.pop("password_hash", None)
+    conn = db()
+    notes = conn.execute(
+        "SELECT note, created_at FROM deal_notes WHERE partner_id=? AND author='operator'"
+        " ORDER BY id DESC LIMIT 5", (u["partner_id"],)).fetchall()
+    conn.close()
+    u["recent_notes"] = [dict(n) for n in notes]
+    u["stage_label"] = DEAL_LABELS.get(u["status"], u["status"])
+    return u
+
+
+# ---------------- AI driver performance ----------------
+@app.get("/api/operator/drivers/{did}/performance")
+def driver_performance(did: int, x_pin: str = Header(default="")):
+    """AI-assisted driver evaluation from real delivery data.
+    Suggests a rating + evidence. Ken reviews and decides — never auto-punishes."""
+    check_pin(x_pin)
+    conn = db()
+    d = conn.execute("SELECT * FROM drivers WHERE id=?", (did,)).fetchone()
+    if not d:
+        conn.close()
+        raise HTTPException(404, "Driver not found")
+    total = d["deliveries"] or 0
+    on_time = d["on_time"] or 0
+    rate = round(100 * on_time / total, 1) if total else 100.0
+    conn.close()
+    d = dict(d)
+    score = 50
+    evidence = []
+    if total >= 10:
+        score += 15
+        evidence.append(f"{total} deliveries completed — experienced")
+    elif total >= 3:
+        score += 8
+        evidence.append(f"{total} deliveries completed")
+    elif total == 0:
+        evidence.append("No deliveries yet — too early to judge")
+    if rate >= 95:
+        score += 25
+        evidence.append(f"{rate}% on-time — excellent reliability")
+    elif rate >= 85:
+        score += 15
+        evidence.append(f"{rate}% on-time — good")
+    elif rate >= 70:
+        score += 5
+        evidence.append(f"{rate}% on-time — needs improvement")
+    else:
+        score -= 10
+        evidence.append(f"{rate}% on-time — below standard")
+    docs_ok = sum(1 for k in ("gov_id_status", "insurance_status", "vehicle_reg_status")
+                  if d.get(k) == "verified")
+    if docs_ok == 3:
+        score += 10
+        evidence.append("All documents verified ✅")
+    else:
+        evidence.append(f"Documents: {docs_ok}/3 verified")
+        if docs_ok < 2:
+            score -= 5
+    score = max(0, min(100, score))
+    if score >= 85:
+        rating, rec = "⭐ Excellent", "Keep them busy — prioritize for high-value orders."
+    elif score >= 70:
+        rating, rec = "✅ Good", "Solid driver. No action needed."
+    elif score >= 50:
+        rating, rec = "⚠️ Fair", "Watch closely. Offer coaching on weak areas."
+    else:
+        rating, rec = "🔴 Needs attention", "Review with driver before assigning more orders."
+    audit("operator", "perf_reviewed", "driver", did, f"score {score}")
+    return {
+        "driver_id": did, "name": d["name"],
+        "score": score, "rating": rating, "recommendation": rec,
+        "evidence": evidence,
+        "metrics": {"deliveries": total, "on_time_rate": rate,
+                    "docs_verified": f"{docs_ok}/3"},
+        "disclaimer": ("AI suggestion from verified delivery data only. "
+                       "Review the evidence, adjust as needed — you make the final call."),
+    }
+
+
+@app.get("/api/operator/audit")
+def op_audit(x_pin: str = Header(default=""), limit: int = 100):
+    """Audit trail: every admin action, newest first."""
+    check_pin(x_pin)
+    conn = db()
+    rows = conn.execute("SELECT * FROM audit_log ORDER BY id DESC LIMIT ?",
+                        (min(limit, 500),)).fetchall()
+    out = [dict(r) for r in rows]
+    conn.close()
+    return out
+
+
 # ---------------- Drop Investors ----------------
 @app.get("/api/quote")
 def get_quote(pickup_lat: float = 0, pickup_lng: float = 0,
@@ -2434,6 +2851,18 @@ def home():
 @app.get("/courier.html", response_class=HTMLResponse)
 def courierpage():
     with open(os.path.join(BASE, "static", "courier.html")) as f:
+        return f.read()
+
+
+@app.get("/partner.html", response_class=HTMLResponse)
+def partnerpage():
+    with open(os.path.join(BASE, "static", "partner.html")) as f:
+        return f.read()
+
+
+@app.get("/business.html", response_class=HTMLResponse)
+def businesspage():
+    with open(os.path.join(BASE, "static", "business.html")) as f:
         return f.read()
 
 
