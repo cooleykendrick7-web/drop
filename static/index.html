@@ -115,8 +115,94 @@ async function load(){
   // Search box
   const si = document.getElementById('search');
   if(si){
-    si.addEventListener('input', ()=> renderRestaurants(si.value.trim().toLowerCase()));
+    si.addEventListener('input', ()=> handleSearch(si.value.trim()));
   }
+}
+/* Never-empty search: if our DB has nothing, pull REAL live spots from
+   OpenStreetMap so there's always something to tap. */
+const STATES={AL:'Alabama',AK:'Alaska',AZ:'Arizona',AR:'Arkansas',CA:'California',CO:'Colorado',CT:'Connecticut',DE:'Delaware',DC:'District of Columbia',FL:'Florida',GA:'Georgia',HI:'Hawaii',ID:'Idaho',IL:'Illinois',IN:'Indiana',IA:'Iowa',KS:'Kansas',KY:'Kentucky',LA:'Louisiana',ME:'Maine',MD:'Maryland',MA:'Massachusetts',MI:'Michigan',MN:'Minnesota',MS:'Mississippi',MO:'Missouri',MT:'Montana',NE:'Nebraska',NV:'Nevada',NH:'New Hampshire',NJ:'New Jersey',NM:'New Mexico',NY:'New York',NC:'North Carolina',ND:'North Dakota',OH:'Ohio',OK:'Oklahoma',OR:'Oregon',PA:'Pennsylvania',RI:'Rhode Island',SC:'South Carolina',SD:'South Dakota',TN:'Tennessee',TX:'Texas',UT:'Utah',VT:'Vermont',VA:'Virginia',WA:'Washington',WV:'West Virginia',WI:'Wisconsin',WY:'Wyoming'};
+function parsePlace(q){
+  let city=null, st=null;
+  const title=s=>s.replace(/\w\S*/g,w=>w.charAt(0).toUpperCase()+w.slice(1).toLowerCase());
+  const cm = q.match(/^(.*?),\s*([a-zA-Z .]+)$/);
+  if(cm){ city=title(cm[1].trim()); st=cm[2].trim(); }
+  else{
+    const words=q.trim().split(/\s+/);
+    if(words.length<2) return null;
+    const title=s=>s.replace(/\w\S*/g,w=>w.charAt(0).toUpperCase()+w.slice(1).toLowerCase());
+    // try two-word state name first ("New York", "North Carolina"…), then one word
+    const two=words.slice(-2).join(' ').toLowerCase();
+    let found=null;
+    for(const [a,name] of Object.entries(STATES)){
+      if(name.toLowerCase()===two){ found={a, n:2}; break; }
+    }
+    if(!found){
+      const lastUp=words[words.length-1].toUpperCase();
+      const lastLo=words[words.length-1].toLowerCase();
+      if(STATES[lastUp]) found={a:lastUp, n:1};
+      else for(const [a,name] of Object.entries(STATES)){
+        if(name.toLowerCase()===lastLo){ found={a, n:1}; break; }
+      }
+    }
+    if(!found) return null;
+    st=found.a; city=title(words.slice(0,-found.n).join(' '));
+  }
+  const up=(st||'').toUpperCase();
+  if(STATES[up]) st=up;
+  else{
+    for(const [a,name] of Object.entries(STATES)){
+      if(name.toLowerCase()===(st||'').toLowerCase()){ st=a; break; }
+    }
+  }
+  if(!STATES[st]||!city) return null;
+  return {city, state:st};
+}
+const esc = s => (s||'').replace(/</g,'&lt;');
+let liveTimer=null, liveSeq=0;
+function handleSearch(q){
+  renderRestaurants(q);
+  clearTimeout(liveTimer);
+  const local = (window._allR||[]).filter(x=>matchesSearch(x,q));
+  if(local.length>0 || !q) return;  // we have results — no fallback needed
+  liveTimer=setTimeout(async ()=>{
+    const seq=++liveSeq;
+    const place=parsePlace(q);
+    const listEl=document.getElementById('list'), countEl=document.getElementById('count');
+    if(!place){
+      countEl.textContent='No exact matches';
+      listEl.innerHTML=`<div class="card" style="text-align:center;padding:28px 16px">
+        <div style="font-size:2.5rem">🔎</div>
+        <h3>Nothing in our book for "${esc(q)}"</h3>
+        <p class="small">Try a city + state, like <b>"Austin TX"</b> or <b>"Miami, FL"</b> — we'll pull live spots for anywhere in the US.<br><br>Or skip the search: <a href="/drop.html"><b>request any pickup →</b></a> and we'll go get it.</p>
+      </div>`;
+      return;
+    }
+    countEl.textContent=`🔎 Checking live spots in ${esc(place.city)}…`;
+    try{
+      const live=await (await fetch(`/api/live-restaurants?city=${encodeURIComponent(place.city)}&state=${place.state}`)).json();
+      if(seq!==liveSeq) return;  // user kept typing — drop stale result
+      if(live && live.length){
+        countEl.textContent=`${live.length} live spots in ${esc(place.city)}, ${place.state}`;
+        listEl.innerHTML=`<p class="small" style="text-align:center">🌐 Live results — tap any spot and we'll go pick it up for you.</p>`+live.map(p=>`
+          <a class="card rest" href="/drop.html?pickup=${encodeURIComponent(p.name)}&addr=${encodeURIComponent((p.address? p.address+', ':'')+place.city+', '+place.state)}">
+            <div class="rbody">
+              <div class="emoji">🍽️</div>
+              <div class="meta"><b>${esc(p.name)}</b><span>${esc(p.address||'')}${esc(p.address)?' · ':''}${esc(place.city)}, ${place.state}${p.cuisine&&p.cuisine!=='Restaurant'?' · '+esc(p.cuisine):''}</span><span class="fee">📦 Tap to request pickup →</span></div>
+            </div>
+          </a>`).join('');
+      }else{
+        countEl.textContent=`No spots found in ${esc(place.city)}`;
+        listEl.innerHTML=`<div class="card" style="text-align:center;padding:28px 16px">
+          <div style="font-size:2.5rem">📦</div>
+          <h3>We couldn't find spots in ${esc(place.city)} yet</h3>
+          <p class="small">But we can still go there. <a href="/drop.html"><b>Request any pickup →</b></a> — tell us the restaurant and address, we'll handle it.</p>
+        </div>`;
+      }
+    }catch(e){
+      if(seq!==liveSeq) return;
+      countEl.textContent='Search hiccup — try again';
+    }
+  }, 700);
 }
 /* Google-like search: every word you type must appear somewhere in
    the name, cuisine, city or state. "nashville tn", "Nashville, TN",

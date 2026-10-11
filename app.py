@@ -1113,12 +1113,165 @@ def seed_ga_fl_menus():
     return filled
 
 
+def seed_50_states():
+    """50-state completion (added 2026-10-11): famous real restaurants in the
+    26 states Drop did not cover yet. Idempotent: skips name+city already present.
+    Addresses/phones are best-effort — Ken must verify before real orders."""
+    SPOTS = [
+        ('Dreamland Bar-B-Que', 'BBQ', '🍖', '5535 15th Ave E', 'Tuscaloosa', 'AL', '(205) 758-8132'),
+        ('Highlands Bar & Grill', 'Fine Dining · Southern', '🍽️', '2011 11th Ave S', 'Birmingham', 'AL', '(205) 939-1400'),
+        ('Big Bob Gibson Bar-B-Q', 'BBQ', '🍖', '1715 6th Ave SE', 'Decatur', 'AL', '(256) 350-6969'),
+        ('The Fish Market', 'Seafood', '🦐', '612 22nd St S', 'Birmingham', 'AL', '(205) 322-3330'),
+        ("Saw's Soul Kitchen", 'Southern · BBQ', '🍗', '215 41st St S', 'Birmingham', 'AL', '(205) 591-1402'),
+        ("Moose's Tooth Pub & Pizzeria", 'Pizza · Pub', '🍕', '3300 Old Seward Hwy', 'Anchorage', 'AK', '(907) 258-2537'),
+        ('Snow City Cafe', 'Breakfast · Brunch', '🥞', '1034 W 4th Ave', 'Anchorage', 'AK', '(907) 272-2489'),
+        ('Glacier Brewhouse', 'Seafood · American', '🦐', '737 W 5th Ave', 'Anchorage', 'AK', '(907) 274-2833'),
+        ('Double Musky Inn', 'Cajun · Steakhouse', '🥩', 'Mile 3 Crow Creek Rd', 'Girdwood', 'AK', '(907) 783-2822'),
+        ("Simon & Seafort's", 'Seafood', '🦀', '420 L St', 'Anchorage', 'AK', '(907) 274-3502'),
+        ("Wright's Barbecue", 'BBQ', '🍖', '2212 Main Dr', 'Johnson', 'AR', '(479) 633-4242'),
+        ('Lassis Inn', 'Southern · Soul Food', '🍗', '518 E 27th St', 'Little Rock', 'AR', '(501) 372-9242'),
+        ('The Root Cafe', 'Farm to Table', '🥗', '1500 Main St', 'Little Rock', 'AR', '(501) 414-0420'),
+        ("Doe's Eat Place", 'Steakhouse', '🥩', '1023 W Markham St', 'Little Rock', 'AR', '(501) 376-1195'),
+        ('AQ Chicken House', 'Southern · Chicken', '🍗', '1207 N Thompson St', 'Springdale', 'AR', '(479) 751-4633'),
+        ('Frank Pepe Pizzeria Napoletana', 'Pizza', '🍕', '157 Wooster St', 'New Haven', 'CT', '(203) 865-5762'),
+        ("Louis' Lunch", 'Burgers', '🍔', '263 Crown St', 'New Haven', 'CT', '(203) 562-5507'),
+        ("Sally's Apizza", 'Pizza', '🍕', '237 Wooster St', 'New Haven', 'CT', '(203) 624-5271'),
+        ('Mystic Pizza', 'Pizza', '🍕', '56 W Main St', 'Mystic', 'CT', '(860) 536-3700'),
+        ('The Griswold Inn', 'American · Historic', '🍽️', '36 Main St', 'Essex', 'CT', '(860) 767-1776'),
+        ('Dogfish Head Brewings & Eats', 'Brewpub · American', '🍺', '320 Rehoboth Ave', 'Rehoboth Beach', 'DE', '(302) 226-2739'),
+        ('Nicola Pizza', 'Pizza', '🍕', '8 N 1st St', 'Rehoboth Beach', 'DE', '(302) 227-6211'),
+        ('Iron Hill Brewery & Restaurant', 'Brewpub', '🍺', '147 E Main St', 'Newark', 'DE', '(302) 266-9000'),
+        ("Capriotti's Sandwich Shop", 'Sandwiches', '🥪', '1300 N Market St', 'Wilmington', 'DE', '(302) 429-0200'),
+        ('Grotto Pizza', 'Pizza', '🍕', '35 N 1st St', 'Rehoboth Beach', 'DE', '(302) 227-3600'),
+        ("Leonard's Bakery", 'Bakery · Malasadas', '🍩', '933 Kapahulu Ave', 'Honolulu', 'HI', '(808) 737-5591'),
+        ("Helena's Hawaiian Food", 'Hawaiian', '🍖', '1240 N School St', 'Honolulu', 'HI', '(808) 845-8044'),
+        ('Ono Seafood', 'Poke · Seafood', '🐟', '747 Kapahulu Ave', 'Honolulu', 'HI', '(808) 732-4806'),
+        ('Matsumoto Shave Ice', 'Shave Ice', '🍧', '66-111 Kamehameha Hwy', 'Haleiwa', 'HI', '(808) 637-4827'),
+        ("Duke's Waikiki", 'Hawaiian · Seafood', '🌺', '2335 Kalakaua Ave', 'Honolulu', 'HI', '(808) 922-2268'),
+        ('Westside Drive-In', 'Burgers · Drive-In', '🍔', '1939 W State St', 'Boise', 'ID', '(208) 342-2952'),
+        ("Goldy's Breakfast Bistro", 'Breakfast', '🥞', '108 S Capitol Blvd', 'Boise', 'ID', '(208) 345-4100'),
+        ('Bardenay Restaurant & Distillery', 'American · Distillery', '🍸', '610 Grove St', 'Boise', 'ID', '(208) 426-0538'),
+        ("Big Jud's", 'Burgers', '🍔', '1289 S Vista Ave', 'Boise', 'ID', '(208) 336-4810'),
+        ('Chandlers Steakhouse', 'Steakhouse', '🥩', '981 W Grove St', 'Boise', 'ID', '(208) 383-4300'),
+        ('St. Elmo Steak House', 'Steakhouse', '🥩', '127 S Illinois St', 'Indianapolis', 'IN', '(317) 635-0636'),
+        ('The Mug-n-Bun', 'Drive-In · Burgers', '🍔', '5211 W 10th St', 'Indianapolis', 'IN', '(317) 244-5669'),
+        ("Nick's English Hut", 'Bar · Burgers', '🍺', '423 E Kirkwood Ave', 'Bloomington', 'IN', '(812) 332-4040'),
+        ('Triple XXX Family Restaurant', 'Burgers · Diner', '🍔', '2 N Salisbury St', 'West Lafayette', 'IN', '(765) 743-5373'),
+        ('Coney Island Wiener Stand', 'Hot Dogs', '🌭', '131 W Main St', 'Fort Wayne', 'IN', '(260) 424-2997'),
+        ('Zombie Burger + Drink Lab', 'Burgers', '🍔', '300 E Grand Ave', 'Des Moines', 'IA', '(515) 244-9292'),
+        ('The Machine Shed', 'Comfort · American', '🍗', '11151 Hickman Rd', 'Urbandale', 'IA', '(515) 270-6818'),
+        ("Fong's Pizza", 'Pizza · Asian Fusion', '🍕', '223 4th St', 'Des Moines', 'IA', '(515) 323-3333'),
+        ("Breitbach's Country Dining", 'Comfort · Family', '🥧', '563 Balltown Rd', 'Balltown', 'IA', '(563) 552-2220'),
+        ("Jethro's BBQ", 'BBQ', '🍖', '9350 University Ave', 'Des Moines', 'IA', '(515) 279-3300'),
+        ("Joe's Kansas City Bar-B-Que", 'BBQ', '🍖', '3002 W 47th Ave', 'Kansas City', 'KS', '(913) 722-3366'),
+        ("Arthur Bryant's Barbeque", 'BBQ', '🍖', '1727 Brooklyn Ave', 'Kansas City', 'KS', '(816) 231-1123'),
+        ("Fritz's Railroad Restaurant", 'Burgers · Family', '🚂', '250 N 18th St', 'Kansas City', 'KS', '(913) 342-0274'),
+        ("Winstead's Steakburgers", 'Burgers · Diner', '🍔', '101 Emanuel Cleaver II Blvd', 'Kansas City', 'KS', '(816) 753-2244'),
+        ('Doo-Dah Diner', 'Diner · Breakfast', '🥞', '206 E Kellogg St', 'Wichita', 'KS', '(316) 265-7010'),
+        ('Brown Hotel Lobby Bar & Grill', 'Southern · Historic', '🍽️', '335 W Broadway', 'Louisville', 'KY', '(502) 583-1234'),
+        ('Wallace Station', 'Southern · Deli', '🥪', '3850 Old Frankfort Pike', 'Versailles', 'KY', '(859) 846-5161'),
+        ('Merrick Inn', 'Southern · Fine Dining', '🍽️', '1074 Merrick Dr', 'Lexington', 'KY', '(859) 269-5417'),
+        ('Old Talbott Tavern', 'American · Historic', '🍺', '107 W Stephen Foster Ave', 'Bardstown', 'KY', '(502) 348-3494'),
+        ("Bourbon n' Toulouse", 'Cajun · Creole', '🌶️', '829 Euclid Ave', 'Lexington', 'KY', '(859) 335-0300'),
+        ('The Lobster Shack', 'Seafood', '🦞', '225 Two Lights Rd', 'Cape Elizabeth', 'ME', '(207) 799-1677'),
+        ('Eventide Oyster Co.', 'Seafood · Oysters', '🦪', '86 Middle St', 'Portland', 'ME', '(207) 774-8538'),
+        ('Duckfat', 'Sandwiches · Belgian Fries', '🍟', '43 Middle St', 'Portland', 'ME', '(207) 774-8080'),
+        ("Becky's Diner", 'Diner · Seafood', '🥞', '390 Commercial St', 'Portland', 'ME', '(207) 773-7070'),
+        ("Red's Eats", 'Lobster Rolls', '🦞', '41 Water St', 'Wiscasset', 'ME', '(207) 882-6128'),
+        ('The Shed Barbeque & Blues Joint', 'BBQ · Blues', '🍖', '7501 US-57', 'Ocean Springs', 'MS', '(228) 875-9590'),
+        ("Doe's Eat Place", 'Steakhouse', '🥩', '502 Nelson St', 'Greenville', 'MS', '(662) 334-3315'),
+        ('White Trolley Cafe', 'Diner · Southern', '🚋', '1211 US-72', 'Corinth', 'MS', '(662) 287-7295'),
+        ("Abe's Grill", 'Southern · Meat & Three', '🍗', '1100 US-72 W', 'Corinth', 'MS', '(662) 286-2562'),
+        ('Taylor Grocery', 'Southern · Catfish', '🐟', '4 County Road 338', 'Taylor', 'MS', '(662) 236-1716'),
+        ('The Notorious P.I.G.', 'BBQ', '🍖', '313 W Front St', 'Missoula', 'MT', '(406) 317-1395'),
+        ('Biga Pizza', 'Pizza', '🍕', '241 W Main St', 'Missoula', 'MT', '(406) 542-0622'),
+        ('Plonk', 'Wine Bar · Small Plates', '🍷', '29 E Main St', 'Bozeman', 'MT', '(406) 587-2170'),
+        ("Sir Scott's Oasis", 'Steakhouse', '🥩', '5 Main St', 'Manhattan', 'MT', '(406) 284-6929'),
+        ('The Burger Dive', 'Burgers', '🍔', '114 N 27th St', 'Billings', 'MT', '(406) 969-1326'),
+        ('The Drover', 'Steakhouse', '🥩', '2121 S 73rd St', 'Omaha', 'NE', '(402) 558-3500'),
+        ('Block 16', 'Burgers · Farm to Table', '🍔', '1616 Harney St', 'Omaha', 'NE', '(402) 342-1220'),
+        ('Runza', 'Fast Food · Regional', '🥪', '1801 K St', 'Lincoln', 'NE', '(402) 474-3394'),
+        ("Stella's", 'Burgers · Bar', '🍔', '10301 S 23rd St', 'Bellevue', 'NE', '(402) 291-3427'),
+        ("Yia Yia's", 'Pizza', '🍕', '1423 O St', 'Lincoln', 'NE', '(402) 477-0013'),
+        ('Red Arrow Diner', 'Diner', '🥞', '61 Lowell St', 'Manchester', 'NH', '(603) 626-1118'),
+        ("Polly's Pancake Parlor", 'Breakfast · Pancakes', '🥞', '672 NH-117', 'Sugar Hill', 'NH', '(603) 823-5575'),
+        ('The Friendly Toast', 'Breakfast · Brunch', '🍳', '121 Congress St', 'Portsmouth', 'NH', '(603) 430-2154'),
+        ("Gilley's PM Lunch", 'Diner · Late Night', '🌭', '175 Fleet St', 'Portsmouth', 'NH', '(603) 431-6343'),
+        ("Tilt'n Diner", 'Diner', '🥞', '61 Laconia Rd', 'Tilton', 'NH', '(603) 286-7832'),
+        ('White Manna', 'Burgers · Sliders', '🍔', '358 River St', 'Hackensack', 'NJ', '(201) 342-0914'),
+        ("Holsten's", 'Diner · Ice Cream', '🍨', '1063 Broad St', 'Bloomfield', 'NJ', '(973) 743-3562'),
+        ('White House Sub Shop', 'Subs · Sandwiches', '🥪', '2301 Arctic Ave', 'Atlantic City', 'NJ', '(609) 345-1564'),
+        ("Rutt's Hut", 'Hot Dogs', '🌭', '417 River Rd', 'Clifton', 'NJ', '(201) 791-7227'),
+        ('Tick Tock Diner', 'Diner', '🥞', '281 Allwood Rd', 'Clifton', 'NJ', '(973) 777-0511'),
+        ('The Shed', 'New Mexican', '🌶️', '113 E Palace Ave', 'Santa Fe', 'NM', '(505) 982-9030'),
+        ('Frontier Restaurant', 'New Mexican', '🌯', '2400 Central Ave SE', 'Albuquerque', 'NM', '(505) 266-0550'),
+        ("Sadie's of New Mexico", 'New Mexican', '🌶️', '6230 4th St NW', 'Albuquerque', 'NM', '(505) 345-5339'),
+        ("Mary & Tito's Cafe", 'New Mexican', '🫔', '2711 4th St NW', 'Albuquerque', 'NM', '(505) 344-6266'),
+        ('The Pantry', 'New Mexican · Breakfast', '🍳', '1820 Cerrillos Rd', 'Santa Fe', 'NM', '(505) 986-0022'),
+        ('Al Forno', 'Italian', '🍝', '577 S Water St', 'Providence', 'RI', '(401) 273-9760'),
+        ('Haven Brothers Diner', 'Diner · Food Truck', '🚚', 'Kennedy Plaza', 'Providence', 'RI', '(401) 861-7777'),
+        ("Iggy's Doughboys & Chowder House", 'Seafood', '🦪', '889 Oakland Beach Ave', 'Warwick', 'RI', '(401) 737-9459'),
+        ('Olneyville New York System', 'Hot Weiners', '🌭', '18 Plainfield St', 'Providence', 'RI', '(401) 621-9500'),
+        ('Caserta Pizzeria', 'Pizza', '🍕', '121 Spruce St', 'Providence', 'RI', '(401) 272-3618'),
+        ('Husk', 'Southern · Fine Dining', '🍽️', '76 Queen St', 'Charleston', 'SC', '(843) 577-2500'),
+        ('Bowens Island Restaurant', 'Seafood', '🦐', '1870 Bowens Island Rd', 'Charleston', 'SC', '(843) 795-2757'),
+        ("Shealy's Bar-B-Que", 'BBQ', '🍖', '340 E Columbia Ave', 'Batesburg-Leesville', 'SC', '(803) 532-8135'),
+        ('The Beacon Drive-In', 'Burgers · Drive-In', '🍔', '255 John B White Sr Blvd', 'Spartanburg', 'SC', '(864) 585-9387'),
+        ("Bertha's Kitchen", 'Southern · Soul Food', '🍗', '2332 Meeting Street Rd', 'Charleston', 'SC', '(843) 554-6519'),
+        ('The Phillips Avenue Diner', 'Diner', '🥞', '121 S Phillips Ave', 'Sioux Falls', 'SD', '(605) 335-5757'),
+        ('Alpine Inn', 'German · Steakhouse', '🥨', '133 Main St', 'Hill City', 'SD', '(605) 574-2749'),
+        ('Black Hills Burger and Bun Co', 'Burgers', '🍔', '404 W Mount Rushmore Rd', 'Custer', 'SD', '(605) 673-3411'),
+        ("Tally's Silver Spoon", 'American · Brunch', '🍳', '530 6th St', 'Rapid City', 'SD', '(605) 342-7621'),
+        ('Minervas', 'American · Steakhouse', '🥩', '301 S Phillips Ave', 'Sioux Falls', 'SD', '(605) 334-0388'),
+        ('Hen of the Wood', 'Farm to Table · Fine Dining', '🍽️', '55 Cherry St', 'Burlington', 'VT', '(802) 540-0534'),
+        ("Al's French Frys", 'Burgers · Fries', '🍟', '1251 Williston Rd', 'South Burlington', 'VT', '(802) 862-9203'),
+        ('The Skinny Pancake', 'Crepes · Breakfast', '🥞', '60 Lake St', 'Burlington', 'VT', '(802) 540-0188'),
+        ('Blue Benn Diner', 'Diner', '🥞', '314 North St', 'Bennington', 'VT', '(802) 442-5140'),
+        ('The Worthy Burger', 'Burgers · Beer', '🍔', '56 Rainbow St', 'South Royalton', 'VT', '(802) 763-2578'),
+        ("Mama J's Kitchen", 'Southern · Soul Food', '🍗', '415 N 1st St', 'Richmond', 'VA', '(804) 225-7449'),
+        ("Sally Bell's Kitchen", 'Southern · Lunch', '🥪', '708 W Grace St', 'Richmond', 'VA', '(804) 644-2838'),
+        ("Doumar's", 'BBQ · Drive-In', '🍔', '1919 Monticello Ave', 'Norfolk', 'VA', '(757) 627-4163'),
+        ('The Virginia Diner', 'Southern · Diner', '🥧', '408 W Main St', 'Wakefield', 'VA', '(757) 899-3106'),
+        ("Dot's Back Inn", 'Bar · Burgers', '🍔', '4030 MacArthur Ave', 'Richmond', 'VA', '(804) 616-2690'),
+        ('Hillbilly Hot Dogs', 'Hot Dogs', '🌭', '6951 Ohio River Rd', 'Lesage', 'WV', '(304) 762-2458'),
+        ("Tudor's Biscuit World", 'Biscuits · Breakfast', '🥞', '1908 Kanawha Blvd E', 'Charleston', 'WV', '(304) 344-6379'),
+        ('Secret Sandwich Society', 'Sandwiches', '🥪', '123 S Court St', 'Fayetteville', 'WV', '(304) 574-4770'),
+        ('Vandalia Grille', 'American', '🍽️', '205 Capitol St', 'Charleston', 'WV', '(304) 205-3737'),
+        ('Pies & Pints', 'Pizza · Craft Beer', '🍕', '219 W Maple Ave', 'Fayetteville', 'WV', '(304) 574-2203'),
+        ("Kopp's Frozen Custard", 'Frozen Custard · Burgers', '🍦', '18880 W Bluemound Rd', 'Brookfield', 'WI', '(262) 789-0121'),
+        ("Sobelman's Pub & Grill", 'Burgers', '🍔', '1900 W St Paul Ave', 'Milwaukee', 'WI', '(414) 931-1919'),
+        ('The Old Fashioned', 'Wisconsin Supper Club', '🧀', '23 N Pinckney St', 'Madison', 'WI', '(608) 310-4545'),
+        ("Mader's", 'German', '🥨', '1041 N Old World 3rd St', 'Milwaukee', 'WI', '(414) 271-3377'),
+        ("Al Johnson's Swedish Restaurant", 'Swedish', '🐐', '10698 N Bay Shore Dr', 'Sister Bay', 'WI', '(920) 854-2626'),
+        ('The Bunnery', 'Bakery · Breakfast', '🥐', '130 N Cache St', 'Jackson', 'WY', '(307) 733-5474'),
+        ("Bubba's Bar-B-Que", 'BBQ', '🍖', '112 E Broadway Ave', 'Jackson', 'WY', '(307) 733-2288'),
+        ('Persephone Bakery', 'Bakery', '🍞', '145 E Broadway Ave', 'Jackson', 'WY', '(307) 200-6707'),
+        ('The Virginian Restaurant', 'American · Saloon', '🍺', '750 W Broadway', 'Jackson', 'WY', '(307) 733-2792'),
+        ("Sanford's Grub & Pub", 'Pub · Grub', '🍔', '320 S Ash St', 'Casper', 'WY', '(307) 237-3381'),
+    ]
+    conn = db()
+    c = conn.cursor()
+    added = 0
+    for name, cuisine, emoji, addr, city, state, phone in SPOTS:
+        exists = c.execute(
+            "SELECT id FROM restaurants WHERE name=? AND city=?", (name, city)).fetchone()
+        if not exists:
+            c.execute(
+                "INSERT INTO restaurants(name, cuisine, emoji, address, city, state, phone, open)"
+                " VALUES(?,?,?,?,?,?,?,1)",
+                (name, cuisine, emoji, addr, city, state, phone))
+            added += 1
+    conn.commit()
+    conn.close()
+    return added
+
 init_db()
 seed()
 seed_cities()
 seed_expansion_cities()
 seed_expansion_cities2()
 seed_ga_fl_menus()
+seed_50_states()
 
 
 # ---------------- helpers ----------------
@@ -6093,8 +6246,11 @@ async def op_add_restaurant(req: Request, x_pin: str = Header(default="")):
         raise HTTPException(400, "Name required")
     conn = db()
     cur = conn.execute(
-        "INSERT INTO restaurants(name, cuisine, emoji, open, sample) VALUES(?,?,?,1,0)",
-        (name, (body.get("cuisine") or "").strip(), (body.get("emoji") or "🍽️").strip()))
+        "INSERT INTO restaurants(name, cuisine, emoji, address, city, state, phone, open, sample)"
+        " VALUES(?,?,?,?,?,?,?,?,1,0)",
+        (name, (body.get("cuisine") or "").strip(), (body.get("emoji") or "🍽️").strip(),
+         (body.get("address") or "").strip(), (body.get("city") or "").strip(),
+         (body.get("state") or "").strip(), (body.get("phone") or "").strip()))
     rid = cur.lastrowid
     conn.commit()
     conn.close()
