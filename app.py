@@ -2817,9 +2817,24 @@ def op_approve_driver(did: int, x_pin: str = Header(default="")):
             "Insurance is required — no exceptions.")
     conn.execute("UPDATE drivers SET status='approved' WHERE id=?", (did,))
     conn.commit()
+    # Notify driver via ntfy if they have a topic set
+    try:
+        topic = d["ntfy_topic"] if "ntfy_topic" in d.keys() else None
+        if topic:
+            import urllib.request, urllib.parse, threading
+            msg = f"🎉 You're approved! Log into your driver portal to start working."
+            r2 = urllib.request.Request(
+                f"https://ntfy.sh/{urllib.parse.quote(topic)}",
+                data=msg.encode(), headers={"Title": "Drop driver approved"}, method="POST")
+            threading.Thread(
+                target=lambda: urllib.request.urlopen(r2, timeout=5).read(),
+                daemon=True).start()
+    except Exception:
+        pass
     conn.close()
     audit("operator", "driver_approved", "driver", did, d["name"])
-    return {"ok": True}
+    log_event("driver", f"✅ Driver #{did} approved", d["name"])
+    return {"ok": True, "message": "Driver approved! They can now log in and start working."}
 
 
 @app.post("/api/operator/drivers/{did}/photo-approve")

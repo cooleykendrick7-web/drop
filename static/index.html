@@ -19,20 +19,10 @@
   <img class="logo-full" src="/static/logo.jpg" alt="Drop — Pick up. Deliver. Done.">
   <h1>Your favorite food,<br><span class="hl">dropped at your door.</span></h1>
   <p class="tagline" id="tagline">We drop it at your door.</p>
-  <div style="margin:0 0 14px"><select id="citypick" style="max-width:280px;margin:0 auto;font-weight:700"></select></div>
-  <p class="small" id="gpsnote" style="margin:-6px 0 12px"></p>
-  <div class="row" style="justify-content:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
-    <button class="btn small ghost" id="usegps" style="width:auto">📍 Use my location</button>
-    <button class="btn small ghost" id="manualcity" style="width:auto">✏️ Enter city manually</button>
+  <div style="max-width:340px;margin:0 auto 14px">
+    <input id="search" placeholder="🔍 Search restaurants or cities…" style="width:100%;padding:12px 16px;border-radius:24px;border:2px solid var(--acc);font-size:1rem;text-align:center">
   </div>
-  <div id="manualbox" style="display:none;margin:0 0 12px">
-    <div class="row" style="justify-content:center;gap:6px">
-      <input id="mancity" placeholder="City" style="max-width:140px">
-      <input id="manstate" placeholder="ST" maxlength="2" style="max-width:60px">
-      <button class="btn small" id="mangobtn" style="width:auto">Go</button>
-    </div>
-  </div>
-  <a class="cta" href="#restaurants">🍽️ Browse restaurants</a>
+  <a class="cta" href="#restaurants">🍽️ Browse all restaurants</a>
   <div class="card" style="max-width:340px;margin:16px auto;text-align:center;border:2px solid var(--acc)">
     <div style="font-size:2rem">📦</div>
     <h3 style="margin:8px 0">Need anything picked up?</h3>
@@ -209,75 +199,46 @@ document.getElementById('spotsend').onclick=async()=>{
 if(!sessionStorage.getItem('dropv')){sessionStorage.setItem('dropv','1');
 fetch('/api/visit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({page:'home'})});}
 async function load(){
-  const cfg = await (await fetch('/api/config')).json();
-  if(cfg.tagline) document.getElementById('tagline').textContent = cfg.tagline;
-  if(cfg.delivery_zone) document.getElementById('zonepill').textContent = cfg.delivery_zone;
-  if(cfg.delivery_fee) document.getElementById('feepill').textContent = '$'+Number(cfg.delivery_fee).toFixed(2);
-  const os=document.getElementById('openstat');
-  os.innerHTML = cfg.open_now
-    ? `🟢 <b>Open now</b> · ${cfg.hours_label} · delivering in ${cfg.delivery_zone}`
-    : `🔴 <b>Closed</b> — back at ${cfg.hours_label.split('–')[0]} · delivering in ${cfg.delivery_zone}`;
-  const cta=document.querySelector('.cta');
-  if(!cfg.open_now){cta.style.opacity=.5;}
-  const fee = cfg.delivery_fee || 3.99;
-  if(!cfg.stripe_live){
-    document.getElementById('dev').innerHTML =
-      '<div class="devbanner">🚧 Demo payments are on (test mode) — real cards come later.</div>';
-  }
-  let cities = [];
+  // Simple: load config + all restaurants, enable search
   try{
-    cities = await (await fetch('/api/cities')).json();
-  }catch(e){ console.error('Cities fetch failed:', e); }
-  const saved = localStorage.getItem('dropcity');
-  const pick = document.getElementById('citypick');
+    const cfg = await (await fetch('/api/config')).json();
+    if(cfg.tagline) document.getElementById('tagline').textContent = cfg.tagline;
+    if(cfg.delivery_fee) document.getElementById('feepill').textContent = '$'+Number(cfg.delivery_fee).toFixed(2);
+  }catch(e){}
+  let allR = [];
   try{
-    pick.innerHTML = cities.map(c=>`<option value="${c.city}|${c.state}">${c.city}, ${c.state} (${c.n})</option>`).join('');
-  }catch(e){
-    console.error('Failed to populate cities:', e);
+    allR = await (await fetch('/api/restaurants')).json();
+  }catch(e){}
+  window._allR = allR;
+  renderRestaurants('');
+  // Search box
+  const si = document.getElementById('search');
+  if(si){
+    si.addEventListener('input', ()=> renderRestaurants(si.value.trim().toLowerCase()));
   }
-  // FIX: respect manually-entered cities even if not in DB yet — don't bounce to Bismarck
-  let cur = saved || (cities[0]?`${cities[0].city}|${cities[0].state}`:'');
-  if(saved && !cities.some(c=>`${c.city}|${c.state}`===saved)){
-    // Manual city not in DB — add it to picker so it sticks
-    const [mc, ms] = saved.split('|');
-    const opt=document.createElement('option');opt.value=saved;opt.textContent=`${mc}, ${ms} (new)`;
-    pick.appendChild(opt);
+}
+function renderRestaurants(q){
+  const allR = window._allR || [];
+  const fee = 3.99;
+  let r = allR;
+  if(q){
+    r = allR.filter(x =>
+      (x.name||'').toLowerCase().includes(q) ||
+      (x.cuisine||'').toLowerCase().includes(q) ||
+      (x.city||'').toLowerCase().includes(q) ||
+      ((x.city||'')+', '+(x.state||'')).toLowerCase().includes(q)
+    );
   }
-  const manualModeEarly = localStorage.getItem('dropcity_manual')==='1';
-  const gpsCity = manualModeEarly ? null : await new Promise(resolve=>{
-    let done=false;
-    const finish=v=>{if(!done){done=true;resolve(v);}};
-    // Force resolve after 12s no matter what — never hang
-    setTimeout(()=>finish(null), 12000);
-    if(!navigator.geolocation) return finish(null);
-    try{
-      navigator.geolocation.getCurrentPosition(async pos=>{
-        window._gps = {lat: pos.coords.latitude, lng: pos.coords.longitude};
-        try{
-          const nc = await (await fetch(`/api/nearest-city?lat=${pos.coords.latitude}&lng=${pos.coords.longitude}`)).json();
-          finish(nc);
-        }catch(e){ finish(null); }
-      }, ()=>finish(null), {timeout:8000, maximumAge:600000});
-    }catch(e){ finish(null); }
-  });
-  const _updHead = ()=>{ const hc=document.getElementById('headcity'); const v=(pick.value||'').split('|')[0]; if(v){hc.textContent=v;hc.style.display='';} };
-  // GPS only auto-sets city if user hasn't manually chosen one
-  const manualMode = localStorage.getItem('dropcity_manual')==='1';
-  if(!manualMode && gpsCity && gpsCity.match){
-    cur = `${gpsCity.match.city}|${gpsCity.match.state}`;
-    localStorage.setItem('dropcity', cur);
-    document.getElementById('gpsnote').innerHTML = `📍 You're in <b>${gpsCity.detected_city||gpsCity.match.city}</b> — showing spots near you.`;
-  } else if(!manualMode && gpsCity && gpsCity.detected_city){
-    const hc = document.getElementById('headcity');
-    hc.textContent = gpsCity.detected_city; hc.style.display = '';
-    document.getElementById('gpsnote').innerHTML = `📍 You're in <b>${gpsCity.detected_city}</b> — Drop isn't there <i>yet</i>. <a href="#suggest">Suggest a spot</a> and we'll come to you.`;
-  } else if(!manualMode){
-    // GPS didn't work — show helpful message instead of hanging
-    document.getElementById('gpsnote').innerHTML = `📍 Couldn't detect location. <b>Tap "Use my location"</b> or enter your city manually.`;
-  }
-  pick.value = cur; _updHead();
-  pick.onchange = ()=>{ localStorage.setItem('dropcity', pick.value); localStorage.setItem('dropcity_manual','1'); _updHead(); load(); };
-  }
+  document.getElementById('count').textContent = r.length + (q ? ` results for "${q}"` : ' restaurants');
+  document.getElementById('list').innerHTML = r.slice(0, 50).map(x=>`
+    <a class="card rest" href="/restaurant.html?id=${x.id}">
+      <div class="rbody">
+      ${(x.logo||x.photo)?`<img class="rlogo" src="${x.logo||x.photo}" alt="" loading="lazy">`:`<div class="emoji">${x.emoji||'🍽️'}</div>`}
+      <div class="meta"><b>${(x.name||'').replace(/</g,'&lt;')}</b><span>${(x.cuisine||'').replace(/</g,'&lt;')} · ${(x.city||'').replace(/</g,'&lt;')}, ${x.state||''}</span><span class="fee">$${fee.toFixed(2)} delivery</span></div>
+      <span class="badge ${x.open?'open':'closed'}">${x.open?'OPEN':'CLOSED'}</span>
+      </div>
+    </a>`).join('') || '<p>No restaurants found. Try a different search.</p>';
+}
   const [ccity, cstate] = (pick.value||'|').split('|');
   const manualMode = localStorage.getItem('dropcity_manual')==='1';
   let r = [];
