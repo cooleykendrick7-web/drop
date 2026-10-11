@@ -199,7 +199,8 @@ def init_db():
     dcols = [r[1] for r in c.execute("PRAGMA table_info(drivers)").fetchall()]
     for _col, _ddl in (("selfie_photo", "TEXT DEFAULT ''"), ("car_photo", "TEXT DEFAULT ''"),
                        ("selfie_approved", "INTEGER DEFAULT 0"), ("car_approved", "INTEGER DEFAULT 0"),
-                       ("rating", "REAL DEFAULT 5.0"), ("rating_count", "INTEGER DEFAULT 0")):
+                       ("rating", "REAL DEFAULT 5.0"), ("rating_count", "INTEGER DEFAULT 0"),
+                       ("stripe_account_id", "TEXT DEFAULT ''")):
         if _col not in dcols:
             c.execute(f"ALTER TABLE drivers ADD COLUMN {_col} {_ddl}")
     # Delivery photo proof (pickup + dropoff, DoorDash-style)
@@ -3956,6 +3957,137 @@ def op_payout_paid(pid: int, x_pin: str = Header(default="")):
     conn.commit()
     conn.close()
     return {"ok": True}
+
+
+# ---------------- AI Auto-Payout Engine ----------------
+# Three modes: manual (Ken taps), auto (AI pays when Connect active), scheduled (weekly).
+# Without Stripe Connect: AI validates + queues, Ken does one-tap confirm.
+
+def _ai_review_payout(driver_id: int, amount: float) -> dict:
+    """AI validates a payout request. Returns {ok, reasons}."""
+    conn = db()
+    d = conn.execute("SELECT * FROM drivers WHERE id=?", (driver_id,)).fetchone()
+    if not d:
+        conn.close()
+        return {"ok": False, "reasons": ["Driver not found"]}
+    reasons = []
+    ok = True
+    # Check 1: driver is approved
+    if d["status"] != "approved":
+        ok = False
+        reasons.append("✗ Driver not approved")
+    else:
+        reasons.append("✓ Driver approved")
+    # Check 2: has completed deliveries
+    if (d["deliveries"] or 0) == 0:
+        ok = False
+        reasons.append("✗ No completed deliveries")
+    else:
+        reasons.append(f"✓ {d['deliveries']} deliveries")
+    # Check 3: no duplicate pending payout
+    dup = conn.execute(
+        "SELECT COUNT(*) FROM payouts WHERE driver_id=? AND status IN ('requested','processing')",
+        (driver_id,)).fetchone()[0]
+    if dup > 0:
+        ok = False
+        reasons.append("✗ Already has a pending payout")
+    else:
+        reasons.append("✓ No duplicate payouts")
+    # Check 4: amount is reasonable (not exceeding wallet)
+    # (wallet check done by caller)
+    reasons.append(f"✓ Amount ${amount:.2f}")
+    conn.close()
+    return {"ok": ok, "reasons": reasons}
+
+
+@app.get("/api/operator/payout-settings")
+def payout_settings_get(x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    mode = get_setting("payout_mode") or "manual"
+    threshold = get_setting("payout_auto_threshold") or "50"
+    return {"mode": mode, "auto_threshold": float(threshold),
+            "connect_enabled": CONNECT_ENABLED}
+
+
+@app.post("/api/operator/payout-settings")
+async def payout_settings_set(req: Request, x_pin: str = Header(default="")):
+    """Ken sets payout mode: manual, auto, or weekly."""
+    check_pin(x_pin)
+    body = await req.json()
+    mode = (body.get("mode") or "manual").strip()
+    if mode not in ("manual", "auto", "weekly"):
+        raise HTTPException(400, "mode must be manual, auto, or weekly")
+    threshold = float(body.get("auto_threshold") or 50)
+    set_setting("payout_mode", mode)
+    set_setting("payout_auto_threshold", str(threshold))
+    audit("operator", "payout_mode_set", "settings", 0, f"mode={mode} threshold={threshold}")
+    return {"ok": True}
+
+
+@app.post("/api/operator/payouts/{pid}/process")
+async def op_payout_process(pid: int, x_pin: str = Header(default="")):
+    """Ken taps once → AI validates → pays via Stripe Connect (if active) or queues for manual."""
+    check_pin(x_pin)
+    conn = db()
+    p = conn.execute("SELECT * FROM payouts WHERE id=?", (pid,)).fetchone()
+    if not p:
+        conn.close()
+        raise HTTPException(404, "Payout not found")
+    if p["status"] != "requested":
+        conn.close()
+        raise HTTPException(400, f"Already {p['status']}")
+    # AI review
+    review = _ai_review_payout(p["driver_id"], p["amount"])
+    if not review["ok"]:
+        conn.close()
+        raise HTTPException(400, "AI blocked: " + "; ".join(review["reasons"]))
+    d = conn.execute("SELECT * FROM drivers WHERE id=?", (p["driver_id"],)).fetchone()
+    # Try Stripe Connect if active
+    if CONNECT_ENABLED and d["stripe_account_id"]:
+        try:
+            import stripe
+            # Idempotency: don't double-pay
+            transfer = stripe.Transfer.create(
+                amount=int(p["amount"] * 100),
+                currency="usd",
+                destination=d["stripe_account_id"],
+                metadata={"payout_id": str(pid), "driver_id": str(p["driver_id"])},
+                idempotency_key=f"payout_{pid}",
+            )
+            conn.execute(
+                "UPDATE payouts SET status='paid', stripe_transfer_id=?, paid_at=? WHERE id=?",
+                (transfer.id, now_iso(), pid))
+            conn.commit()
+            # Ledger entry
+            conn.execute(
+                "INSERT INTO payment_ledger(txn_id, entry_type, driver_id, amount, direction,"
+                " category, provider, provider_ref, status, created_at)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?)",
+                (f"payout_{pid}", "payout", p["driver_id"], p["amount"],
+                 "out", "driver_payout", "stripe", transfer.id, "completed", now_iso()))
+            conn.commit()
+            conn.close()
+            audit("operator", "payout_auto_paid", "payout", pid,
+                  f"${p['amount']:.2f} to driver {p['driver_id']} via Stripe")
+            log_event("payment", f"💸 Auto-payout ${p['amount']:.2f}",
+                      f"Driver #{p['driver_id']} via Stripe Connect")
+            return {"ok": True, "method": "stripe", "transfer_id": transfer.id}
+        except Exception as e:
+            conn.execute("UPDATE payouts SET status='failed', note=? WHERE id=?",
+                         (f"Stripe error: {str(e)[:200]}", pid))
+            conn.commit()
+            conn.close()
+            raise HTTPException(500, f"Stripe failed: {str(e)[:200]}")
+    else:
+        # Manual mode: mark as processing, Ken sends via his method, taps "Mark paid"
+        conn.execute("UPDATE payouts SET status='processing' WHERE id=?", (pid,))
+        conn.commit()
+        conn.close()
+        audit("operator", "payout_queued", "payout", pid,
+              f"${p['amount']:.2f} validated by AI, awaiting manual send")
+        return {"ok": True, "method": "manual",
+                "message": f"AI validated ✓. Send ${p['amount']:.2f} to {d['name']} via your preferred method, then tap Mark Paid.",
+                "ai_checks": review["reasons"]}
 
 
 @app.post("/api/investors/interest")

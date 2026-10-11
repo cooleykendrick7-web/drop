@@ -755,13 +755,27 @@ $('fs-save').onclick=async()=>{
 async function loadPayouts(){
   const p=await (await fetch('/api/operator/payouts',{headers:H()})).json();
   const req=p.filter(x=>x.status==='requested');
+  const proc=p.filter(x=>x.status==='processing');
   $('payoutlist').innerHTML=(req.map(x=>`
     <div class="card"><div class="row"><b>${x.driver_name}: $${x.amount.toFixed(2)}</b>
       <span class="badge">REQUESTED</span></div>
-      <p class="small">${x.created_at.slice(0,16).replace('T',' ')} · Send via bank/Cash App, then tap:</p>
-      <button class="btn small" onclick="markPaid(${x.id})">✅ Mark paid</button></div>`).join('')
+      <p class="small">${x.created_at.slice(0,16).replace('T',' ')} · AI will validate, then pay:</p>
+      <button class="btn small" onclick="processPayout(${x.id})">🤖 AI Pay Now</button></div>`).join('')
     ||'<p class="small">No payout requests right now.</p>')
+    + proc.map(x=>`
+    <div class="card" style="border-left:3px solid #f39c12"><div class="row"><b>${x.driver_name}: $${x.amount.toFixed(2)}</b>
+      <span class="badge">PROCESSING</span></div>
+      <p class="small">AI validated ✓. Send the money, then confirm:</p>
+      <button class="btn small" onclick="markPaid(${x.id})">✅ I Sent It — Mark Paid</button></div>`).join('')
     + (p.filter(x=>x.status==='paid').length?`<p class="small">✅ ${p.filter(x=>x.status==='paid').length} payouts completed.</p>`:'');
+}
+async function processPayout(id){
+  if(!confirm('Let AI validate and process this payout?'))return;
+  const r=await(await fetch('/api/operator/payouts/'+id+'/process',{method:'POST',headers:H()})).json();
+  if(r.ok){
+    alert(r.method==='stripe' ? 'Paid via Stripe! Transfer: '+r.transfer_id : r.message);
+  } else alert('Blocked: '+(r.detail||'error'));
+  loadPayouts(); loadMoney();
 }
 async function markPaid(id){
   if(!confirm('Confirm you sent this money to the driver?'))return;
