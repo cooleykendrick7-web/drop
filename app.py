@@ -3180,7 +3180,7 @@ def watcher_live(x_pin: str = Header(default="")):
         "SELECT name, is_online, last_gps_at FROM drivers WHERE status='approved'").fetchall()
     # recent activity (public-safe events only)
     act = conn.execute(
-        "SELECT kind, title, created_at FROM activity_log"
+        "SELECT kind, title, created_at FROM system_events"
         " WHERE kind IN ('order','driver','schedule','gift')"
         " ORDER BY id DESC LIMIT 15").fetchall()
     # business hours / open status
