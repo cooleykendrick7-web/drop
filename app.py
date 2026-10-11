@@ -4789,6 +4789,21 @@ def op_restaurant_apps(x_pin: str = Header(default=""), status: str = ""):
     return {"partners": out, "stages": DEAL_LABELS}
 
 
+@app.get("/api/operator/partners")
+def op_partners(x_pin: str = Header(default=""), status: str = ""):
+    """List B2B partnership applications, optionally filtered by pipeline stage."""
+    check_pin(x_pin)
+    conn = db()
+    if status:
+        rows = conn.execute(
+            "SELECT * FROM business_partners WHERE status=? ORDER BY id DESC", (status,)).fetchall()
+    else:
+        rows = conn.execute("SELECT * FROM business_partners ORDER BY id DESC").fetchall()
+    out = [dict(r) for r in rows]
+    conn.close()
+    return {"partners": out}
+
+
 @app.post("/api/operator/partners/{pid}/stage")
 async def op_partner_stage(pid: int, req: Request, x_pin: str = Header(default="")):
     """Move a deal through the pipeline. Ken only."""
