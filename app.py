@@ -215,6 +215,12 @@ def init_db():
         author TEXT NOT NULL DEFAULT 'Anonymous',
         message TEXT NOT NULL, reply TEXT DEFAULT '',
         created_at TEXT NOT NULL)""")
+    # City expansion requests
+    c.execute("""CREATE TABLE IF NOT EXISTS city_requests (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        city TEXT NOT NULL, state TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'requested',
+        created_at TEXT NOT NULL)""")
     # ---- Universal Payment Infrastructure ----
     # Virtual card applications (driver requests a Drop card)
     c.execute("""CREATE TABLE IF NOT EXISTS card_applications (
@@ -3487,6 +3493,45 @@ def watch_status():
         "maintenance": [{"title": m["title"], "when": m["created_at"][:16]} for m in maint],
         "site_up": True, "orders_flowing": orders_today > 0, "trend": trend,
     }
+
+
+# ---------------- City expansion requests ----------------
+@app.post("/api/city/request")
+async def city_request(req: Request):
+    """User wants Drop in their city. Logs it, notifies Ken, AI researches."""
+    body = await req.json()
+    city = (body.get("city") or "").strip()[:80]
+    state = (body.get("state") or "").strip()[:10]
+    if not city or not state:
+        raise HTTPException(400, "City and state required")
+    conn = db()
+    # Dedupe
+    existing = conn.execute(
+        "SELECT id FROM city_requests WHERE LOWER(city)=LOWER(?) AND LOWER(state)=LOWER(?)",
+        (city, state)).fetchone()
+    if not existing:
+        conn.execute(
+            "INSERT INTO city_requests(city, state, status, created_at) VALUES(?,?,?,?)",
+            (city, state, "requested", now_iso()))
+        conn.commit()
+    conn.close()
+    log_event("expansion", f"🌍 Drop requested in {city}, {state}",
+              "AI will research restaurants")
+    # Notify Ken
+    try:
+        topic = get_setting("ntfy_topic")
+        if topic:
+            import urllib.request, urllib.parse, threading
+            msg = f"🌍 NEW CITY REQUEST\n{city}, {state}\nSomeone wants Drop there!"
+            r2 = urllib.request.Request(
+                f"https://ntfy.sh/{urllib.parse.quote(topic)}",
+                data=msg.encode(), headers={"Title": "Drop city request"}, method="POST")
+            threading.Thread(
+                target=lambda: urllib.request.urlopen(r2, timeout=5).read(),
+                daemon=True).start()
+    except Exception:
+        pass
+    return {"ok": True}
 
 
 # ---------------- WATCH portal comments ----------------

@@ -14,6 +14,8 @@
 </header>
 
 <div class="hero">
+  <div class="orb o1" aria-hidden="true"></div>
+  <div class="orb o2" aria-hidden="true"></div>
   <img class="logo-full" src="/static/logo.jpg" alt="Drop — Pick up. Deliver. Done.">
   <h1>Your favorite food,<br><span class="hl">dropped at your door.</span></h1>
   <p class="tagline" id="tagline">One flat $3.99 fee. Real-time tracking.</p>
@@ -71,17 +73,17 @@ document.getElementById('spotsend').onclick=async()=>{
 </script>
 
 <div class="section-title" style="margin-top:34px">
-  <h2>Why Bismarck loves Drop</h2>
+  <h2>Why everyone loves Drop</h2>
 </div>
 <div class="card" style="padding:0;overflow:hidden">
   <video src="/static/promo-commercial.mp4" controls playsinline preload="metadata"
     style="width:100%;display:block;aspect-ratio:16/9;background:#000"></video>
 </div>
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">
-  <img src="/static/promo-doorstep.webp" alt="Drop driver delivering to a happy customer" style="width:100%;border-radius:14px;display:block">
-  <img src="/static/promo-family.webp" alt="Happy family enjoying Drop delivery" style="width:100%;border-radius:14px;display:block">
-  <img src="/static/promo-kids.webp" alt="Kids excited for their Drop delivery" style="width:100%;border-radius:14px;display:block">
-  <img src="/static/promo-driver.webp" alt="Drop driver on the way" style="width:100%;border-radius:14px;display:block">
+<div class="promo-grid">
+  <img src="/static/promo-doorstep.webp" alt="Drop driver delivering to a happy customer">
+  <img src="/static/promo-family.webp" alt="Happy family enjoying Drop delivery">
+  <img src="/static/promo-kids.webp" alt="Kids excited for their Drop delivery">
+  <img src="/static/promo-driver.webp" alt="Drop driver on the way">
 </div>
 <p class="small" style="text-align:center;margin-top:10px">Real driver. Real fast. Real fresh. 🧡</p>
 
@@ -115,7 +117,14 @@ async function load(){
   const saved = localStorage.getItem('dropcity');
   const pick = document.getElementById('citypick');
   pick.innerHTML = cities.map(c=>`<option value="${c.city}|${c.state}">${c.city}, ${c.state} (${c.n})</option>`).join('');
-  let cur = saved && cities.some(c=>`${c.city}|${c.state}`===saved) ? saved : (cities[0]?`${cities[0].city}|${cities[0].state}`:'');
+  // FIX: respect manually-entered cities even if not in DB yet — don't bounce to Bismarck
+  let cur = saved || (cities[0]?`${cities[0].city}|${cities[0].state}`:'');
+  if(saved && !cities.some(c=>`${c.city}|${c.state}`===saved)){
+    // Manual city not in DB — add it to picker so it sticks
+    const [mc, ms] = saved.split('|');
+    const opt=document.createElement('option');opt.value=saved;opt.textContent=`${mc}, ${ms} (new)`;
+    pick.appendChild(opt);
+  }
   const gpsCity = await new Promise(resolve=>{
     if(!navigator.geolocation) return resolve(null);
     navigator.geolocation.getCurrentPosition(async pos=>{
@@ -179,6 +188,18 @@ async function load(){
     document.getElementById('count').textContent = r.length + ' spots within 50 miles';
   } else {
     r = (await (await fetch('/api/restaurants')).json()).filter(x=>(x.city||'Bismarck')===ccity && (x.state||'ND')===cstate);
+    if(r.length===0 && ccity){
+      // New city — show expansion prompt instead of empty list
+      document.getElementById('count').textContent = `Drop is coming to ${ccity}!`;
+      document.getElementById('rlist').innerHTML = `
+        <div class="card" style="text-align:center;padding:32px 16px">
+          <div style="font-size:3rem">🚀</div>
+          <h3>We're not in ${ccity} yet</h3>
+          <p class="small">But we can be! Our AI will research real restaurants in ${ccity}, ${cstate} and add them.</p>
+          <button class="btn" onclick="requestCity('${ccity}','${cstate}')">🔔 Bring Drop to ${ccity}</button>
+        </div>`;
+      return;
+    }
     document.getElementById('count').textContent = r.length + ' spots in ' + ccity;
   }
   // one-tap reorder
@@ -204,6 +225,13 @@ async function load(){
       <span class="badge ${x.open?'open':'closed'}">${x.open?'OPEN':'CLOSED'}</span>
       </div>
     </a>`).join('') || '<p>No restaurants yet — check back soon.</p>';
+}
+async function requestCity(city, state){
+  if(!confirm(`Want Drop to expand to ${city}, ${state}? Our AI will research real restaurants there.`))return;
+  const r=await(await fetch('/api/city/request',{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({city,state})})).json();
+  alert(r.ok ? `Done! We're researching ${city} now. Check back soon.` : 'Request failed');
 }
 load();
 </script></body></html>
