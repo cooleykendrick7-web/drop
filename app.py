@@ -8005,6 +8005,20 @@ async def fare_quote(req: Request):
 WATCHER_PIN = "5683"
 
 
+@app.get("/api/rides/mine")
+def my_rides(req: Request):
+    """Rides for the logged-in rider (matched by phone)."""
+    me = get_session_user(req)
+    if not me:
+        raise HTTPException(401, "Not logged in")
+    conn = db()
+    rides = conn.execute(
+        "SELECT * FROM rides WHERE rider_phone=? ORDER BY id DESC LIMIT 30",
+        (me.get("phone", ""),)).fetchall()
+    conn.close()
+    return {"rides": [dict(r) for r in rides]}
+
+
 @app.get("/api/rides/{ride_id}")
 def get_ride(ride_id: int):
     """Get ride details (for tracking page)."""
@@ -8707,20 +8721,6 @@ def dpage():
 def termspage():
     with open(os.path.join(BASE, "static", "terms.html")) as f:
         return f.read()
-@app.get("/api/rides/mine")
-def my_rides(req: Request):
-    """Rides for the logged-in rider (matched by phone)."""
-    me = get_session_user(req)
-    if not me:
-        raise HTTPException(401, "Not logged in")
-    conn = db()
-    rides = conn.execute(
-        "SELECT * FROM rides WHERE rider_phone=? ORDER BY id DESC LIMIT 30",
-        (me.get("phone", ""),)).fetchall()
-    conn.close()
-    return {"rides": [dict(r) for r in rides]}
-
-
 @app.post("/api/rides/checkout")
 async def rides_checkout(req: Request):
     """Create a ride and start Stripe payment. Returns Stripe URL."""
