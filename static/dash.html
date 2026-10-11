@@ -10,26 +10,17 @@
 
 <div id="login" class="card">
   <h1>Operator login</h1>
-  <label>PIN</label><input id="pin" type="password" placeholder="Enter PIN or code">
+  <label>PIN</label><input id="pin" inputmode="numeric" type="password" placeholder="Enter PIN">
   <button class="btn" id="gobtn">Unlock</button>
   <p class="small" id="loginmsg"></p>
 </div>
 
 <div id="app" style="display:none">
-  <div class="tabs" style="flex-wrap:wrap">
-    <button class="on" data-t="home">🏠 Home</button>
-    <button data-t="orders">📦 Orders</button>
+  <div class="tabs">
+    <button class="on" data-t="orders">Orders</button>
     <button data-t="money">💰 Money</button>
     <button data-t="deals">🤝 Deals <span id="dealbadge"></span></button>
-    <button data-t="drv">🚗 Drivers <span id="drvbadge"></span></button>
-    <button data-t="out">📧 Outreach <span id="outbadge"></span></button>
-    <button data-t="live">⚡ Live</button>
-    <button data-t="bot">🤖 AI Bot</button>
-    <button data-t="pay">💳 Payments</button>
-    <button data-t="crew">📢 Crew</button>
-    <button data-t="more">⋯ More</button>
-  </div>
-  <div class="tabs sub" id="moretabs" style="display:none;flex-wrap:wrap;background:#141419">
+    <button data-t="drv">Drivers <span id="drvbadge"></span></button>
     <button data-t="biz">Drop More</button>
     <button data-t="earn">Earnings</button>
     <button data-t="menu">Menu</button>
@@ -38,31 +29,13 @@
     <button data-t="sup">Support <span id="tixbadge"></span></button>
     <button data-t="stats">Stats</button>
     <button data-t="inv">Investors <span id="invbadge"></span></button>
+    <button data-t="out">📧 Outreach <span id="outbadge"></span></button>
+    <button data-t="live">⚡ Live</button>
     <button data-t="audit">Audit</button>
     <button data-t="set">Settings</button>
   </div>
 
-  <div class="tab on" id="t-home">
-    <div class="hero" style="text-align:center;padding:20px 16px">
-      <h1 style="margin:0;font-size:1.8rem">Welcome back, <span style="color:var(--acc)">Ken</span> 👑</h1>
-      <p class="small" id="homedate"></p>
-    </div>
-    <div id="attention"></div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0" id="homestats"></div>
-    <div class="card">
-      <h3 style="margin-top:0">⚡ Quick actions</h3>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-        <button class="btn" onclick="goTab('orders')">📦 Orders</button>
-        <button class="btn" onclick="goTab('money')">💰 Money</button>
-        <button class="btn" onclick="goTab('drv')">🚗 Drivers</button>
-        <button class="btn" onclick="goTab('out')">📧 Outreach</button>
-        <button class="btn" onclick="goTab('live')">⚡ Live feed</button>
-        <button class="btn" onclick="goTab('bot')">🤖 Ask AI</button>
-      </div>
-    </div>
-  </div>
-
-  <div class="tab" id="t-orders">
+  <div class="tab on" id="t-orders">
     <div class="card" id="loccard"><div class="row"><span><b>📍 Share my location</b><br>
       <span class="small">While ON, customers watch your car move on their tracking map.</span></span>
       <button class="btn small ghost" id="locToggle" style="width:auto;padding:10px 20px">Start</button></div>
@@ -102,9 +75,6 @@
       <p class="small">Every deal moves: Submitted → Under Review → Financial Evaluation → Negotiation → Contract Review → Approved → Active. <b>You</b> approve every stage.</p></div>
     <div class="row" id="dealstages" style="flex-wrap:wrap;gap:6px;margin-bottom:10px"></div>
     <div id="deallist"></div>
-    <div class="card" style="margin-top:12px"><b>🍽️ Restaurant applications</b>
-      <p class="small">Restaurants that applied to join Drop for food delivery.</p>
-      <div id="partlist"><p class="small">Loading…</p></div></div>
   </div>
 
   <div class="tab" id="t-drv">
@@ -177,63 +147,16 @@
   </div>
 
   <div class="tab" id="t-live">
+    <div class="card"><b>🗺️ Live driver map</b>
+      <p class="small">All your drivers, right now. Auto-refreshes every 15 seconds.</p>
+      <div id="drivermap" style="height:300px;border-radius:12px;z-index:1"></div>
+      <div id="driverlist" style="margin-top:10px"></div></div>
     <div class="card"><b>🤖 AI suggestions</b>
       <p class="small">What needs your attention right now, based on live data.</p>
       <div id="sugglist"><p class="small">Loading…</p></div></div>
     <div class="card"><b>⚡ Live activity</b>
       <p class="small">Everything the platform does on its own + your actions. Auto-refreshes.</p>
       <div id="actlist"><p class="small">Loading…</p></div></div>
-  </div>
-
-  <div class="tab" id="t-bot">
-    <div class="card">
-      <h3 style="margin-top:0">🤖 Talk to your AI helper</h3>
-      <p class="small">Ask about Drop, get reports, queue outreach, or request changes. It knows your business live. Replies usually land within ~10 minutes.</p>
-      <div id="botlog" style="max-height:320px;overflow-y:auto;margin:10px 0"></div>
-      <div class="row"><input id="botmsg" placeholder="Ask anything…" style="flex:1;margin-right:6px">
-      <button class="btn small" id="botsend" style="width:auto;padding:10px 20px">Send</button></div>
-    </div>
-    <div class="card">
-      <h3 style="margin-top:0">💡 AI improvement ideas</h3>
-      <p class="small">Every week the AI studies Drop and proposes ways to beat DoorDash. Approve the ones you want built.</p>
-      <div id="ideaslist"></div>
-    </div>
-  </div>
-
-  <div class="tab" id="t-crew">
-    <div class="card"><h3>👥 Driver Monitor</h3><p class="small">All drivers, PINs, status, live activity.</p><div id="drivermon"></div></div>
-    <div class="card"><h3>📢 Broadcast to Drivers</h3>
-      <p class="small">Post updates, bonuses, news — all drivers see it in their News tab.</p>
-      <label>Title</label><input id="bc-title" placeholder="e.g. Weekend bonus!">
-      <label>Message</label><textarea id="bc-msg" rows="3" placeholder="Details…" style="width:100%"></textarea>
-      <button class="btn" id="bc-send" style="margin-top:8px">Send broadcast</button>
-      <p class="small" id="bc-status"></p></div>
-    <div class="card"><h3>🆘 Driver Complaints</h3><p class="small">AI categorizes and suggests fixes.</p><div id="complist"></div></div>
-  </div>
-  <div class="tab" id="t-pay">
-    <div class="card" style="border-left:4px solid #f39c12">
-      <h3 style="margin-top:0">💳 Universal Payment Control Center</h3>
-      <p class="small" id="providernote"></p>
-      <div id="payoverview"></div>
-    </div>
-    <div class="card">
-      <h3>🧾 Food Receipts — Approve Reimbursement</h3>
-      <p class="small">Drivers pay at the restaurant, you approve, they get reimbursed + profit.</p>
-      <div id="receipts"></div>
-    </div>
-    <div class="card">
-      <h3>🚨 Disputes & Appeals</h3>
-      <p class="small">Theft accusations, suspensions, driver appeals.</p>
-      <div id="disputes"></div>
-    </div>
-    <div class="card">
-      <h3>📝 Card Applications</h3>
-      <div id="cardapps"></div>
-    </div>
-    <div class="card">
-      <h3>💳 Virtual Cards</h3>
-      <div id="virtcards"></div>
-    </div>
   </div>
 
   <div class="tab" id="t-audit">
@@ -269,17 +192,10 @@
       <h3>Minutes per delivery</h3>
       <input id="smpd" inputmode="numeric" placeholder="18">
       <p class="small">Used to estimate customer wait times. Your average door-to-door minutes.</p>
-      <h3>Max live orders (capacity)</h3>
-      <input id="smaxq" inputmode="numeric" placeholder="8">
-      <p class="small">How many active orders you juggle at once. Hit the cap and the site shows "At capacity" for real.</p>
       <h3>Delivery fee ($)</h3>
       <input id="sfee" inputmode="decimal"><h3>Minimum food order ($)</h3>
       <input id="smin" inputmode="decimal" placeholder="10.00"><h3>Change PIN</h3>
-      <input id="spin" inputmode="numeric" placeholder="4–8 digits">
-      <h3>Owner driver PIN</h3>
-      <input id="sopin" inputmode="numeric" maxlength="6" placeholder="6 digits">
-      <p class="small">Your master key: type it in the Driver Hub PIN box to open the 👑 Master Hub — claim any delivery, all driver features.</p>
-      <h3>ntfy push topic</h3>
+      <input id="spin" inputmode="numeric" placeholder="4–8 digits"><h3>ntfy push topic</h3>
       <input id="stopic" placeholder="secret-topic-name">
       <button class="btn" id="saveset">Save settings</button>
       <p class="small" id="setmsg"></p></div>
@@ -306,154 +222,12 @@ function beep(){
 }
 function banner(t){const a=$('alert');a.textContent=t;a.style.display='block';setTimeout(()=>a.style.display='none',8000);}
 
-function goTab(t){
-  const btn=document.querySelector(`.tabs button[data-t="${t}"]`);
-  if(btn) btn.click();
-}
 document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
-  if(b.dataset.t==='more'){
-    const m=$('moretabs'); m.style.display=m.style.display==='none'?'flex':'none';
-    b.classList.toggle('on'); return;
-  }
   document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
   b.classList.add('on'); $('t-'+b.dataset.t).classList.add('on');
-  if(b.dataset.t==='home') loadHome();
-  if(b.dataset.t==='earn') loadEarn(); if(b.dataset.t==='menu') loadMenu(); if(b.dataset.t==='set') loadSet(); if(b.dataset.t==='sup') loadTix(); if(b.dataset.t==='promo') loadPromos(); if(b.dataset.t==='stats') loadStats(); if(b.dataset.t==='upd') loadProposals(); if(b.dataset.t==='drv') loadDrivers(); if(b.dataset.t==='biz') loadBiz(); if(b.dataset.t==='inv') loadInv(); if(b.dataset.t==='money') loadMoney(); if(b.dataset.t==='deals') loadDeals(); if(b.dataset.t==='audit') loadAudit(); if(b.dataset.t==='out') loadOutreach(); if(b.dataset.t==='live') loadLive(); if(b.dataset.t==='pay') loadPay(); if(b.dataset.t==='bot'){ loadBot(); loadIdeas(); }
-
-/* ---- Payment Control Center ---- */
-async function loadCrew(){
-  // Driver monitor
-  try{
-    const dm=await(await fetch('/api/operator/drivers/monitor',{headers:H()})).json();
-    $('drivermon').innerHTML=dm.map(d=>`
-      <div class="card" style="margin:8px 0">
-        <div class="row"><b>${d.name.replace(/</g,'&lt;')}</b><span class="badge">${d.status.toUpperCase()}</span></div>
-        <p class="small">📞 ${d.phone} · 🔑 PIN: <b>${d.login_pin||'—'}</b> · ⭐ ${d.rating||'5.0'} · 📦 ${d.deliveries||0} deliveries</p>
-        ${d.last_active?`<p class="small">Last active: ${d.last_active}</p>`:''}
-      </div>`).join('')||'<p class="small">No drivers yet.</p>';
-  }catch(e){ $('drivermon').innerHTML='<p class="small">Failed to load.</p>'; }
-  // Complaints
-  const c=await(await fetch('/api/operator/complaints',{headers:H()})).json();
-  $('complist').innerHTML=c.map(x=>`
-    <div class="card" style="margin:8px 0;border-left:3px solid ${x.status==='open'?'#e74c3c':'#2ecc71'}">
-      <div class="row"><b>${x.driver_name}: ${x.subject.replace(/</g,'&lt;')}</b><span class="badge">${x.status.toUpperCase()}</span></div>
-      <p class="small">${x.message.replace(/</g,'&lt;')}</p>
-      <p class="small" style="color:#f39c12"><b>AI:</b> ${x.ai_summary} — ${x.ai_suggestion}</p>
-      ${x.ken_response?`<p class="small" style="color:#2ecc71"><b>You:</b> ${x.ken_response.replace(/</g,'&lt;')}</p>`:`
-      <div class="row"><input id="resp-${x.id}" placeholder="Your response…" style="flex:1;margin-right:6px">
-      <button class="btn small" onclick="respondComplaint(${x.id})" style="width:auto">Reply</button></div>`}
-    </div>`).join('')||'<p class="small">No complaints.</p>';
-}
-async function respondComplaint(id){
-  const r=document.getElementById('resp-'+id).value.trim();
-  if(!r)return;
-  await fetch(`/api/operator/complaints/${id}/respond`,{method:'POST',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({response:r})});
-  loadCrew();
-}
-document.getElementById('bc-send').onclick=async()=>{
-  const t=document.getElementById('bc-title').value.trim();
-  const m=document.getElementById('bc-msg').value.trim();
-  if(!t||!m){document.getElementById('bc-status').textContent='Fill in both.';return;}
-  const r=await(await fetch('/api/operator/broadcasts',{method:'POST',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({title:t,message:m})})).json();
-  document.getElementById('bc-status').textContent=r.ok?'✅ Broadcast sent to all drivers!':'Failed.';
-  document.getElementById('bc-title').value='';document.getElementById('bc-msg').value='';
-};
-// Hook crew tab into tab switcher
-const _origShow=document.querySelectorAll('.tabs button');
-_origShow.forEach(b=>b.addEventListener('click',()=>{ if(b.dataset.t==='crew') loadCrew(); }));
-async function loadPay(){
-  const d=await(await fetch('/api/operator/payments/overview',{headers:H()})).json();
-  $('providernote').innerHTML=`⚠️ <b>Provider status:</b> ${d.provider_note}`;
-  $('payoverview').innerHTML=`
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0">
-      <div class="card" style="margin:0;text-align:center"><div style="font-size:1.4rem;font-weight:800">${d.pending_payouts.count}</div><div class="small">Pending payouts ($${d.pending_payouts.total})</div></div>
-      <div class="card" style="margin:0;text-align:center"><div style="font-size:1.4rem;font-weight:800">${d.cards.length}</div><div class="small">Virtual cards</div></div>
-    </div>`;
-  $('cardapps').innerHTML=d.applications.map(a=>`
-    <div class="card" style="margin:8px 0">
-      <b>${a.driver_name}</b> <span class="small">AI: ${a.ai_recommendation}</span><br>
-      <span class="small">${a.ai_reason}</span><br>
-      ${a.status==='pending'?`<button class="btn small" onclick="decideCard(${a.id},1)">Approve</button>
-      <button class="btn small ghost" onclick="decideCard(${a.id},0)">Reject</button>`
-      :`<span class="small">Status: ${a.status}</span>`}
-    </div>`).join('')||'<p class="small">No applications.</p>';
-  $('virtcards').innerHTML=d.cards.map(c=>`
-    <div class="card" style="margin:8px 0">
-      <b>${c.driver_name}</b> — ${c.last4?'•••• '+c.last4:'No card issued'}<br>
-      <span class="small">Status: ${c.status} | Provider: ${c.provider||'Not activated'}</span>
-    </div>`).join('')||'<p class="small">No cards yet.</p>';
-  // Receipts
-  const rc=await(await fetch('/api/operator/receipts',{headers:H()})).json();
-  $('receipts').innerHTML=rc.map(x=>`
-    <div class="card" style="margin:8px 0">
-      <div class="row"><b>${x.driver_name}: $${x.amount.toFixed(2)}</b><span class="badge">PENDING</span></div>
-      <p class="small">Order #${x.order_id} · ${x.ai_check}</p>
-      ${x.photo_path?`<img src="${x.photo_path}" style="max-width:200px;border-radius:8px">`:''}<br>
-      <button class="btn small" onclick="approveReceipt(${x.id})">✅ Approve & Pay</button>
-      <button class="btn small ghost" onclick="rejectReceipt(${x.id})">❌ Reject</button>
-    </div>`).join('')||'<p class="small">No pending receipts.</p>';
-  // Disputes
-  const dp=await(await fetch('/api/operator/disputes',{headers:H()})).json();
-  $('disputes').innerHTML=dp.map(x=>`
-    <div class="card" style="margin:8px 0;border-left:3px solid ${x.status==='open'?'#e74c3c':x.status==='appealed'?'#f39c12':'#2ecc71'}">
-      <div class="row"><b>${x.driver_name}</b><span class="badge">${x.status.toUpperCase()}</span></div>
-      <p class="small"><b>${x.issue_type}</b>: ${x.description}</p>
-      ${x.driver_appeal?`<p class="small" style="color:#f39c12"><b>Appeal:</b> ${x.driver_appeal}</p>`:''}
-      ${x.status!=='resolved'?`
-      <button class="btn small" onclick="resolveDispute(${x.id},'reinstate')">✅ Reinstate</button>
-      <button class="btn small ghost" onclick="resolveDispute(${x.id},'ban')">🚫 Ban</button>`:`
-      <p class="small">Resolved: ${x.resolution}</p>`}
-    </div>`).join('')||'<p class="small">No disputes.</p>';
-}
-async function approveReceipt(id){
-  if(!confirm('Approve this receipt? Driver will be reimbursed + paid.'))return;
-  const r=await(await fetch(`/api/operator/receipts/${id}/approve`,{method:'POST',headers:H()})).json();
-  alert(r.ok?`Approved! $${r.payout_total} queued for driver.`:'Failed');
-  loadPay();
-}
-async function rejectReceipt(id){
-  const reason=prompt('Reason for rejection:');
-  if(!reason)return;
-  await fetch(`/api/operator/receipts/${id}/reject`,{method:'POST',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({reason})});
-  loadPay();
-}
-async function resolveDispute(id, action){
-  const res=prompt(action==='reinstate'?'Reason for reinstating:':'Reason for ban:');
-  if(!res)return;
-  await fetch(`/api/operator/disputes/${id}/resolve`,{method:'POST',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({action,resolution:res})});
-  loadPay();
-}
-async function decideCard(aid, approve){
-  await fetch(`/api/operator/cards/${aid}/decide`,{method:'POST',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({approve:!!approve})});
-  loadPay();
-}
+  if(b.dataset.t==='earn') loadEarn(); if(b.dataset.t==='menu') loadMenu(); if(b.dataset.t==='set') loadSet(); if(b.dataset.t==='sup') loadTix(); if(b.dataset.t==='promo') loadPromos(); if(b.dataset.t==='stats') loadStats(); if(b.dataset.t==='upd') loadProposals(); if(b.dataset.t==='drv') loadDrivers(); if(b.dataset.t==='biz') loadBiz(); if(b.dataset.t==='inv') loadInv(); if(b.dataset.t==='money') loadMoney(); if(b.dataset.t==='deals') loadDeals(); if(b.dataset.t==='audit') loadAudit(); if(b.dataset.t==='out') loadOutreach(); if(b.dataset.t==='live') loadLive();
 });
-
-/* ---- Home dashboard ---- */
-async function loadHome(){
-  $('homedate').textContent=new Date().toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'});
-  const s=await(await fetch('/api/operator/command-stats',{headers:H()})).json();
-  const cards=[
-    ['📦','Orders today',s.orders_today,'#ff5a00'],
-    ['💰','Revenue today','$'+(s.revenue_today||0).toFixed(2),'#2ecc71'],
-    ['🛵','Active now',s.active_orders,'#3498db'],
-    ['🍽️','Restaurants',s.restaurants,'#9b59b6'],
-    ['🌍','Cities',s.cities,'#f39c12'],
-    ['🤝','Pending deals',s.pending_partners,'#e74c3c'],
-  ];
-  $('homestats').innerHTML=cards.map(([e,l,v,c])=>`
-    <div class="card" style="text-align:center;border-top:3px solid ${c};margin:0">
-      <div style="font-size:1.8rem">${e}</div>
-      <div style="font-size:1.4rem;font-weight:800">${v}</div>
-      <div class="small">${l}</div>
-    </div>`).join('');
-  const attn=[];
-  if(s.pending_partners>0) attn.push(`🤝 <b>${s.pending_partners}</b> partner applications waiting — <a href="#" onclick="goTab('deals');return false">review them</a>`);
-  if(s.active_orders>0) attn.push(`🛵 <b>${s.active_orders}</b> active orders right now — <a href="#" onclick="goTab('orders');return false">view</a>`);
-  if(s.paused) attn.push(`⏸️ Ordering is <b>paused</b> — <a href="#" onclick="goTab('set');return false">resume in Settings</a>`);
-  $('attention').innerHTML=attn.length?`<div class="card" style="border-left:4px solid #ff5a00"><b>👀 Needs your attention</b><br>${attn.join('<br>')}</div>`:'';
-}
 
 async function loadStats(){
   const a=await (await fetch('/api/operator/analytics',{headers:H()})).json();
@@ -469,21 +243,15 @@ async function loadStats(){
 }
 
 $('gobtn').onclick=async()=>{
-  const val=$('pin').value.trim();
-  // LOVE code → WATCH portal (for Ken's friends)
-  if(val==='LOVE'){
-    location.href='/watch.html';
-    return;
-  }
-  PIN=val;
+  PIN=$('pin').value.trim();
   const r=await fetch('/api/operator/orders',{headers:H()});
   if(r.status===401){$('loginmsg').textContent='Wrong PIN.';return;}
   sessionStorage.setItem('droppin',PIN);
   $('login').style.display='none';$('app').style.display='block';
-  loadHome();
+  loadOrders(true);
 };
 PIN=sessionStorage.getItem('droppin')||'';
-if(PIN){$('login').style.display='none';$('app').style.display='block';loadHome();}
+if(PIN){$('login').style.display='none';$('app').style.display='block';loadOrders(true);}
 
 async function loadOrders(first){
   const r=await fetch('/api/operator/orders',{headers:H()});
@@ -604,7 +372,7 @@ $('addrest').onclick=async()=>{
 };
 async function loadSet(){
   const s=await (await fetch('/api/operator/settings',{headers:H()})).json();
-  $('sfee').value=s.delivery_fee;$('smin').value=s.min_order;$('smpd').value=s.mins_per_delivery;$('smaxq').value=s.max_queue||8;$('sopin').value=s.owner_pin||'';$('stopic').value=s.ntfy_topic||'';
+  $('sfee').value=s.delivery_fee;$('smin').value=s.min_order;$('smpd').value=s.mins_per_delivery;$('stopic').value=s.ntfy_topic||'';
   $('sopen').value=s.open_hour;$('sclose').value=s.close_hour;$('szone').value=s.delivery_zone||'';
   const pt=$('pausetoggle');
   pt.textContent=s.accepting_orders?'Pause':'Resume';
@@ -618,12 +386,11 @@ $('pausetoggle').onclick=async()=>{
 };
 $('saveset').onclick=async()=>{
   const body={delivery_fee:parseFloat($('sfee').value),min_order:parseFloat($('smin').value)||0,
-    mins_per_delivery:parseInt($('smpd').value)||18,max_queue:parseInt($('smaxq').value)||8,
-    ntfy_topic:$('stopic').value.trim(),delivery_zone:$('szone').value.trim()};
+    mins_per_delivery:parseInt($('smpd').value)||18,ntfy_topic:$('stopic').value.trim(),
+    delivery_zone:$('szone').value.trim()};
   const oh=parseInt($('sopen').value),ch=parseInt($('sclose').value);
   if(!isNaN(oh))body.open_hour=oh; if(!isNaN(ch))body.close_hour=ch;
   if($('spin').value.trim()) body.pin=$('spin').value.trim();
-  body.owner_pin=$('sopin').value.trim();
   const r=await fetch('/api/operator/settings',{method:'PUT',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify(body)});
   const j=await r.json();
   if(r.ok){$('setmsg').textContent='Saved ✓';if(body.pin)PIN=body.pin,sessionStorage.setItem('droppin',PIN);$('spin').value='';}
@@ -870,27 +637,13 @@ $('fs-save').onclick=async()=>{
 async function loadPayouts(){
   const p=await (await fetch('/api/operator/payouts',{headers:H()})).json();
   const req=p.filter(x=>x.status==='requested');
-  const proc=p.filter(x=>x.status==='processing');
   $('payoutlist').innerHTML=(req.map(x=>`
     <div class="card"><div class="row"><b>${x.driver_name}: $${x.amount.toFixed(2)}</b>
       <span class="badge">REQUESTED</span></div>
-      <p class="small">${x.created_at.slice(0,16).replace('T',' ')} · AI will validate, then pay:</p>
-      <button class="btn small" onclick="processPayout(${x.id})">🤖 AI Pay Now</button></div>`).join('')
+      <p class="small">${x.created_at.slice(0,16).replace('T',' ')} · Send via bank/Cash App, then tap:</p>
+      <button class="btn small" onclick="markPaid(${x.id})">✅ Mark paid</button></div>`).join('')
     ||'<p class="small">No payout requests right now.</p>')
-    + proc.map(x=>`
-    <div class="card" style="border-left:3px solid #f39c12"><div class="row"><b>${x.driver_name}: $${x.amount.toFixed(2)}</b>
-      <span class="badge">PROCESSING</span></div>
-      <p class="small">AI validated ✓. Send the money, then confirm:</p>
-      <button class="btn small" onclick="markPaid(${x.id})">✅ I Sent It — Mark Paid</button></div>`).join('')
     + (p.filter(x=>x.status==='paid').length?`<p class="small">✅ ${p.filter(x=>x.status==='paid').length} payouts completed.</p>`:'');
-}
-async function processPayout(id){
-  if(!confirm('Let AI validate and process this payout?'))return;
-  const r=await(await fetch('/api/operator/payouts/'+id+'/process',{method:'POST',headers:H()})).json();
-  if(r.ok){
-    alert(r.method==='stripe' ? 'Paid via Stripe! Transfer: '+r.transfer_id : r.message);
-  } else alert('Blocked: '+(r.detail||'error'));
-  loadPayouts(); loadMoney();
 }
 async function markPaid(id){
   if(!confirm('Confirm you sent this money to the driver?'))return;
@@ -937,25 +690,6 @@ async function loadDeals(stage){
       </div>
       <div id="deal-${p.id}" style="margin-top:8px"></div>
     </div>`).join('')||'<p class="small">No partnership applications yet.</p>';
-  loadRestaurantApps();
-}
-async function loadRestaurantApps(){
-  const apps=await (await fetch('/api/operator/food-partner-apps',{headers:H()})).json();
-  const esc=s=>(s||'').replace(/</g,'&lt;');
-  $('partlist').innerHTML=apps.map(a=>`
-    <div class="card" style="margin:8px 0">
-      <div class="row"><b>${esc(a.business_name)}</b><span class="badge">${a.status}</span></div>
-      <p class="small">${esc(a.cuisine)} · ${esc(a.city)}, ${esc(a.state)} · ${esc(a.contact_name)}<br>
-      ✉️ <a href="mailto:${esc(a.email)}">${esc(a.email)}</a>${a.phone?` · 📞 ${esc(a.phone)}`:''}</p>
-      ${a.proposal?`<p class="small"><b>Their proposal:</b> ${esc(a.proposal)}</p>`:''}
-      ${a.status==='new'?`<button class="btn small" onclick="restAppAct(${a.id},'approve')">✅ Approve</button>
-      <button class="btn small ghost" onclick="restAppAct(${a.id},'reject')">Reject</button>`:''}
-    </div>`).join('')||'<p class="small">No restaurant applications yet.</p>';
-}
-async function restAppAct(id,act){
-  if(!confirm(`${act==='approve'?'Approve':'Reject'} this restaurant?`))return;
-  await fetch(`/api/operator/food-partner-apps/${id}/${act}`,{method:'POST',headers:H()});
-  loadRestaurantApps();
 }
 async function dealStage(id,stage){
   const stages={under_review:'Under Review',negotiation:'Negotiation',approved:'Approved',rejected:'Rejected'};
@@ -1040,7 +774,7 @@ async function outDiscard(id){
 }
 
 /* --- Live activity + AI suggestions --- */
-let liveTimer=null;
+let liveTimer=null, driverMap=null, driverMarkers={};
 async function loadLive(){
   // suggestions
   const s=await (await fetch('/api/operator/suggestions',{headers:H()})).json();
@@ -1052,8 +786,49 @@ async function loadLive(){
     ||'<p class="small">✅ All clear — nothing needs your attention right now.</p>';
   // activity feed
   await loadActivity();
+  await loadDriverMap();
   if(liveTimer)clearInterval(liveTimer);
-  liveTimer=setInterval(loadActivity,15000);
+  liveTimer=setInterval(()=>{loadActivity();loadDriverMap();},15000);
+}
+async function loadDriverMap(){
+  // Leaflet via CDN
+  if(!window.L){
+    await new Promise(res=>{
+      const l=document.createElement('link');
+      l.rel='stylesheet';l.href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+      document.head.appendChild(l);
+      const s=document.createElement('script');
+      s.src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+      s.onload=res;document.head.appendChild(s);
+    });
+  }
+  const d=await (await fetch('/api/operator/drivers/live',{headers:H()})).json();
+  if(!driverMap){
+    driverMap=L.map('drivermap').setView([46.8083,-100.7837],12);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+      {attribution:'©OpenStreetMap ©CARTO',maxZoom:19}).addTo(driverMap);
+  }
+  // clear old markers
+  Object.values(driverMarkers).forEach(m=>driverMap.removeLayer(m));
+  driverMarkers={};
+  const carIcon=L.divIcon({html:'🚗',iconSize:[28,28],className:'car-marker'});
+  let bounds=[];
+  d.forEach(x=>{
+    if(x.lat&&x.lng){
+      const m=L.marker([x.lat,x.lng],{icon:carIcon}).addTo(driverMap)
+        .bindPopup(`<b>${x.name.replace(/</g,'&lt;')}</b><br>${x.status}<br><span style="font-size:.8em">${x.updated||''}</span>`);
+      driverMarkers[x.id]=m;
+      bounds.push([x.lat,x.lng]);
+    }
+  });
+  if(bounds.length)driverMap.fitBounds(bounds,{padding:[30,30]});
+  $('driverlist').innerHTML=d.map(x=>`
+    <div class="row" style="padding:6px 0;border-bottom:1px solid #222">
+      <span>${x.lat?'🟢':'⚪'}</span>
+      <div style="flex:1"><b class="small">${x.name.replace(/</g,'&lt;')}</b><br>
+        <span class="small" style="opacity:.7">${x.status}${x.updated?' · '+x.updated:''}</span></div>
+      ${x.lat?`<button class="btn small ghost" style="width:auto" onclick="sendBoost(${x.id})">💪</button>`:''}
+    </div>`).join('')||'<p class="small">No drivers sharing location right now.</p>';
 }
 async function loadActivity(){
   const a=await (await fetch('/api/operator/activity?limit=30',{headers:H()})).json();
@@ -1074,40 +849,5 @@ async function loadAudit(){
     <div class="card"><div class="row"><b>${x.action}</b><span class="small">${x.created_at.slice(0,16).replace('T',' ')}</span></div>
       <p class="small">${x.actor} · ${x.entity_type} #${x.entity_id}${x.details?` · ${x.details.replace(/</g,'&lt;')}`:''}</p></div>`).join('')
     ||'<p class="small">No admin actions recorded yet.</p>';
-}
-/* ---- AI Bot ---- */
-async function loadBot(){
-  const h=await (await fetch('/api/operator/bot/history',{headers:H()})).json();
-  $('botlog').innerHTML=h.map(m=>`
-    <div style="margin:6px 0;text-align:${m.role==='ken'?'right':'left'}">
-      <span style="display:inline-block;max-width:85%;padding:8px 12px;border-radius:14px;font-size:.9rem;
-        background:${m.role==='ken'?'linear-gradient(135deg,#ff5a00,#ffaa00)':'#1c1c23'};color:#fff;
-        border-bottom-${m.role==='ken'?'right':'left'}-radius:4px">${m.message.replace(/</g,'&lt;')}</span>
-    </div>`).join('')||'<p class="small">No messages yet — say hi.</p>';
-  $('botlog').scrollTop=$('botlog').scrollHeight;
-}
-$('botsend').onclick=async()=>{
-  const v=$('botmsg').value.trim(); if(!v) return;
-  $('botmsg').value='';
-  await fetch('/api/operator/bot/send',{method:'POST',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({message:v})});
-  loadBot();
-};
-$('botmsg').addEventListener('keydown',e=>{if(e.key==='Enter')$('botsend').click();});
-/* ---- AI ideas ---- */
-async function loadIdeas(){
-  const ideas=await (await fetch('/api/operator/ideas',{headers:H()})).json();
-  $('ideaslist').innerHTML=ideas.map(i=>`
-    <div class="card" style="margin:8px 0;border-left:4px solid ${i.status==='approved'?'#2ecc71':i.status==='rejected'?'#555':'#ffaa00'}">
-      <b>${i.title.replace(/</g,'&lt;')}</b>
-      <span class="small" style="margin-left:8px">${i.status}</span>
-      <p class="small">${i.description.replace(/</g,'&lt;')}</p>
-      <p class="small" style="color:#ffaa00">🥊 ${i.why_beats.replace(/</g,'&lt;')}</p>
-      ${i.status==='pending'?`<button class="btn small" onclick="ideaAct(${i.id},'approve')">✅ Build it</button>
-      <button class="btn small ghost" onclick="ideaAct(${i.id},'reject')">Reject</button>`:''}
-    </div>`).join('')||'<p class="small">No ideas yet — the AI proposes 3 every Sunday.</p>';
-}
-async function ideaAct(id,act){
-  await fetch(`/api/operator/ideas/${id}/${act}`,{method:'POST',headers:H()});
-  loadIdeas();
 }
 </script></body></html>
