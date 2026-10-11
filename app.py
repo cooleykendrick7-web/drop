@@ -7889,14 +7889,14 @@ def rides_quote(pickup_address: str = "", dropoff_address: str = "",
         p_lat, p_lng = plat, plng
         p_approx = False
     else:
-        p_lat, p_lng = geocode(pickup_address, {})
+        p_lat, p_lng = geocode(pickup_address)
         p_approx = True
     # dropoff coords
     if dlat and dlng:
         d_lat, d_lng = dlat, dlng
         d_approx = False
     else:
-        d_lat, d_lng = geocode(dropoff_address, {})
+        d_lat, d_lng = geocode(dropoff_address)
         d_approx = True
 
     if not p_lat or not d_lat:
