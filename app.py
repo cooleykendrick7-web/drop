@@ -7847,6 +7847,301 @@ def search_city(city: str = "", state: str = ""):
 
 
 # ---------------- Rides (passenger) quote ----------------
+# ---- transplanted: rideshare completion flow ----
+@app.get("/api/rides/driver/{driver_id}")
+def driver_rides(driver_id: int, req: Request):
+    """Driver's ride history with earnings."""
+    # verify driver PIN or operator PIN
+    pin = req.headers.get("x-pin", "")
+    conn = db()
+    drv = conn.execute("SELECT * FROM drivers WHERE id=?", (driver_id,)).fetchone()
+    if not drv:
+        conn.close()
+        raise HTTPException(404, "Driver not found")
+    # allow if PIN matches driver PIN or operator PIN
+    if pin != drv["pin"] and pin != get_setting("pin"):
+        conn.close()
+        raise HTTPException(401, "Bad PIN")
+    rides = conn.execute(
+        "SELECT * FROM rides WHERE driver_id=? ORDER BY id DESC LIMIT 50",
+        (driver_id,)).fetchall()
+    total_earned = sum(r["driver_pay"] for r in rides if r["status"] == "completed")
+    conn.close()
+    return {
+        "rides": [dict(r) for r in rides],
+        "total_earned": round(total_earned, 2),
+        "ride_count": len([r for r in rides if r["status"] == "completed"]),
+    }
+
+@app.get("/api/rides/{ride_id}")
+def get_ride(ride_id: int):
+    """Get ride details (for tracking page)."""
+    conn = db()
+    r = conn.execute("SELECT * FROM rides WHERE id=?", (ride_id,)).fetchone()
+    conn.close()
+    if not r:
+        raise HTTPException(404, "Ride not found")
+    return dict(r)
+
+@app.post("/api/dropper")
+async def dropper_chat(req: Request):
+    """Dropper — friendly AI that helps riders sign up and answers questions."""
+    body = await req.json()
+    q = (body.get("q") or "").strip()
+    if not q:
+        return {"answer": "Hey! I'm Dropper 🤖 Ask me about riding, driving, or fares!"}
+    l = q.lower()
+
+    # quick local answers (no AI needed)
+    if any(w in l for w in ("sign", "rider", "account", "join")):
+        return {"answer": "To ride with Drop: tap '🧍 Ride with Drop' on the homepage, enter your name and phone number, and you're in! Then use the fare calculator to see your price and book."}
+    if any(w in l for w in ("drive", "driver", "job", "apply", "work")):
+        return {"answer": "To drive for Drop: go to '🚗 Drive for Drop'. You'll need a valid driver's license, proof of insurance, a clear photo of yourself, and a photo of your car. Every application is reviewed personally — we only approve safe, reliable drivers."}
+    if any(w in l for w in ("price", "cost", "fare", "much", "charge")):
+        base = fin_setting("ride_base_fare", 4.99)
+        pm = fin_setting("ride_per_mile", 2.00)
+        return {"answer": f"Fares are simple: ${base:.2f} base + ${pm:.2f} per mile. Type your pickup and dropoff in the calculator to see your exact price upfront — no surge, no surprises!"}
+    if any(w in l for w in ("where", "area", "city", "serve", "location")):
+        return {"answer": "Drop serves Bismarck and Mandan, North Dakota right now. We're local — real drivers from your neighborhood!"}
+    if any(w in l for w in ("safe", "trust")):
+        return {"answer": "Every Drop driver passes our review: valid license, active insurance, and a personal application review. You can message your driver directly and track them live on the map."}
+    if any(w in l for w in ("pay", "payment", "card")):
+        return {"answer": "You pay right on the site with your card — secure checkout through Stripe. Your driver doesn't handle cash, so it's clean and simple."}
+    if any(w in l for w in ("hi", "hey", "hello")):
+        return {"answer": "Hey there! 👋 I'm Dropper. I can help you sign up to ride, apply to drive, or figure out your fare. What's up?"}
+
+    return {"answer": "Good question! I'm still learning — but I can definitely help with signing up to ride, applying to drive, fares, or where we operate. What else can I do for you?"}
+
+
+# ---------------- Public fare calculator ----------------
+@app.post("/api/fare-quote")
+async def fare_quote(req: Request):
+    """Accurate upfront fare estimate. Takes structured from/to addresses,
+    geocodes both, calculates REAL driving distance, returns the price."""
+    body = await req.json()
+    frm = body.get("from") or {}
+    to = body.get("to") or {}
+    kind = body.get("kind", "courier")
+
+    # validate required fields
+    for label, a in (("pickup", frm), ("delivery", to)):
+        if not a.get("street") or not a.get("city") or not a.get("state"):
+            raise HTTPException(400, f"{label}: street, city, and state required")
+
+    def full_addr(a):
+        s = a["street"].strip()
+        if a.get("apt"):
+            s += ", " + a["apt"].strip()
+        s += f", {a['city'].strip()}, {a['state'].strip().upper()}"
+        if a.get("zip"):
+            s += " " + a["zip"].strip()
+        return s
+
+    from_full = full_addr(frm)
+    to_full = full_addr(to)
+
+    # geocode both with structured parts for max accuracy
+    flat, flng = geocode(from_full, frm)
+    tlat, tlng = geocode(to_full, to)
+    if not flat or not tlat:
+        raise HTTPException(400,
+            "Couldn't find one of those addresses. Double-check street, city, state.")
+
+    # real driving distance
+    miles = driving_miles(flat, flng, tlat, tlng)
+    q = calc_quote(flat, flng, tlat, tlng, kind)
+
+    return {
+        "from": from_full, "to": to_full,
+        "distance_miles": miles,
+        "delivery_fee": q["delivery_fee"],
+        "driver_pay": q["driver_pay"],
+        "warnings": q["warnings"],
+        "from_lat": flat, "from_lng": flng,
+        "to_lat": tlat, "to_lng": tlng,
+    }
+
+
+# ---------------- Watcher mode (PIN 5683): read-only live view + chat ----------------
+WATCHER_PIN = "5683"
+
+@app.post("/api/operator/rides/{ride_id}/assign")
+async def assign_ride_driver(ride_id: int, req: Request, x_pin: str = Header(default="")):
+    """Assign a driver to a ride."""
+    check_pin(x_pin)
+    body = await req.json()
+    driver_id = body.get("driver_id")
+    conn = db()
+    drv = conn.execute("SELECT * FROM drivers WHERE id=?", (driver_id,)).fetchone()
+    if not drv:
+        conn.close()
+        raise HTTPException(404, "Driver not found")
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        "UPDATE rides SET driver_id=?, driver_name=?, status='assigned', updated_at=?"
+        " WHERE id=?", (driver_id, drv["name"], now, ride_id))
+    conn.commit()
+    r = conn.execute("SELECT * FROM rides WHERE id=?", (ride_id,)).fetchone()
+    conn.close()
+    # notify driver
+    try:
+        if drv.get("ntfy_topic"):
+            send_ntfy(drv["ntfy_topic"], "🚗 New ride assigned!",
+                      f"Pickup: {r['pickup_address']}\nDropoff: {r['dropoff_address']}\n"
+                      f"Fare: ${r['driver_pay']:.2f} for you")
+    except Exception:
+        pass
+    log_event("ride", f"👨‍✈️ Driver {drv['name']} assigned to ride #{ride_id}", "")
+    return {"ok": True}
+
+
+# ---------------- Dropper AI assistant ----------------
+@app.post("/api/dropper")
+async def dropper_chat(req: Request):
+    """Dropper — friendly AI that helps riders sign up and answers questions."""
+    body = await req.json()
+    q = (body.get("q") or "").strip()
+    if not q:
+        return {"answer": "Hey! I'm Dropper 🤖 Ask me about riding, driving, or fares!"}
+    l = q.lower()
+
+    # quick local answers (no AI needed)
+    if any(w in l for w in ("sign", "rider", "account", "join")):
+        return {"answer": "To ride with Drop: tap '🧍 Ride with Drop' on the homepage, enter your name and phone number, and you're in! Then use the fare calculator to see your price and book."}
+    if any(w in l for w in ("drive", "driver", "job", "apply", "work")):
+        return {"answer": "To drive for Drop: go to '🚗 Drive for Drop'. You'll need a valid driver's license, proof of insurance, a clear photo of yourself, and a photo of your car. Every application is reviewed personally — we only approve safe, reliable drivers."}
+    if any(w in l for w in ("price", "cost", "fare", "much", "charge")):
+        base = fin_setting("ride_base_fare", 4.99)
+        pm = fin_setting("ride_per_mile", 2.00)
+        return {"answer": f"Fares are simple: ${base:.2f} base + ${pm:.2f} per mile. Type your pickup and dropoff in the calculator to see your exact price upfront — no surge, no surprises!"}
+    if any(w in l for w in ("where", "area", "city", "serve", "location")):
+        return {"answer": "Drop serves Bismarck and Mandan, North Dakota right now. We're local — real drivers from your neighborhood!"}
+    if any(w in l for w in ("safe", "trust")):
+        return {"answer": "Every Drop driver passes our review: valid license, active insurance, and a personal application review. You can message your driver directly and track them live on the map."}
+    if any(w in l for w in ("pay", "payment", "card")):
+        return {"answer": "You pay right on the site with your card — secure checkout through Stripe. Your driver doesn't handle cash, so it's clean and simple."}
+    if any(w in l for w in ("hi", "hey", "hello")):
+        return {"answer": "Hey there! 👋 I'm Dropper. I can help you sign up to ride, apply to drive, or figure out your fare. What's up?"}
+
+    return {"answer": "Good question! I'm still learning — but I can definitely help with signing up to ride, applying to drive, fares, or where we operate. What else can I do for you?"}
+
+
+# ---------------- Public fare calculator ----------------
+@app.post("/api/fare-quote")
+async def fare_quote(req: Request):
+    """Accurate upfront fare estimate. Takes structured from/to addresses,
+    geocodes both, calculates REAL driving distance, returns the price."""
+    body = await req.json()
+    frm = body.get("from") or {}
+    to = body.get("to") or {}
+    kind = body.get("kind", "courier")
+
+    # validate required fields
+    for label, a in (("pickup", frm), ("delivery", to)):
+        if not a.get("street") or not a.get("city") or not a.get("state"):
+            raise HTTPException(400, f"{label}: street, city, and state required")
+
+    def full_addr(a):
+        s = a["street"].strip()
+        if a.get("apt"):
+            s += ", " + a["apt"].strip()
+        s += f", {a['city'].strip()}, {a['state'].strip().upper()}"
+        if a.get("zip"):
+            s += " " + a["zip"].strip()
+        return s
+
+    from_full = full_addr(frm)
+    to_full = full_addr(to)
+
+    # geocode both with structured parts for max accuracy
+    flat, flng = geocode(from_full, frm)
+    tlat, tlng = geocode(to_full, to)
+    if not flat or not tlat:
+        raise HTTPException(400,
+            "Couldn't find one of those addresses. Double-check street, city, state.")
+
+    # real driving distance
+    miles = driving_miles(flat, flng, tlat, tlng)
+    q = calc_quote(flat, flng, tlat, tlng, kind)
+
+    return {
+        "from": from_full, "to": to_full,
+        "distance_miles": miles,
+        "delivery_fee": q["delivery_fee"],
+        "driver_pay": q["driver_pay"],
+        "warnings": q["warnings"],
+        "from_lat": flat, "from_lng": flng,
+        "to_lat": tlat, "to_lng": tlng,
+    }
+
+
+# ---------------- Watcher mode (PIN 5683): read-only live view + chat ----------------
+WATCHER_PIN = "5683"
+
+@app.post("/api/rides/{ride_id}/complete")
+async def complete_ride(ride_id: int, req: Request, x_pin: str = Header(default="")):
+    """Driver or operator marks ride complete."""
+    check_pin(x_pin)
+    conn = db()
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute("UPDATE rides SET status='completed', updated_at=? WHERE id=?",
+                 (now, ride_id))
+    conn.commit()
+    conn.close()
+    log_event("ride", f"🏁 Ride #{ride_id} completed", "")
+    return {"ok": True}
+
+@app.post("/api/rides/{ride_id}/rate")
+async def rate_ride(ride_id: int, req: Request):
+    """Rider rates driver and optionally adds tip."""
+    body = await req.json()
+    rating = int(body.get("rating") or 0)
+    review = (body.get("review") or "").strip()
+    extra_tip = float(body.get("extra_tip") or 0)
+    if rating < 1 or rating > 5:
+        raise HTTPException(400, "Rating must be 1-5")
+    conn = db()
+    r = conn.execute("SELECT * FROM rides WHERE id=?", (ride_id,)).fetchone()
+    if not r:
+        conn.close()
+        raise HTTPException(404, "Ride not found")
+    now = datetime.now(timezone.utc).isoformat()
+    new_tip = r["tip"] + extra_tip
+    new_total = r["total"] + extra_tip
+    new_driver_pay = r["driver_pay"] + extra_tip  # 100% of extra tip to driver
+    conn.execute(
+        "UPDATE rides SET rider_rating=?, rider_review=?, tip=?, total=?,"
+        " driver_pay=?, updated_at=? WHERE id=?",
+        (rating, review, new_tip, new_total, new_driver_pay, now, ride_id))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+@app.post("/api/rides/{ride_id}/rider-in-car")
+async def rider_in_car(ride_id: int, req: Request):
+    """Rider confirms they're in the vehicle."""
+    conn = db()
+    r = conn.execute("SELECT * FROM rides WHERE id=?", (ride_id,)).fetchone()
+    if not r:
+        conn.close()
+        raise HTTPException(404, "Ride not found")
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute("UPDATE rides SET status='in_progress', updated_at=? WHERE id=?",
+                 (now, ride_id))
+    conn.commit()
+    conn.close()
+    log_event("ride", f"✅ Rider in car — ride #{ride_id}", "")
+    # notify driver via ntfy
+    try:
+        drv = get_driver(r["driver_id"]) if r["driver_id"] else None
+        if drv and drv.get("ntfy_topic"):
+            send_ntfy(drv["ntfy_topic"], "Rider confirmed",
+                      f"Rider is in your car! Head to: {r['dropoff_address']}")
+    except Exception:
+        pass
+    return {"ok": True, "status": "in_progress"}
+
+
 @app.get("/api/rides/quote")
 def rides_quote(pickup_address: str = "", dropoff_address: str = "",
                 plat: float = None, plng: float = None,
