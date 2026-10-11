@@ -3,6 +3,10 @@
 <title>Drop — Track order</title>
 <link rel="icon" href="/static/logo-mark.jpg">
 <link rel="stylesheet" href="/static/styles.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>#map{height:280px;border-radius:16px;margin:12px 0;display:none;z-index:0}
+.leaflet-divicon{background:none;border:none;font-size:26px;text-align:center}</style>
 </head><body>
 <header class="topbar"><a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg" alt="Drop"><b>Drop</b></a><a class="acct" href="/account.html">👤 Account</a></header>
 <h1>Order <span id="oid"></span></h1>
@@ -10,12 +14,50 @@
 <div id="queuepos"></div>
 <div class="card" id="items"></div>
 <h2>Where's my food?</h2>
+<div id="map"></div>
 <div class="steps" id="steps"></div>
 <p class="small" id="note">Live updates every few seconds.</p>
 <div id="cancelwrap" style="margin-top:12px"></div>
 <script>
 const oid = new URLSearchParams(location.search).get('id');
 const FLOW=[['placed','Order placed','Ken got your order'],['confirmed','Confirmed','Ken is heading to the restaurant'],['picked_up','Picked up','Ken has your food'],['on_the_way','On the way','Ken is driving to you'],['delivered','Delivered','Enjoy!']];
+let map=null, driverMarker=null;
+const emojiIcon=e=>L.divIcon({className:'leaflet-divicon',html:e,iconSize:[30,30],iconAnchor:[15,15]});
+function drawMap(o){
+  const pts=[];
+  if(o.restaurant_lat) pts.push(['rest',o.restaurant_lat,o.restaurant_lng]);
+  if(o.cust_lat) pts.push(['cust',o.cust_lat,o.cust_lng]);
+  if(!pts.length) return;
+  document.getElementById('map').style.display='block';
+  if(!map){
+    map=L.map('map',{scrollWheelZoom:false}).setView([pts[0][1],pts[0][2]],13);
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+      {attribution:'© OpenStreetMap © CARTO',maxZoom:19}).addTo(map);
+  }
+  if(o.restaurant_lat && !map._restM){
+    map._restM=L.marker([o.restaurant_lat,o.restaurant_lng],{icon:emojiIcon('🍔')})
+      .addTo(map).bindPopup('<b>'+o.restaurant+'</b><br>'+(o.restaurant_address||''));
+  }
+  if(o.cust_lat && !map._custM){
+    map._custM=L.marker([o.cust_lat,o.cust_lng],{icon:emojiIcon('🏠')})
+      .addTo(map).bindPopup('<b>Your door</b><br>'+(o.address||''));
+  }
+  const bounds=[];
+  if(o.restaurant_lat) bounds.push([o.restaurant_lat,o.restaurant_lng]);
+  if(o.cust_lat) bounds.push([o.cust_lat,o.cust_lng]);
+  if(o.driver_lat && o.driver_updated){
+    const age=(Date.now()-new Date(o.driver_updated).getTime())/1000;
+    if(age<600){  // driver's dot only if shared in the last 10 min
+      bounds.push([o.driver_lat,o.driver_lng]);
+      if(!driverMarker){
+        driverMarker=L.marker([o.driver_lat,o.driver_lng],{icon:emojiIcon('🚗')})
+          .addTo(map).bindPopup("<b>Ken's on the way!</b>");
+      } else driverMarker.setLatLng([o.driver_lat,o.driver_lng]);
+    } else if(driverMarker){ map.removeLayer(driverMarker); driverMarker=null; }
+  }
+  if(bounds.length>1 && !map._fit){ map.fitBounds(bounds,{padding:[30,30]}); map._fit=true; }
+  else if(bounds.length===1 && !map._fit){ map.setView(bounds[0],14); map._fit=true; }
+}
 async function poll(){
   const o = await (await fetch('/api/orders/'+oid+'/public')).json();
   if(o.id===undefined){document.body.innerHTML='<p>Order not found.</p>';return;}
@@ -55,6 +97,7 @@ async function poll(){
     const icon = i<idx?'✓':(i===idx?'●':'○');
     return `<div class="step ${cls}"><div class="dot">${icon}</div><div class="t"><b>${s[1]}</b><span>${s[2]}</span></div></div>`;
   }).join('');
+  drawMap(o);
   if(o.status!=='delivered') setTimeout(poll,5000);
   else document.getElementById('note').textContent='Delivered! Thanks for using Drop. 🧡';
 }

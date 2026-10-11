@@ -21,12 +21,17 @@
     <button data-t="earn">Earnings</button>
     <button data-t="menu">Menu</button>
     <button data-t="promo">Promos</button>
+    <button data-t="upd">Updates <span id="updbadge"></span></button>
     <button data-t="sup">Support <span id="tixbadge"></span></button>
     <button data-t="stats">Stats</button>
     <button data-t="set">Settings</button>
   </div>
 
   <div class="tab on" id="t-orders">
+    <div class="card"><div class="row"><span><b>📍 Share my location</b><br>
+      <span class="small">While ON, your dot moves on customers' tracking maps.</span></span>
+      <button class="btn small ghost" id="locToggle" style="width:auto;padding:10px 20px">Start</button></div>
+      <p class="small" id="locmsg"></p></div>
     <div id="olist"></div>
   </div>
 
@@ -55,6 +60,12 @@
       <button class="btn small" id="pcreate" style="width:auto;padding:10px 20px">Create</button></div>
       <p class="small" id="pmsg"></p></div>
     <div id="plist"></div>
+  </div>
+
+  <div class="tab" id="t-upd">
+    <div class="card"><b>🤖 AI menu watchdog</b>
+      <p class="small">Once a week the AI checks every restaurant's menu online. When it spots a changed price, new item, or removed item, it lands here. Nothing changes on your menu until you tap <b>Approve</b>.</p></div>
+    <div id="updlist"><p class="small">Loading…</p></div>
   </div>
 
   <div class="tab" id="t-sup">
@@ -115,7 +126,7 @@ document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
   b.classList.add('on'); $('t-'+b.dataset.t).classList.add('on');
-  if(b.dataset.t==='earn') loadEarn(); if(b.dataset.t==='menu') loadMenu(); if(b.dataset.t==='set') loadSet(); if(b.dataset.t==='sup') loadTix(); if(b.dataset.t==='promo') loadPromos(); if(b.dataset.t==='stats') loadStats();
+  if(b.dataset.t==='earn') loadEarn(); if(b.dataset.t==='menu') loadMenu(); if(b.dataset.t==='set') loadSet(); if(b.dataset.t==='sup') loadTix(); if(b.dataset.t==='promo') loadPromos(); if(b.dataset.t==='stats') loadStats(); if(b.dataset.t==='upd') loadProposals();
 });
 
 async function loadStats(){
@@ -154,7 +165,11 @@ async function loadOrders(first){
   lastSeen=mx;
   const open=orders.filter(o=>!['delivered','cancelled'].includes(o.status));
   const done=orders.filter(o=>['delivered','cancelled'].includes(o.status));
-  const card=(o,i)=>`
+  const card=(o,i)=>{
+    const navUrl=o.rest_lat&&o.cust_lat
+      ? `https://www.google.com/maps/dir/?api=1&origin=${o.rest_lat},${o.rest_lng}&destination=${o.cust_lat},${o.cust_lng}`
+      : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(o.address||'')}`;
+    return `
     <div class="card order ${o.id>lastSeen-2&&o.status==='placed'?'new':''}">
       <div class="row"><b>${i>=0?`#${i+1} · `:''}${o.id} · ${o.restaurant_name}</b>
         <span class="badge ${o.status==='placed'?'closed':''}">${o.status_label}</span></div>
@@ -165,9 +180,10 @@ async function loadOrders(first){
       <div class="small">${o.paid?'💰 Paid ✓':'⚠️ NOT PAID'} · ${new Date(o.created_at).toLocaleString()}</div>
       <div style="margin-top:8px">
         ${NEXT[o.status]?`<button class="btn small" onclick="setStatus(${o.id},'${NEXT[o.status]}')">${NEXTLBL[NEXT[o.status]]}</button>`:''}
+        ${!['delivered','cancelled'].includes(o.status)?`<a class="btn small ghost" href="${navUrl}" target="_blank" style="text-decoration:none;display:inline-block">🗺️ Navigate</a>`:''}
         ${!['delivered','cancelled'].includes(o.status)?`<button class="btn small ghost" onclick="setStatus(${o.id},'cancelled')">Cancel</button>`:''}
       </div>
-    </div>`;
+    </div>`;};
   $('olist').innerHTML = '<h2>Active ('+open.length+')</h2>'+(open.map((o,i)=>card(o,i)).join('')||'<p class="small">None right now.</p>')
     + '<h2>History</h2>'+(done.map(o=>card(o,-1)).join('')||'<p class="small">Nothing yet.</p>');
 }
@@ -273,6 +289,56 @@ $('pcreate').onclick=async()=>{
   if(r.ok){$('pmsg').textContent='Created ✓';$('pcode').value='';$('pvalue').value='';$('pmin').value='';$('pmax').value='';loadPromos();}
   else $('pmsg').textContent='Error: '+(j.detail||'create failed');
 };
+// ---- GPS location sharing (Ken's dot on customer maps) ----
+let locWatch=null, lastLocPost=0;
+$('locToggle').onclick=()=>{
+  if(locWatch){ stopLoc(); return; }
+  if(!navigator.geolocation){ $('locmsg').textContent='GPS not available on this device.'; return; }
+  $('locmsg').textContent='Sharing… keep this page open while you deliver.';
+  $('locToggle').textContent='Stop'; $('locToggle').classList.remove('ghost');
+  const post=(lat,lng)=>{
+    const now=Date.now();
+    if(now-lastLocPost<15000) return;  // max once per 15s
+    lastLocPost=now;
+    fetch('/api/operator/location',{method:'POST',headers:{...H(),'Content-Type':'application/json'},
+      body:JSON.stringify({lat,lng})}).catch(()=>{});
+  };
+  locWatch=navigator.geolocation.watchPosition(
+    p=>{ post(p.coords.latitude,p.coords.longitude);
+         $('locmsg').textContent='📍 Live — updated '+new Date().toLocaleTimeString(); },
+    ()=>{ $('locmsg').textContent='GPS blocked — allow location for this site.'; stopLoc(); },
+    {enableHighAccuracy:true,maximumAge:10000,timeout:20000});
+};
+function stopLoc(){
+  if(locWatch) navigator.geolocation.clearWatch(locWatch);
+  locWatch=null;
+  $('locToggle').textContent='Start'; $('locToggle').classList.add('ghost');
+  $('locmsg').textContent='';
+}
+
+// ---- AI menu watchdog proposals ----
+const KINDLBL={price_change:'💲 Price change',new_item:'✨ New item',unavailable:'🚫 Removed item',back_available:'✅ Back on menu'};
+async function loadProposals(){
+  const p=await (await fetch('/api/operator/proposals',{headers:H()})).json();
+  $('updbadge').textContent=p.length?`(${p.length})`:'';
+  $('updlist').innerHTML=p.map(x=>{
+    let desc='';
+    if(x.kind==='price_change') desc=`<b>${x.item_name}</b>: $${x.old_price.toFixed(2)} → <b>$${x.new_price.toFixed(2)}</b>`;
+    else if(x.kind==='new_item') desc=`<b>${x.item_name}</b> — $${x.new_price.toFixed(2)}${x.detail?`<br><span class="small">${x.detail}</span>`:''}`;
+    else desc=`<b>${x.item_name}</b>`;
+    return `<div class="card"><div class="row"><b>${KINDLBL[x.kind]||x.kind}</b>
+      <span class="small">${x.restaurant_name}</span></div>
+      <p>${desc}</p>
+      ${x.source_url?`<p class="small">Source: <a href="${x.source_url}" target="_blank">menu page</a></p>`:''}
+      <div><button class="btn small" onclick="proposalAct(${x.id},'approve')">✓ Approve</button>
+      <button class="btn small ghost" onclick="proposalAct(${x.id},'reject')">✕ Reject</button></div>
+    </div>`;
+  }).join('')||'<p class="small">All clear — no pending menu changes. The watchdog checks weekly.</p>';
+}
+async function proposalAct(id,act){
+  await fetch(`/api/operator/proposals/${id}/${act}`,{method:'POST',headers:H()});
+  loadProposals();
+}
 setInterval(()=>{if(PIN) loadOrders();},5000);
 async function loadTix(){
   const t=await (await fetch('/api/operator/tickets',{headers:H()})).json();
