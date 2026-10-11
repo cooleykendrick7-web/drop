@@ -582,9 +582,116 @@ def seed_cities():
     conn.close()
 
 
+def seed_expansion_cities():
+    """Idempotent: add 88 real restaurants across 10 major US cities."""
+    conn = db()
+    c = conn.cursor()
+    SPOTS = [
+    ("The Varsity", "American · Burgers", "🍔", "61 North Ave NW", "Atlanta", "GA", "(404) 881-1706"),
+    ("Mary Mac's Tea Room", "Southern · Comfort", "🍗", "224 Ponce De Leon Ave NE", "Atlanta", "GA", "(404) 876-1800"),
+    ("The Vortex Bar & Grill", "Burgers · American", "🍔", "438 Moreland Ave NE", "Atlanta", "GA", "(404) 688-1828"),
+    ("Fox Bros Bar-B-Q", "BBQ", "🍖", "1238 DeKalb Ave NE", "Atlanta", "GA", "(404) 577-4030"),
+    ("Antico Pizza Napoletana", "Pizza · Italian", "🍕", "1093 Hemphill Ave NW", "Atlanta", "GA", "(404) 724-2333"),
+    ("The Busy Bee Cafe", "Soul Food", "🍗", "810 Martin Luther King Jr Dr SW", "Atlanta", "GA", "(404) 521-9061"),
+    ("Slutty Vegan", "Vegan · Burgers", "🌱", "1542 Ralph David Abernathy Blvd SW", "Atlanta", "GA", "(470) 240-1976"),
+    ("Canoe", "American · Fine Dining", "🍽️", "4199 Paces Ferry Rd SE", "Atlanta", "GA", "(770) 432-2663"),
+    ("Bacchanalia", "Fine Dining · American", "🍽️", "1460 Ellsworth Industrial Blvd NW", "Atlanta", "GA", "(404) 365-0410"),
+    ("Pecan Lodge", "BBQ", "🍖", "2702 Main St", "Dallas", "TX", "(214) 748-8900"),
+    ("Mi Cocina", "Tex-Mex", "🌮", "2515 McKinney Ave", "Dallas", "TX", "(214) 754-0368"),
+    ("Hutchins BBQ", "BBQ", "🍖", "1301 N Tennessee St", "McKinney", "TX", "(214) 548-4119"),
+    ("Terry Black's Barbecue", "BBQ", "🍖", "3025 Main St", "Dallas", "TX", "(214) 997-1551"),
+    ("Uchi Dallas", "Japanese · Sushi", "🍣", "2817 Maple Ave", "Dallas", "TX", "(214) 855-5454"),
+    ("Cane Rosso", "Pizza · Italian", "🍕", "2612 Commerce St", "Dallas", "TX", "(214) 741-4760"),
+    ("Ellen's", "Breakfast · Brunch", "🥞", "1790 N Record St", "Dallas", "TX", "(214) 702-4667"),
+    ("Rodeo Goat", "Burgers", "🍔", "1926 Market Center Blvd", "Dallas", "TX", "(214) 741-4628"),
+    ("The Breakfast Klub", "Breakfast", "🥞", "3711 Travis St", "Houston", "TX", "(713) 528-8561"),
+    ("Pappadeaux Seafood Kitchen", "Seafood · Cajun", "🦐", "2410 Richmond Ave", "Houston", "TX", "(713) 521-2233"),
+    ("Killen's Barbecue", "BBQ", "🍖", "3613 E Broadway St", "Pearland", "TX", "(281) 485-2272"),
+    ("Uchi Houston", "Japanese · Sushi", "🍣", "904 Westheimer Rd", "Houston", "TX", "(713) 522-4808"),
+    ("Goode Company BBQ", "BBQ", "🍖", "5109 Kirby Dr", "Houston", "TX", "(713) 522-2530"),
+    ("The Original Ninfa's", "Tex-Mex", "🌮", "2704 Navigation Blvd", "Houston", "TX", "(713) 228-1175"),
+    ("Crawfish & Noodles", "Vietnamese-Cajun · Seafood", "🦐", "11360 Bellaire Blvd #990", "Houston", "TX", "(281) 988-8098"),
+    ("Lankford Grocery", "Burgers", "🍔", "88 Dennis St", "Houston", "TX", "(713) 522-9555"),
+    ("Pinkerton's Barbecue", "BBQ", "🍖", "1100 E 5 1/2 St", "Houston", "TX", "(713) 904-9100"),
+    ("Lou Malnati's Pizzeria", "Deep Dish Pizza", "🍕", "439 N Wells St", "Chicago", "IL", "(312) 828-9800"),
+    ("Giordano's", "Deep Dish Pizza", "🍕", "730 N Rush St", "Chicago", "IL", "(312) 951-0747"),
+    ("Portillo's Hot Dogs", "Hot Dogs · Italian Beef", "🌭", "100 W Ontario St", "Chicago", "IL", "(312) 587-8910"),
+    ("Al's #1 Italian Beef", "Italian Beef", "🥪", "1079 W Taylor St", "Chicago", "IL", "(312) 226-4017"),
+    ("Girl & the Goat", "American", "🍽️", "809 W Randolph St", "Chicago", "IL", "(312) 492-6262"),
+    ("Pequod's Pizza", "Pan Pizza", "🍕", "2207 N Clybourn Ave", "Chicago", "IL", "(773) 327-1512"),
+    ("The Wiener's Circle", "Hot Dogs", "🌭", "2622 N Clark St", "Chicago", "IL", "(773) 477-7444"),
+    ("Mr. Beef", "Italian Beef", "🥪", "666 N Orleans St", "Chicago", "IL", "(312) 337-8500"),
+    ("Xoco", "Mexican", "🌮", "449 N Clark St", "Chicago", "IL", "(312) 334-3688"),
+    ("In-N-Out Burger", "Burgers", "🍔", "9149 S Sepulveda Blvd", "Los Angeles", "CA", "(800) 786-1000"),
+    ("Pink's Hot Dogs", "Hot Dogs", "🌭", "709 N La Brea Ave", "Los Angeles", "CA", "(323) 931-4223"),
+    ("The Original Pantry Cafe", "Diner · American", "🥞", "877 S Figueroa St", "Los Angeles", "CA", "(213) 972-9279"),
+    ("Philippe The Original", "Deli · French Dip", "🥪", "1001 N Alameda St", "Los Angeles", "CA", "(213) 628-3781"),
+    ("Guisados", "Tacos", "🌮", "2100 E Cesar E Chavez Ave", "Los Angeles", "CA", "(323) 264-7201"),
+    ("Howlin' Ray's", "Nashville Hot Chicken", "🍗", "727 N Broadway #128", "Los Angeles", "CA", "(213) 935-8399"),
+    ("Roscoe's House of Chicken & Waffles", "Soul Food", "🧇", "1514 N Gower St", "Los Angeles", "CA", "(323) 466-7453"),
+    ("Langer's Delicatessen", "Deli", "🥪", "704 S Alvarado St", "Los Angeles", "CA", "(213) 483-8050"),
+    ("Bestia", "Italian", "🍽️", "2121 E 7th Pl", "Los Angeles", "CA", "(213) 514-5724"),
+    ("Jon & Vinny's", "Italian", "🍕", "412 N Fairfax Ave", "Los Angeles", "CA", "(323) 334-3369"),
+    ("Katz's Delicatessen", "Deli", "🥪", "205 E Houston St", "New York", "NY", "(212) 254-2246"),
+    ("Joe's Pizza", "Pizza", "🍕", "7 Carmine St", "New York", "NY", "(212) 366-1182"),
+    ("Xi'an Famous Foods", "Chinese · Noodles", "🍜", "45 Bayard St", "New York", "NY", "(212) 786-2068"),
+    ("Prince Street Pizza", "Pizza", "🍕", "27 Prince St", "New York", "NY", "(212) 966-4100"),
+    ("Russ & Daughters", "Bagels · Appetizing", "🥯", "179 E Houston St", "New York", "NY", "(212) 475-4880"),
+    ("Di Fara Pizza", "Pizza", "🍕", "1424 Avenue J", "Brooklyn", "NY", "(718) 258-1367"),
+    ("Peter Luger Steak House", "Steakhouse", "🥩", "178 Broadway", "Brooklyn", "NY", "(718) 387-7400"),
+    ("Rubirosa", "Italian · Pizza", "🍕", "235 Mulberry St", "New York", "NY", "(212) 965-1700"),
+    ("Versailles Restaurant", "Cuban", "🍖", "3555 SW 8th St", "Miami", "FL", "(305) 444-0240"),
+    ("Joe's Stone Crab", "Seafood", "🦀", "11 Washington Ave", "Miami Beach", "FL", "(305) 673-0365"),
+    ("La Sandwicherie", "Sandwiches", "🥪", "229 14th St", "Miami Beach", "FL", "(305) 532-8934"),
+    ("Enriqueta's Sandwich Shop", "Cuban Sandwiches", "🥪", "186 NE 29th St", "Miami", "FL", "(305) 573-4681"),
+    ("Garcia's Seafood Grille", "Seafood", "🦐", "398 NW North River Dr", "Miami", "FL", "(305) 375-0765"),
+    ("Puerto Sagua", "Cuban", "🍗", "700 Collins Ave", "Miami Beach", "FL", "(305) 673-1115"),
+    ("Sanguich De Miami", "Cuban Sandwiches", "🥪", "1042 SW 8th St", "Miami", "FL", "(786) 558-8368"),
+    ("Casa Bonita", "Mexican", "🌮", "6715 W Colfax Ave", "Lakewood", "CO", "(303) 232-5115"),
+    ("Sam's No. 3", "Diner", "🥞", "1500 Curtis St", "Denver", "CO", "(303) 534-2227"),
+    ("Biker Jim's Gourmet Dogs", "Hot Dogs", "🌭", "2148 Larimer St", "Denver", "CO", "(303) 209-2808"),
+    ("Denver Biscuit Company", "Biscuits · Breakfast", "🥐", "3237 E Colfax Ave", "Denver", "CO", "(303) 377-7900"),
+    ("Illegal Pete's", "Burritos", "🌯", "270 S Broadway", "Denver", "CO", "(303) 778-1397"),
+    ("Snooze, an A.M. Eatery", "Breakfast", "🥞", "2262 Larimer St", "Denver", "CO", "(303) 297-0700"),
+    ("Tacos Tequila Whiskey", "Tacos", "🌮", "3300 Blake St", "Denver", "CO", "(303) 297-4939"),
+    ("The Buckhorn Exchange", "Steakhouse", "🥩", "1000 Osage St", "Denver", "CO", "(303) 534-9505"),
+    ("Rosenberg's Bagels", "Bagels · Deli", "🥯", "725 E 26th Ave", "Denver", "CO", "(720) 519-3841"),
+    ("Pike Place Chowder", "Seafood · Chowder", "🦐", "1530 Post Alley", "Seattle", "WA", "(206) 267-2537"),
+    ("Dick's Drive-In", "Burgers", "🍔", "111 NE 45th St", "Seattle", "WA", "(206) 632-5125"),
+    ("Piroshky Piroshky", "Russian Bakery", "🥐", "1908 Pike Pl", "Seattle", "WA", "(206) 441-6068"),
+    ("Salumi", "Italian Deli", "🥪", "309 3rd Ave S", "Seattle", "WA", "(206) 621-8772"),
+    ("The Pink Door", "Italian", "🍝", "1919 Post Alley", "Seattle", "WA", "(206) 443-3241"),
+    ("Din Tai Fung", "Chinese · Dumplings", "🥟", "2621 NE 46th St", "Seattle", "WA", "(206) 525-0958"),
+    ("Serious Pie", "Pizza", "🍕", "316 Virginia St", "Seattle", "WA", "(206) 838-7388"),
+    ("Ivar's Acres of Clams", "Seafood", "🦐", "1001 Alaskan Way", "Seattle", "WA", "(206) 624-6852"),
+    ("Marination Ma Kai", "Hawaiian", "🌺", "1660 Harbor Ave SW", "Seattle", "WA", "(206) 328-8226"),
+    ("Pizzeria Bianco", "Pizza", "🍕", "623 E Adams St", "Phoenix", "AZ", "(602) 258-8300"),
+    ("Matt's Big Breakfast", "Breakfast", "🥞", "825 N 1st St", "Phoenix", "AZ", "(602) 254-1074"),
+    ("Los Dos Molinos", "Mexican", "🌮", "8646 S Central Ave", "Phoenix", "AZ", "(602) 243-9113"),
+    ("Carolina's Mexican Food", "Mexican", "🌮", "2126 E Cactus Rd", "Phoenix", "AZ", "(602) 749-5961"),
+    ("Little Miss BBQ", "BBQ", "🍖", "4301 E University Dr", "Phoenix", "AZ", "(602) 437-1177"),
+    ("Welcome Diner", "Diner", "🍔", "924 E Roosevelt St", "Phoenix", "AZ", "(602) 495-1114"),
+    ("Tacos Huicho", "Tacos", "🌮", "822 N 16th St", "Phoenix", "AZ", "(602) 322-8824"),
+    ("Chino Bandido", "Chinese-Mexican Fusion", "🍜", "15414 N 19th Ave", "Phoenix", "AZ", "(602) 375-3639"),
+    ("Barrio Cafe", "Mexican", "🌮", "2814 N 16th St", "Phoenix", "AZ", "(602) 636-0240"),
+    ("Durant's", "Steakhouse", "🥩", "2611 N Central Ave", "Phoenix", "AZ", "(602) 264-5967"),
+    ]
+    for name, cuisine, emoji, addr, city, state, phone in SPOTS:
+        exists = c.execute(
+            "SELECT id FROM restaurants WHERE name=? AND city=?", (name, city)).fetchone()
+        if not exists:
+            c.execute(
+                "INSERT INTO restaurants(name, cuisine, emoji, address, city, state, phone, open)"
+                " VALUES(?,?,?,?,?,?,?,1)",
+                (name, cuisine, emoji, addr, city, state, phone))
+    conn.commit()
+    conn.close()
+
+
 init_db()
 seed()
 seed_cities()
+seed_expansion_cities()
 
 
 # ---------------- helpers ----------------
