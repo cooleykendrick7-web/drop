@@ -4996,6 +4996,78 @@ def pickuppage():
         return f.read()
 
 
+@app.get("/drop.html", response_class=HTMLResponse)
+def droppage():
+    with open(os.path.join(BASE, "static", "drop.html")) as f:
+        return f.read()
+
+
+@app.post("/api/drop/request")
+async def drop_request(req: Request):
+    """Unified Drop request: pick up anything from anywhere, deliver anywhere."""
+    import math
+    body = await req.json()
+    what = (body.get("what") or "").strip()[:200]
+    pickup_addr = (body.get("pickup_address") or "").strip()[:200]
+    delivery_addr = (body.get("delivery_address") or "").strip()[:200]
+    details = (body.get("details") or "").strip()[:300]
+    name = (body.get("customer_name") or "").strip()[:80]
+    phone = (body.get("phone") or "").strip()[:30]
+    quoted = float(body.get("quoted_price") or 0)
+    if not what or not pickup_addr or not delivery_addr or not name:
+        raise HTTPException(400, "What, both addresses, and your name are required")
+    # Geocode both for distance + driver matching
+    plat, plng, dlat, dlng = 0.0, 0.0, 0.0, 0.0
+    try:
+        import urllib.request, urllib.parse, json
+        for addr, which in ((pickup_addr, "p"), (delivery_addr, "d")):
+            url = f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(addr)}&format=json&limit=1"
+            rq = urllib.request.Request(url, headers={"User-Agent": "DropApp/1.0"})
+            geo = json.loads(urllib.request.urlopen(rq, timeout=10).read())
+            if geo:
+                if which == "p":
+                    plat, plng = float(geo[0]["lat"]), float(geo[0]["lon"])
+                else:
+                    dlat, dlng = float(geo[0]["lat"]), float(geo[0]["lon"])
+    except Exception:
+        pass
+    # Price: $1.50/mile, min $3.99
+    miles = math.hypot(dlat - plat, dlng - plng) * 69 if all([plat, plng, dlat, dlng]) else 0
+    fee = round(max(3.99, miles * 1.50), 2) if miles > 0 else (quoted if quoted > 0 else 3.99)
+    conn = db()
+    cur = conn.execute(
+        """INSERT INTO orders(restaurant_id, items_json, customer_name, phone, address,
+                              notes, food_total, delivery_fee, tip, total, status,
+                              stripe_status, created_at, updated_at, kind,
+                              pickup_name, pickup_address, pickup_lat, pickup_lng,
+                              cust_lat, cust_lng)
+           VALUES(0, '[]', ?, ?, ?, ?, 0, ?, 0, ?, 'new', 'pending', ?, ?, 'drop',
+                   ?, ?, ?, ?, ?, ?)""",
+        (name, phone, delivery_addr,
+         f"{what}. {details}",
+         fee, fee, now_iso(), now_iso(),
+         what, pickup_addr, plat, plng, dlat, dlng))
+    oid = cur.lastrowid
+    conn.commit()
+    conn.close()
+    log_event("order", f"📦 Drop request #{oid}", f"{what[:40]} — ${fee:.2f}")
+    # Notify Ken
+    try:
+        topic = get_setting("ntfy_topic")
+        if topic:
+            import urllib.request, urllib.parse, threading
+            msg = f"📦 DROP #{oid}\n{what[:50]}\n${fee:.2f}"
+            r2 = urllib.request.Request(
+                f"https://ntfy.sh/{urllib.parse.quote(topic)}",
+                data=msg.encode(), headers={"Title": "Drop request"}, method="POST")
+            threading.Thread(
+                target=lambda: urllib.request.urlopen(r2, timeout=5).read(),
+                daemon=True).start()
+    except Exception:
+        pass
+    return {"ok": True, "order_id": oid, "fee": fee}
+
+
 @app.get("/watch.html", response_class=HTMLResponse)
 def watchpage():
     with open(os.path.join(BASE, "static", "watch.html")) as f:
