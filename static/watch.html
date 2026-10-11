@@ -15,7 +15,7 @@
 .chatmsg.owner{background:var(--acc);color:#fff;margin-left:auto}
 </style>
 </head><body>
-<header class="topbar"><a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg" alt="Drop"><b>Drop</b></a></header>
+<header class="topbar"><a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg" alt="Drop"><b>Drop</b></a><button class="btn small ghost" id="logoutbtn" style="width:auto">Log out</button></header>
 
 <div id="login" class="card" style="max-width:400px;margin:40px auto">
   <h2>👀 Live Status</h2>
@@ -44,17 +44,18 @@
 
 <script>
 const $=id=>document.getElementById(id);
-let PIN=sessionStorage.getItem('watchpin')||'';
+let PIN=localStorage.getItem('watchpin')||'';
 const H=()=>({'x-pin':PIN});
 
 $('gobtn').onclick=async()=>{
   PIN=$('pin').value.trim();
   const r=await fetch('/api/watcher/login',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({pin:PIN})});
-  if(r.ok){sessionStorage.setItem('watchpin',PIN);showApp();}
+  if(r.ok){localStorage.setItem('watchpin',PIN);showApp();}
   else $('loginmsg').textContent='Invalid code.';
 };
 if(PIN)showApp();
+$('logoutbtn').onclick=()=>{localStorage.removeItem('watchpin');PIN='';$('app').style.display='none';$('login').style.display='block';$('pin').value='';};
 
 function showApp(){
   $('login').style.display='none';$('app').style.display='block';

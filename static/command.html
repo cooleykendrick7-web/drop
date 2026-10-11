@@ -58,11 +58,12 @@ h1{font-size:1.1rem;letter-spacing:3px;color:var(--acc2);text-transform:uppercas
   <div class="row2">
     <a class="btn" href="/dash">Full dashboard</a>
     <a class="btn ghost" href="/">Customer site</a>
+    <button class="btn ghost" id="logoutbtn">Log out</button>
   </div>
   <p class="tick" id="tick">—</p>
 </div>
 <script>
-let PIN=sessionStorage.getItem('droppin')||'';
+let PIN=localStorage.getItem('droppin')||'';
 const H=()=>({'X-PIN':PIN});
 const $=id=>document.getElementById(id);
 function set(id,v){$(id).querySelector('.val').textContent=v;}
@@ -88,11 +89,19 @@ async function tick(){
     $('tick').textContent='LIVE · updated '+new Date().toLocaleTimeString();
   }catch(e){}
 }
+function doLogout(){
+  localStorage.removeItem('droppin');
+  PIN='';
+  $('dash').style.display='none';
+  $('login').style.display='block';
+  $('pin').value=''; $('msg').textContent='';
+}
+$('logoutbtn').onclick=()=>{doLogout();};
 $('go').onclick=async()=>{
   PIN=$('pin').value.trim();
   const r=await fetch('/api/operator/command-stats',{headers:H()});
   if(r.status===401){$('msg').textContent='Wrong PIN.';return;}
-  sessionStorage.setItem('droppin',PIN);
+  localStorage.setItem('droppin',PIN);
   $('login').style.display='none';$('dash').style.display='block';
   tick(); setInterval(tick,8000);
 };

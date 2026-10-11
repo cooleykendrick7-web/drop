@@ -16,6 +16,10 @@
 </div>
 
 <div id="app" style="display:none">
+  <div class="row" style="padding:8px 12px 0;justify-content:space-between">
+    <span class="small" style="opacity:.6">🔐 Operator dashboard</span>
+    <button class="btn small ghost" id="logoutbtn" style="width:auto;padding:6px 14px">Log out</button>
+  </div>
   <div class="tabs">
     <button class="on" data-t="orders">Orders</button>
     <button data-t="rides">🚗 Rides <span id="ridebadge"></span></button>
@@ -288,12 +292,13 @@ $('gobtn').onclick=async()=>{
   PIN=$('pin').value.trim();
   const r=await fetch('/api/operator/orders',{headers:H()});
   if(r.status===401){$('loginmsg').textContent='Wrong PIN.';return;}
-  sessionStorage.setItem('droppin',PIN);
+  localStorage.setItem('droppin',PIN);
   $('login').style.display='none';$('app').style.display='block';
   loadOrders(true);
 };
-PIN=sessionStorage.getItem('droppin')||'';
+PIN=localStorage.getItem('droppin')||'';
 if(PIN){$('login').style.display='none';$('app').style.display='block';loadOrders(true);}
+$('logoutbtn').onclick=()=>{doLogout();};
 
 async function activateSched(oid){
   if(!confirm('Activate order #'+oid+' now?'))return;
@@ -301,9 +306,17 @@ async function activateSched(oid){
     body:JSON.stringify({status:'confirmed'})});
   loadOrders();
 }
+function doLogout(){
+  localStorage.removeItem('droppin');
+  PIN='';
+  $('app').style.display='none';
+  $('login').style.display='block';
+  $('pin').value='';
+  $('loginmsg').textContent='';
+}
 async function loadOrders(first){
   const r=await fetch('/api/operator/orders',{headers:H()});
-  if(r.status===401){location.reload();return;}
+  if(r.status===401){doLogout();$('loginmsg').textContent='Session expired — enter your PIN.';return;}
   const orders=await r.json();
   // scheduled orders
   try{
@@ -454,7 +467,7 @@ $('saveset').onclick=async()=>{
   body.owner_pin=$('sopin').value.trim();
   const r=await fetch('/api/operator/settings',{method:'PUT',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify(body)});
   const j=await r.json();
-  if(r.ok){$('setmsg').textContent='Saved ✓';if(body.pin)PIN=body.pin,sessionStorage.setItem('droppin',PIN);$('spin').value='';}
+  if(r.ok){$('setmsg').textContent='Saved ✓';if(body.pin)PIN=body.pin,localStorage.setItem('droppin',PIN);$('spin').value='';}
   else $('setmsg').textContent='Error: '+(j.detail||'save failed');
 };
 async function loadPromos(){
