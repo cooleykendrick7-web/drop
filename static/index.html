@@ -279,20 +279,21 @@ async function load(){
   } else {
     r = (await (await fetch('/api/restaurants')).json()).filter(x=>(x.city||'')===ccity && (x.state||'')===cstate);
     if(r.length===0 && ccity){
-      // Try FREE OpenStreetMap first, then Google Places (needs key)
+      // Try LIVE restaurants from OpenStreetMap (free, real data)
       try{
-        const osm = await (await fetch(`/api/osm/restaurants?city=${encodeURIComponent(ccity)}&state=${encodeURIComponent(cstate)}`)).json();
-        if(osm.results && osm.results.length>0){
-          document.getElementById('count').textContent = osm.results.length + ` real spots in ${ccity}`;
-          document.getElementById('list').innerHTML = osm.results.map(p=>`
-            <div class="card rest">
+        const live = await (await fetch(`/api/live-restaurants?city=${encodeURIComponent(ccity)}&state=${encodeURIComponent(cstate)}`)).json();
+        if(live && live.length>0){
+          document.getElementById('count').textContent = live.length + ` real spots in ${ccity}`;
+          document.getElementById('list').innerHTML = live.map(p=>`
+            <a class="card rest" href="/drop.html?pickup=${encodeURIComponent(p.name)}&addr=${encodeURIComponent(p.address+', '+ccity)}" style="text-decoration:none;color:inherit">
               <div class="rbody">
                 <div class="emoji">🍽️</div>
-                <div class="meta"><b>${p.name.replace(/</g,'&lt;')}</b><span>${(p.address||'').replace(/</g,'&lt;')}${p.cuisine?` · ${p.cuisine}`:''}</span>
-                <span class="fee">Tap to order via Drop</span></div>
+                <div class="meta"><b>${p.name.replace(/</g,'&lt;')}</b><span>${(p.address||'').replace(/</g,'&lt;')}${p.cuisine&&p.cuisine!=='Restaurant'?` · ${p.cuisine}`:''}</span>
+                <span class="fee">📦 Tap to request pickup →</span></div>
               </div>
-            </div>`).join('');
+            </a>`).join('');
           return;
+        }
         }
         const gp = await (await fetch(`/api/places/search?city=${encodeURIComponent(ccity)}&state=${encodeURIComponent(cstate)}`)).json();
         if(gp.active && gp.results && gp.results.length>0){

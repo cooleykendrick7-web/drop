@@ -257,6 +257,9 @@ def init_db():
         brand TEXT DEFAULT '', exp_month TEXT DEFAULT '', exp_year TEXT DEFAULT '',
         stripe_pm_id TEXT DEFAULT '',
         created_at TEXT NOT NULL)""")
+    # Live restaurant cache (from OpenStreetMap, 24h TTL)
+    c.execute("""CREATE TABLE IF NOT EXISTS live_cache (
+        key TEXT PRIMARY KEY, data TEXT NOT NULL, cached_at TEXT NOT NULL)""")
     # WATCH portal comments
     c.execute("""CREATE TABLE IF NOT EXISTS watch_comments (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -925,6 +928,64 @@ def list_cities():
         "SELECT city, state, COUNT(*) n FROM restaurants GROUP BY city, state ORDER BY n DESC").fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+@app.get("/api/live-restaurants")
+def live_restaurants(city: str = "", state: str = "", lat: float = 0, lng: float = 0):
+    """Get REAL restaurants for any city via OpenStreetMap (free, no key needed).
+    Returns live data — not from our DB, but real places that exist."""
+    import urllib.request, urllib.parse, json, time
+    if not city:
+        return []
+    # Check cache first (24h)
+    cache_key = f"{city},{state}".lower()
+    conn = db()
+    try:
+        cached = conn.execute(
+            "SELECT data, cached_at FROM live_cache WHERE key=?", (cache_key,)).fetchone()
+        if cached:
+            age = time.time() - float(cached["cached_at"])
+            if age < 86400:  # 24h
+                conn.close()
+                return json.loads(cached["data"])
+    except Exception:
+        pass
+    # Fetch from Nominatim
+    try:
+        query = f"restaurants in {city}, {state}" if state else f"restaurants in {city}"
+        url = f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(query)}&format=json&limit=20&extratags=1"
+        req = urllib.request.Request(url, headers={"User-Agent": "DropApp/1.0"})
+        data = json.loads(urllib.request.urlopen(req, timeout=15).read())
+        results = []
+        for r in data:
+            # Extract name and address
+            name = r.get("display_name", "").split(",")[0].strip()
+            addr_parts = r.get("display_name", "").split(",")[1:3]
+            addr = ",".join(addr_parts).strip()
+            if name and len(name) > 2:
+                results.append({
+                    "name": name,
+                    "address": addr,
+                    "city": city,
+                    "state": state,
+                    "lat": float(r.get("lat", 0)),
+                    "lng": float(r.get("lon", 0)),
+                    "cuisine": r.get("extratags", {}).get("cuisine", "Restaurant"),
+                    "live": True  # Mark as live data
+                })
+        # Cache it
+        try:
+            conn.execute(
+                "INSERT OR REPLACE INTO live_cache(key, data, cached_at) VALUES(?,?,?)",
+                (cache_key, json.dumps(results), str(time.time())))
+            conn.commit()
+        except Exception:
+            pass
+        conn.close()
+        return results
+    except Exception as e:
+        conn.close()
+        return []
 
 
 @app.get("/api/ip-location")
