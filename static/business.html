@@ -1,0 +1,65 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Business Portal — DROP MORE</title>
+<link rel="icon" href="/static/logo-mark.jpg">
+<link rel="stylesheet" href="/static/styles.css">
+<style>.bform input{width:100%;margin:6px 0}.bform label{font-weight:700;margin-top:10px;display:block}</style>
+</head><body>
+<header class="topbar"><a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg" alt="Drop"><b>Drop</b><span class="tag">business</span></a></header>
+
+<div id="login" class="card bform">
+  <h1>Business login</h1>
+  <p class="small">Track your partnership application. <a href="/partner.html">Apply here</a> if you haven't yet.</p>
+  <label>Email</label><input id="email" inputmode="email">
+  <label>Password</label><input id="pass" type="password">
+  <button class="btn" id="gobtn">Log in</button>
+  <p class="small" id="loginmsg"></p>
+  <hr>
+  <h3>New? Create your account</h3>
+  <p class="small">Use the same email as your partnership application, plus your application #.</p>
+  <label>Your name</label><input id="r-name">
+  <label>Email (must match application)</label><input id="r-email" inputmode="email">
+  <label>Application #</label><input id="r-pid" inputmode="numeric" placeholder="e.g. 3">
+  <label>Password (6+ characters)</label><input id="r-pass" type="password">
+  <button class="btn" id="regbtn">Create account</button>
+  <p class="small" id="regmsg"></p>
+</div>
+
+<div id="app" style="display:none">
+  <div class="card"><h2 style="margin:0" id="bname"></h2>
+    <p><span class="badge" id="bstage"></span></p>
+    <p class="small" id="binfo"></p></div>
+  <div class="card"><h3>Your proposal</h3><p class="small" id="bproposal"></p></div>
+  <div class="card"><h3>Latest updates</h3><div id="bnotes"><p class="small">No updates yet.</p></div></div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+$('gobtn').onclick=async()=>{
+  const r=await fetch('/api/biz/login',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({email:$('email').value,password:$('pass').value})});
+  if(!r.ok){$('loginmsg').textContent='Wrong email or password.';return;}
+  loadMe();
+};
+$('regbtn').onclick=async()=>{
+  const r=await fetch('/api/biz/register',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({name:$('r-name').value,email:$('r-email').value,
+      partner_id:$('r-pid').value,password:$('r-pass').value})});
+  const j=await r.json();
+  $('regmsg').textContent=r.ok?'✅ Account created — log in above.':'Error: '+(j.detail||'failed');
+};
+async function loadMe(){
+  const r=await fetch('/api/biz/me');
+  if(!r.ok)return;
+  const m=await r.json();
+  $('login').style.display='none';$('app').style.display='block';
+  $('bname').textContent=m.legal_name;
+  $('bstage').textContent=m.stage_label;
+  $('binfo').textContent=`${m.business_type} · ${m.locations} location(s) · ${m.est_deliveries}`;
+  $('bproposal').textContent=`Rates: ${m.proposed_rates||'—'} · Terms: ${m.payment_terms||'—'} · Duration: ${m.contract_duration||'—'}`;
+  if(m.recent_notes.length)
+    $('bnotes').innerHTML=m.recent_notes.map(n=>`<p class="small">📝 ${n.note.replace(/</g,'&lt;')}<br><span style="opacity:.6">${n.created_at.slice(0,10)}</span></p>`).join('');
+}
+loadMe();
+</script>
+<script src="/static/chat.js"></script></body></html>

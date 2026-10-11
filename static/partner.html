@@ -1,0 +1,96 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Partner With DROP MORE — Bismarck's Delivery Network</title>
+<link rel="icon" href="/static/logo-mark.jpg">
+<link rel="stylesheet" href="/static/styles.css">
+<style>.pform input,.pform textarea,.pform select{width:100%;margin:6px 0}
+.pform label{font-weight:700;margin-top:12px;display:block}
+.pform h3{color:var(--acc);margin:20px 0 4px}</style>
+</head><body>
+<header class="topbar"><a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg" alt="Drop"><b>Drop</b><span class="tag">partners</span></a></header>
+
+<div class="hero" style="text-align:center;padding:28px 16px">
+  <h1 style="margin:0">Partner With <span style="color:var(--acc)">DROP MORE</span> 🤝</h1>
+  <p class="sub">Auto parts · Clothing · Office supplies · Warehouses · Retailers · E-commerce<br>
+  Recurring pickups and deliveries, handled by Bismarck's own delivery team.</p>
+</div>
+
+<div class="card">
+  <h2>Why businesses choose Drop</h2>
+  <p class="small">🚗 <b>Dedicated local drivers</b> — not gig-app roulette<br>
+  📦 <b>Recurring routes</b> — daily/weekly pickups on your schedule<br>
+  💰 <b>Transparent pricing</b> — you propose the deal, we make the math work<br>
+  📍 <b>Live tracking</b> — your customers watch every delivery<br>
+  🤖 <b>AI-powered</b> — smart routing, automatic updates, fast support</p>
+</div>
+
+<div class="card pform" id="pform">
+  <h2>Partnership application</h2>
+  <p class="small">Tell us about your business and propose the deal you want. Every application is reviewed personally — we only take partnerships that work for both sides.</p>
+
+  <h3>Your business</h3>
+  <label>Legal business name *</label><input id="f-legal" placeholder="Acme Auto Parts LLC">
+  <label>DBA (if different)</label><input id="f-dba" placeholder="Acme Auto">
+  <div class="row"><div style="flex:1"><label>Type of business *</label>
+    <select id="f-type"><option>Auto parts / automotive</option><option>Clothing / retail</option>
+    <option>Office supplies</option><option>Warehouse / distributor</option>
+    <option>E-commerce</option><option>Wholesale supplier</option>
+    <option>National brand / multi-location</option><option>Other</option></select></div>
+    <div style="flex:1"><label>Locations</label><input id="f-locs" inputmode="numeric" placeholder="1"></div></div>
+  <label>What do you sell / handle?</label><textarea id="f-products" rows="2" placeholder="e.g. Aftermarket auto parts, oil, filters"></textarea>
+  <label>Website</label><input id="f-web" placeholder="https://…">
+  <label>Business address</label><input id="f-addr" placeholder="Street, Bismarck, ND">
+
+  <h3>Contact person</h3>
+  <div class="row"><div style="flex:1"><label>Full name *</label><input id="f-cname" placeholder="Jane Smith"></div>
+  <div style="flex:1"><label>Title</label><input id="f-ctitle" placeholder="Operations Manager"></div></div>
+  <div class="row"><div style="flex:1"><label>Email *</label><input id="f-email" inputmode="email" placeholder="jane@acme.com"></div>
+  <div style="flex:1"><label>Phone</label><input id="f-phone" inputmode="tel" placeholder="(555) 123-4567"></div></div>
+
+  <h3>Delivery needs</h3>
+  <label>Estimated deliveries *</label><input id="f-vol" placeholder="e.g. 20 per day, 100 per week">
+  <label>Pickup &amp; delivery areas</label><input id="f-areas" placeholder="e.g. Bismarck-Mandan, pickup at our warehouse">
+  <label>Shipment size / weight / handling</label><textarea id="f-ship" rows="2" placeholder="e.g. Small boxes under 20 lbs, some fragile"></textarea>
+
+  <h3>Your proposed deal</h3>
+  <label>Proposed delivery rates or budget</label><input id="f-rates" placeholder="e.g. $6 per delivery, or $2,000/month flat">
+  <label>Preferred payment terms</label><input id="f-terms" placeholder="e.g. Net 15, weekly invoice">
+  <label>Commission / revenue share (if any)</label><input id="f-comm" placeholder="e.g. 5% of order value">
+  <div class="row"><div style="flex:1"><label>Contract duration</label><input id="f-dur" placeholder="e.g. 12 months"></div>
+  <div style="flex:1"><label>Desired start date</label><input id="f-start" placeholder="e.g. Dec 1, 2026"></div></div>
+
+  <h3>Anything else</h3>
+  <label>Special requirements</label><textarea id="f-req" rows="2" placeholder="Refrigeration, signatures, time windows…"></textarea>
+  <label>Additional comments</label><textarea id="f-comments" rows="2"></textarea>
+
+  <button class="btn" id="f-submit" style="margin-top:16px">Submit application →</button>
+  <p class="small" id="f-msg"></p>
+  <p class="small">After applying, you can <a href="/business.html">create a business account</a> to track your application status.</p>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+$('f-submit').onclick=async()=>{
+  const v=id=>$(id).value.trim();
+  const body={legal_name:v('f-legal'),dba:v('f-dba'),business_type:$('f-type').value,
+    locations:v('f-locs'),products:v('f-products'),website:v('f-web'),address:v('f-addr'),
+    contact_name:v('f-cname'),contact_title:v('f-ctitle'),email:v('f-email'),phone:v('f-phone'),
+    est_deliveries:v('f-vol'),service_areas:v('f-areas'),shipment_info:v('f-ship'),
+    proposed_rates:v('f-rates'),payment_terms:v('f-terms'),commission:v('f-comm'),
+    contract_duration:v('f-dur'),start_date:v('f-start'),
+    requirements:v('f-req'),comments:v('f-comments')};
+  if(!body.legal_name||!body.contact_name||!body.email.includes('@')){
+    $('f-msg').textContent='Legal name, contact name, and a valid email are required.';return;}
+  if(!body.est_deliveries){$('f-msg').textContent='Please estimate your delivery volume.';return;}
+  $('f-msg').textContent='Submitting…';
+  const r=await fetch('/api/partners/apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const j=await r.json();
+  if(r.ok){
+    $('pform').innerHTML=`<h2>✅ Application received!</h2>
+      <p>Thanks, ${body.contact_name.split(' ')[0]} — we'll review <b>${body.legal_name}</b> and reach out at <b>${body.email}</b>.</p>
+      <p class="small">Application #${j.id} — save this number.</p>
+      <p><a class="btn" href="/business.html" style="text-decoration:none">Create a business account to track status →</a></p>`;
+  } else $('f-msg').textContent='Error: '+(j.detail||'could not submit');
+};
+</script>
+<script src="/static/chat.js"></script></body></html>

@@ -19,6 +19,7 @@
   <div class="tabs">
     <button class="on" data-t="orders">Orders</button>
     <button data-t="money">💰 Money</button>
+    <button data-t="deals">🤝 Deals <span id="dealbadge"></span></button>
     <button data-t="drv">Drivers <span id="drvbadge"></span></button>
     <button data-t="biz">Drop More</button>
     <button data-t="earn">Earnings</button>
@@ -28,6 +29,7 @@
     <button data-t="sup">Support <span id="tixbadge"></span></button>
     <button data-t="stats">Stats</button>
     <button data-t="inv">Investors <span id="invbadge"></span></button>
+    <button data-t="audit">Audit</button>
     <button data-t="set">Settings</button>
   </div>
 
@@ -64,6 +66,13 @@
     <div class="card"><h3>🔗 Stripe Connect</h3><div id="connectbox"><p class="small">Loading…</p></div></div>
     <h3>Per-order breakdown</h3>
     <div id="finorders"></div>
+  </div>
+
+  <div class="tab" id="t-deals">
+    <div class="card"><b>🤝 Partnership pipeline</b>
+      <p class="small">Every deal moves: Submitted → Under Review → Financial Evaluation → Negotiation → Contract Review → Approved → Active. <b>You</b> approve every stage.</p></div>
+    <div class="row" id="dealstages" style="flex-wrap:wrap;gap:6px;margin-bottom:10px"></div>
+    <div id="deallist"></div>
   </div>
 
   <div class="tab" id="t-drv">
@@ -135,6 +144,12 @@
     <div id="invlist"></div>
   </div>
 
+  <div class="tab" id="t-audit">
+    <div class="card"><b>📋 Audit trail</b>
+      <p class="small">Every admin decision, recorded. Nothing happens in the dark.</p></div>
+    <div id="auditlist"></div>
+  </div>
+
   <div class="tab" id="t-set">
     <div class="card"><h3>🟢 Accepting orders</h3>
       <div class="row"><span class="small">Turn off when you're slammed — the site tells customers to check back.</span>
@@ -183,7 +198,7 @@ document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
   b.classList.add('on'); $('t-'+b.dataset.t).classList.add('on');
-  if(b.dataset.t==='earn') loadEarn(); if(b.dataset.t==='menu') loadMenu(); if(b.dataset.t==='set') loadSet(); if(b.dataset.t==='sup') loadTix(); if(b.dataset.t==='promo') loadPromos(); if(b.dataset.t==='stats') loadStats(); if(b.dataset.t==='upd') loadProposals(); if(b.dataset.t==='drv') loadDrivers(); if(b.dataset.t==='biz') loadBiz(); if(b.dataset.t==='inv') loadInv(); if(b.dataset.t==='money') loadMoney();
+  if(b.dataset.t==='earn') loadEarn(); if(b.dataset.t==='menu') loadMenu(); if(b.dataset.t==='set') loadSet(); if(b.dataset.t==='sup') loadTix(); if(b.dataset.t==='promo') loadPromos(); if(b.dataset.t==='stats') loadStats(); if(b.dataset.t==='upd') loadProposals(); if(b.dataset.t==='drv') loadDrivers(); if(b.dataset.t==='biz') loadBiz(); if(b.dataset.t==='inv') loadInv(); if(b.dataset.t==='money') loadMoney(); if(b.dataset.t==='deals') loadDeals(); if(b.dataset.t==='audit') loadAudit();
 });
 
 async function loadStats(){
@@ -498,7 +513,9 @@ async function loadDrivers(){
     return `<div class="card"><div class="row"><b>${esc(x.name)}</b>
       <span class="badge open">⭐ ${rate}% · ${x.deliveries} deliveries</span></div>
       <p class="small">📞 ${esc(x.phone)} · 🚗 ${esc(x.vehicle_year)} ${esc(x.vehicle_make)} ${esc(x.vehicle_model)}</p>
-      <button class="btn small ghost" onclick="drvAct(${x.id},'suspend')">⏸ Suspend</button></div>`;
+      <div class="row"><button class="btn small" onclick="driverProfile(${x.id})">📊 AI Performance</button>
+      <button class="btn small ghost" onclick="drvAct(${x.id},'suspend')">⏸ Suspend</button></div>
+      <div id="dprof-${x.id}" style="display:none;margin-top:8px"></div></div>`;
   }).join('')||'<p class="small">No active drivers yet.</p>';
 }
 async function drvAct(id,act){
@@ -603,5 +620,89 @@ async function loadConnect(){
     :'<p class="small">⏳ <b>Manual mode:</b> you send driver payouts yourself, then tap "Mark paid".</p>')
     + c.steps.map(s=>`<p class="small">${s.done?'✅':'⬜'} ${s.label}</p>`).join('')
     + `<p class="small">${c.note}</p>`;
+}
+/* --- Partnership deals pipeline --- */
+let DEALSTAGES={};
+async function loadDeals(stage){
+  const j=await (await fetch('/api/operator/partners'+(stage?`?status=${stage}`:''),{headers:H()})).json();
+  DEALSTAGES=j.stages;
+  const counts={};
+  j.partners.forEach(p=>counts[p.status]=(counts[p.status]||0)+1);
+  const newCount=(counts['submitted']||0);
+  $('dealbadge').textContent=newCount?`(${newCount})`:'';
+  $('dealstages').innerHTML=Object.entries(j.stages).map(([k,v])=>
+    `<button class="btn small ${stage===k?'':'ghost'}" onclick="loadDeals('${k}')">${v}${counts[k]?` (${counts[k]})`:''}</button>`).join('')
+    +`<button class="btn small ghost" onclick="loadDeals()">All</button>`;
+  const esc=s=>(s||'').replace(/</g,'&lt;');
+  $('deallist').innerHTML=j.partners.map(p=>`
+    <div class="card ${p.status==='submitted'?'order new':''}">
+      <div class="row"><b>#${p.id} — ${esc(p.legal_name)}</b><span class="badge">${j.stages[p.status]||p.status}</span></div>
+      <p class="small">${esc(p.business_type)} · ${esc(p.contact_name)}${p.contact_title?`, ${esc(p.contact_title)}`:''}<br>
+      ✉️ <a href="mailto:${esc(p.email)}">${esc(p.email)}</a>${p.phone?` · 📞 <a href="tel:${esc(p.phone)}">${esc(p.phone)}</a>`:''}<br>
+      📦 ${esc(p.est_deliveries)} · 💵 ${esc(p.proposed_rates)||'—'} · 📅 ${esc(p.contract_duration)||'—'}</p>
+      ${p.products?`<p class="small"><b>Products:</b> ${esc(p.products)}</p>`:''}
+      ${p.requirements?`<p class="small"><b>Requirements:</b> ${esc(p.requirements)}</p>`:''}
+      ${p.profit_score?`<p class="small">💰 Est. profit: <b>$${p.profit_score.toFixed(2)}/delivery</b></p>`:''}
+      <div class="row" style="flex-wrap:wrap;gap:6px;margin-top:8px">
+        <button class="btn small" onclick="dealEval(${p.id})">💰 Evaluate profit</button>
+        <button class="btn small ghost" onclick="dealStage(${p.id},'under_review')">👀 Review</button>
+        <button class="btn small ghost" onclick="dealStage(${p.id},'negotiation')">🤝 Negotiate</button>
+        <button class="btn small ghost" onclick="dealStage(${p.id},'approved')">✅ Approve</button>
+        <button class="btn small ghost" onclick="dealStage(${p.id},'rejected')">❌ Reject</button>
+        <button class="btn small ghost" onclick="dealNotes(${p.id})">📝 Notes</button>
+      </div>
+      <div id="deal-${p.id}" style="margin-top:8px"></div>
+    </div>`).join('')||'<p class="small">No partnership applications yet.</p>';
+}
+async function dealStage(id,stage){
+  const stages={under_review:'Under Review',negotiation:'Negotiation',approved:'Approved',rejected:'Rejected'};
+  if((stage==='approved'||stage==='rejected')&&!confirm(`${stages[stage]} deal #${id}?`))return;
+  await fetch(`/api/operator/partners/${id}/stage`,{method:'POST',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({stage})});
+  loadDeals();
+}
+async function dealEval(id){
+  const box=$('deal-'+id);
+  box.innerHTML='<p class="small">Calculating…</p>';
+  const r=await (await fetch(`/api/operator/partners/${id}/evaluate`,{method:'POST',headers:H()})).json();
+  box.innerHTML=`<div class="card" style="background:#141419">
+    <b>${r.verdict}</b>
+    <p class="small">📦 ~${r.est_deliveries_month}/month · 💵 $${r.revenue_per_delivery}/delivery revenue<br>
+    🚗 $${r.driver_cost_per} driver + $${r.stripe_per} Stripe = $${r.contribution_per_delivery}/delivery profit<br>
+    📈 Est. <b>$${r.est_monthly_profit}/month</b> · $${r.est_annual_profit}/year</p></div>`;
+}
+async function dealNotes(id){
+  const box=$('deal-'+id);
+  const notes=await (await fetch(`/api/operator/partners/${id}/notes`,{headers:H()})).json();
+  box.innerHTML=notes.map(n=>`<p class="small">📝 ${n.note.replace(/</g,'&lt;')}<br><span style="opacity:.6">${n.created_at.slice(0,16).replace('T',' ')}</span></p>`).join('')
+    +`<div class="row"><input id="dn-${id}" placeholder="Add a note…" style="flex:1;margin-right:6px">
+      <button class="btn small" onclick="dealNoteSend(${id})">Add</button></div>`;
+}
+async function dealNoteSend(id){
+  const v=$('dn-'+id).value.trim(); if(!v)return;
+  await fetch(`/api/operator/partners/${id}/note`,{method:'POST',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({note:v})});
+  dealNotes(id);
+}
+
+/* --- Enhanced driver profiles --- */
+async function driverProfile(id){
+  const box=$('dprof-'+id);
+  if(box.style.display!=='none'){box.style.display='none';return;}
+  box.style.display='block';
+  box.innerHTML='<p class="small">Loading…</p>';
+  const p=await (await fetch(`/api/operator/drivers/${id}/performance`,{headers:H()})).json();
+  box.innerHTML=`<div class="card" style="background:#141419">
+    <div class="row"><b>${p.rating}</b><b>Score: ${p.score}/100</b></div>
+    <p class="small"><b>AI recommendation:</b> ${p.recommendation}</p>
+    ${p.evidence.map(e=>`<p class="small">• ${e}</p>`).join('')}
+    <p class="small" style="opacity:.7">${p.disclaimer}</p></div>`;
+}
+
+/* --- Audit trail --- */
+async function loadAudit(){
+  const a=await (await fetch('/api/operator/audit?limit=80',{headers:H()})).json();
+  $('auditlist').innerHTML=a.map(x=>`
+    <div class="card"><div class="row"><b>${x.action}</b><span class="small">${x.created_at.slice(0,16).replace('T',' ')}</span></div>
+      <p class="small">${x.actor} · ${x.entity_type} #${x.entity_id}${x.details?` · ${x.details.replace(/</g,'&lt;')}`:''}</p></div>`).join('')
+    ||'<p class="small">No admin actions recorded yet.</p>';
 }
 </script></body></html>
