@@ -186,8 +186,9 @@ async function load(){
     },()=>{document.getElementById('gpsnote').innerHTML='Location permission denied.';},{timeout:10000});
   };
   const [ccity, cstate] = (pick.value||'|').split('|');
+  const manualMode = localStorage.getItem('dropcity_manual')==='1';
   let r;
-  if(window._gps && window._gps.lat){
+  if(window._gps && window._gps.lat && !manualMode){
     r = await (await fetch(`/api/nearby?lat=${window._gps.lat}&lng=${window._gps.lng}&radius=50`)).json();
     document.getElementById('count').textContent = r.length + ' spots within 50 miles';
   } else {

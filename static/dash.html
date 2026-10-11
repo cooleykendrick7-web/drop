@@ -206,6 +206,16 @@
       <div id="payoverview"></div>
     </div>
     <div class="card">
+      <h3>🧾 Food Receipts — Approve Reimbursement</h3>
+      <p class="small">Drivers pay at the restaurant, you approve, they get reimbursed + profit.</p>
+      <div id="receipts"></div>
+    </div>
+    <div class="card">
+      <h3>🚨 Disputes & Appeals</h3>
+      <p class="small">Theft accusations, suspensions, driver appeals.</p>
+      <div id="disputes"></div>
+    </div>
+    <div class="card">
       <h3>📝 Card Applications</h3>
       <div id="cardapps"></div>
     </div>
@@ -315,6 +325,46 @@ async function loadPay(){
       <b>${c.driver_name}</b> — ${c.last4?'•••• '+c.last4:'No card issued'}<br>
       <span class="small">Status: ${c.status} | Provider: ${c.provider||'Not activated'}</span>
     </div>`).join('')||'<p class="small">No cards yet.</p>';
+  // Receipts
+  const rc=await(await fetch('/api/operator/receipts',{headers:H()})).json();
+  $('receipts').innerHTML=rc.map(x=>`
+    <div class="card" style="margin:8px 0">
+      <div class="row"><b>${x.driver_name}: $${x.amount.toFixed(2)}</b><span class="badge">PENDING</span></div>
+      <p class="small">Order #${x.order_id} · ${x.ai_check}</p>
+      ${x.photo_path?`<img src="${x.photo_path}" style="max-width:200px;border-radius:8px">`:''}<br>
+      <button class="btn small" onclick="approveReceipt(${x.id})">✅ Approve & Pay</button>
+      <button class="btn small ghost" onclick="rejectReceipt(${x.id})">❌ Reject</button>
+    </div>`).join('')||'<p class="small">No pending receipts.</p>';
+  // Disputes
+  const dp=await(await fetch('/api/operator/disputes',{headers:H()})).json();
+  $('disputes').innerHTML=dp.map(x=>`
+    <div class="card" style="margin:8px 0;border-left:3px solid ${x.status==='open'?'#e74c3c':x.status==='appealed'?'#f39c12':'#2ecc71'}">
+      <div class="row"><b>${x.driver_name}</b><span class="badge">${x.status.toUpperCase()}</span></div>
+      <p class="small"><b>${x.issue_type}</b>: ${x.description}</p>
+      ${x.driver_appeal?`<p class="small" style="color:#f39c12"><b>Appeal:</b> ${x.driver_appeal}</p>`:''}
+      ${x.status!=='resolved'?`
+      <button class="btn small" onclick="resolveDispute(${x.id},'reinstate')">✅ Reinstate</button>
+      <button class="btn small ghost" onclick="resolveDispute(${x.id},'ban')">🚫 Ban</button>`:`
+      <p class="small">Resolved: ${x.resolution}</p>`}
+    </div>`).join('')||'<p class="small">No disputes.</p>';
+}
+async function approveReceipt(id){
+  if(!confirm('Approve this receipt? Driver will be reimbursed + paid.'))return;
+  const r=await(await fetch(`/api/operator/receipts/${id}/approve`,{method:'POST',headers:H()})).json();
+  alert(r.ok?`Approved! $${r.payout_total} queued for driver.`:'Failed');
+  loadPay();
+}
+async function rejectReceipt(id){
+  const reason=prompt('Reason for rejection:');
+  if(!reason)return;
+  await fetch(`/api/operator/receipts/${id}/reject`,{method:'POST',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({reason})});
+  loadPay();
+}
+async function resolveDispute(id, action){
+  const res=prompt(action==='reinstate'?'Reason for reinstating:':'Reason for ban:');
+  if(!res)return;
+  await fetch(`/api/operator/disputes/${id}/resolve`,{method:'POST',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({action,resolution:res})});
+  loadPay();
 }
 async function decideCard(aid, approve){
   await fetch(`/api/operator/cards/${aid}/decide`,{method:'POST',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({approve:!!approve})});

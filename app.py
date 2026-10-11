@@ -209,6 +209,23 @@ def init_db():
         order_id INTEGER NOT NULL, driver_id INTEGER NOT NULL,
         photo_type TEXT NOT NULL, photo_path TEXT NOT NULL,
         created_at TEXT NOT NULL)""")
+    # Driver food purchase receipts (pay at restaurant, get reimbursed)
+    c.execute("""CREATE TABLE IF NOT EXISTS food_receipts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id INTEGER NOT NULL, driver_id INTEGER NOT NULL,
+        amount REAL NOT NULL, photo_path TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        ai_check TEXT DEFAULT '', decided_by TEXT DEFAULT '',
+        created_at TEXT NOT NULL)""")
+    # Driver disputes/appeals (theft accusations, suspensions)
+    c.execute("""CREATE TABLE IF NOT EXISTS driver_disputes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        driver_id INTEGER NOT NULL, order_id INTEGER DEFAULT 0,
+        issue_type TEXT NOT NULL, description TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'open',
+        driver_appeal TEXT DEFAULT '',
+        resolution TEXT DEFAULT '', decided_by TEXT DEFAULT '',
+        created_at TEXT NOT NULL, resolved_at TEXT DEFAULT '')""")
     # WATCH portal comments
     c.execute("""CREATE TABLE IF NOT EXISTS watch_comments (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2384,6 +2401,192 @@ def order_photos(oid: int):
         " WHERE order_id=? ORDER BY id", (oid,)).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+# ---------------- Driver food receipts + reimbursement ----------------
+@app.post("/api/drivers/receipt")
+async def driver_submit_receipt(req: Request):
+    """Driver paid for food at restaurant, submits receipt photo for reimbursement."""
+    from PIL import Image
+    import io, os
+    form = await req.form()
+    driver_id = int(form.get("driver_id") or 0)
+    order_id = int(form.get("order_id") or 0)
+    try:
+        amount = round(float(form.get("amount") or 0), 2)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Valid amount required")
+    file = form.get("file")
+    if not driver_id or not order_id or amount <= 0 or not file:
+        raise HTTPException(400, "driver_id, order_id, amount, and receipt photo required")
+    data = await file.read()
+    if len(data) > 5 * 1024 * 1024:
+        raise HTTPException(400, "Photo too large (max 5MB)")
+    try:
+        img = Image.open(io.BytesIO(data))
+        img.verify()
+        img = Image.open(io.BytesIO(data))
+    except Exception:
+        raise HTTPException(400, "Invalid image")
+    os.makedirs("static/receipts", exist_ok=True)
+    fname = f"r{order_id}_{int(__import__('time').time())}.jpg"
+    path = f"static/receipts/{fname}"
+    img.convert("RGB").save(path, "JPEG", quality=80)
+    # AI check: compare against order total
+    conn = db()
+    o = conn.execute("SELECT food_total FROM orders WHERE id=?", (order_id,)).fetchone()
+    ai_note = ""
+    if o:
+        expected = o["food_total"] or 0
+        diff = abs(amount - expected)
+        if diff < 1.0:
+            ai_note = f"✓ Matches order (${expected:.2f})"
+        elif amount > expected * 1.2:
+            ai_note = f"⚠️ ${amount:.2f} vs order ${expected:.2f} — review needed"
+        else:
+            ai_note = f"~ ${amount:.2f} vs order ${expected:.2f}"
+    conn.execute(
+        "INSERT INTO food_receipts(order_id, driver_id, amount, photo_path, ai_check, created_at)"
+        " VALUES(?,?,?,?,?,?)",
+        (order_id, driver_id, amount, f"/{path}", ai_note, now_iso()))
+    conn.commit()
+    conn.close()
+    log_event("payment", f"🧾 Receipt ${amount:.2f} from driver #{driver_id}",
+              f"Order #{order_id} — {ai_note}")
+    return {"ok": True, "ai_check": ai_note}
+
+
+@app.get("/api/operator/receipts")
+def op_receipts(x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    conn = db()
+    rows = conn.execute(
+        "SELECT fr.*, d.name as driver_name FROM food_receipts fr"
+        " JOIN drivers d ON d.id=fr.driver_id"
+        " WHERE fr.status='pending' ORDER BY fr.id DESC").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+@app.post("/api/operator/receipts/{rid}/approve")
+async def op_receipt_approve(rid: int, req: Request, x_pin: str = Header(default="")):
+    """Ken approves receipt → driver gets reimbursed + profit via payout."""
+    check_pin(x_pin)
+    conn = db()
+    r = conn.execute("SELECT * FROM food_receipts WHERE id=?", (rid,)).fetchone()
+    if not r:
+        conn.close()
+        raise HTTPException(404, "Receipt not found")
+    # Mark approved
+    conn.execute("UPDATE food_receipts SET status='approved', decided_by='ken' WHERE id=?", (rid,))
+    # Create reimbursement payout (food cost + delivery earnings)
+    o = conn.execute("SELECT delivery_fee, tip FROM orders WHERE id=?", (r["order_id"],)).fetchone()
+    total = r["amount"] + (o["delivery_fee"] if o else 0) + (o["tip"] if o else 0)
+    conn.execute(
+        "INSERT INTO payouts(driver_id, amount, kind, status, note, created_at)"
+        " VALUES(?, ?, 'reimbursement', 'requested', ?, ?)",
+        (r["driver_id"], round(total, 2),
+         f"Food ${r['amount']:.2f} + delivery (order #{r['order_id']})", now_iso()))
+    conn.commit()
+    conn.close()
+    audit("operator", "receipt_approved", "receipt", rid, f"${r['amount']:.2f}")
+    log_event("payment", f"✅ Receipt approved — ${total:.2f} to driver #{r['driver_id']}",
+              f"Food reimbursement + delivery pay")
+    return {"ok": True, "payout_total": round(total, 2)}
+
+
+@app.post("/api/operator/receipts/{rid}/reject")
+async def op_receipt_reject(rid: int, req: Request, x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    body = await req.json()
+    reason = (body.get("reason") or "").strip()[:200]
+    conn = db()
+    conn.execute("UPDATE food_receipts SET status='rejected', decided_by='ken' WHERE id=?", (rid,))
+    conn.commit()
+    conn.close()
+    audit("operator", "receipt_rejected", "receipt", rid, reason)
+    return {"ok": True}
+
+
+# ---------------- Driver disputes / theft / appeals ----------------
+@app.post("/api/operator/drivers/{did}/flag")
+async def op_flag_driver(did: int, req: Request, x_pin: str = Header(default="")):
+    """Ken flags a driver for theft/misconduct → suspended, can appeal."""
+    check_pin(x_pin)
+    body = await req.json()
+    issue = (body.get("issue_type") or "theft").strip()
+    desc = (body.get("description") or "").strip()[:500]
+    order_id = int(body.get("order_id") or 0)
+    if not desc:
+        raise HTTPException(400, "Description required")
+    conn = db()
+    conn.execute(
+        "INSERT INTO driver_disputes(driver_id, order_id, issue_type, description, created_at)"
+        " VALUES(?,?,?,?,?)",
+        (did, order_id, issue, desc, now_iso()))
+    # Suspend driver immediately
+    conn.execute("UPDATE drivers SET status='suspended' WHERE id=?", (did,))
+    conn.commit()
+    conn.close()
+    audit("operator", "driver_flagged", "driver", did, f"{issue}: {desc[:100]}")
+    log_event("safety", f"🚨 Driver #{did} suspended", f"{issue}: {desc[:100]}")
+    return {"ok": True, "message": "Driver suspended. They can submit an appeal."}
+
+
+@app.post("/api/drivers/appeal")
+async def driver_appeal(req: Request):
+    """Suspended driver submits an appeal."""
+    body = await req.json()
+    driver_id = int(body.get("driver_id") or 0)
+    dispute_id = int(body.get("dispute_id") or 0)
+    appeal = (body.get("appeal") or "").strip()[:1000]
+    if not driver_id or not dispute_id or not appeal:
+        raise HTTPException(400, "driver_id, dispute_id, and appeal text required")
+    conn = db()
+    conn.execute(
+        "UPDATE driver_disputes SET driver_appeal=?, status='appealed' WHERE id=? AND driver_id=?",
+        (appeal, dispute_id, driver_id))
+    conn.commit()
+    conn.close()
+    log_event("safety", f"📝 Driver #{driver_id} appealed dispute #{dispute_id}", "")
+    return {"ok": True}
+
+
+@app.get("/api/operator/disputes")
+def op_disputes(x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    conn = db()
+    rows = conn.execute(
+        "SELECT dd.*, d.name as driver_name FROM driver_disputes dd"
+        " JOIN drivers d ON d.id=dd.driver_id"
+        " ORDER BY dd.id DESC").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+@app.post("/api/operator/disputes/{did}/resolve")
+async def op_dispute_resolve(did: int, req: Request, x_pin: str = Header(default="")):
+    """Ken resolves: reinstate driver or ban permanently."""
+    check_pin(x_pin)
+    body = await req.json()
+    action = (body.get("action") or "").strip()  # 'reinstate' or 'ban'
+    resolution = (body.get("resolution") or "").strip()[:500]
+    if action not in ("reinstate", "ban"):
+        raise HTTPException(400, "action must be reinstate or ban")
+    conn = db()
+    disp = conn.execute("SELECT * FROM driver_disputes WHERE id=?", (did,)).fetchone()
+    if not disp:
+        conn.close()
+        raise HTTPException(404, "Dispute not found")
+    new_status = "approved" if action == "reinstate" else "banned"
+    conn.execute(
+        "UPDATE driver_disputes SET status='resolved', resolution=?, decided_by='ken', resolved_at=? WHERE id=?",
+        (resolution, now_iso(), did))
+    conn.execute("UPDATE drivers SET status=? WHERE id=?", (new_status, disp["driver_id"]))
+    conn.commit()
+    conn.close()
+    audit("operator", f"dispute_{action}", "dispute", did, resolution[:100])
+    return {"ok": True}
 
 
 @app.post("/api/driver/nearby")
