@@ -41,10 +41,6 @@ $('gobtn').onclick=async()=>{
     body:JSON.stringify({email:$('email').value,password:$('pass').value})});
   if(!r.ok){$('loginmsg').textContent='Wrong email or password.';return;}
   loadMe();
-$('logoutbtn').onclick=async()=>{
-  await fetch('/api/biz/logout',{method:'POST'});
-  location.reload();
-};
 };
 $('regbtn').onclick=async()=>{
   const r=await fetch('/api/biz/register',{method:'POST',headers:{'Content-Type':'application/json'},
@@ -67,5 +63,10 @@ async function loadMe(){
     $('bnotes').innerHTML=m.recent_notes.map(n=>`<p class="small">📝 ${n.note.replace(/</g,'&lt;')}<br><span style="opacity:.6">${n.created_at.slice(0,10)}</span></p>`).join('');
 }
 loadMe();
+$('logoutbtn').onclick=async()=>{
+  await fetch('/api/biz/logout',{method:'POST'});
+  location.reload();
+};
 </script>
-<script src="/static/chat.js"></script></body></html>
+<script src="/static/chat.js"></script><script src="/static/seasonal.js"></script>
+</body></html>

@@ -1,1 +1,122 @@
-<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=/"><title>Drop — Rides</title></head><body><p><a href="/">Go to Drop</a></p></body></html>
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Drop — Menu</title>
+<link rel="icon" href="/static/logo-mark.jpg">
+<link rel="stylesheet" href="/static/styles.css">
+</head><body>
+<header class="topbar"><a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg" alt="Drop"><b>Drop</b></a><a class="acct" href="/account.html">👤 Account</a></header>
+<a href="/" class="small">← All restaurants</a>
+<div id="head"></div>
+<div id="reviews-sec"></div>
+<div id="menu"></div>
+<div class="cartbar" id="cartbar" style="display:none">
+  <div class="row">
+    <button class="btn" id="gocheck" style="flex:1">View cart · $<span id="ctotal">0.00</span></button>
+    <button class="btn ghost" id="clearcart" style="width:auto;margin-left:8px">🗑️ Clear</button>
+  </div>
+</div>
+<script>
+if(!sessionStorage.getItem('dropv')){sessionStorage.setItem('dropv','1');
+fetch('/api/visit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({page:'restaurant'})});}
+const rid = new URLSearchParams(location.search).get('id');
+let cart = JSON.parse(localStorage.getItem('dropcart_'+rid) || '{}');
+let menu = [], rest = null, fee = 3.99;
+// one-tap reorder: restore last order's items
+try{
+  if(new URLSearchParams(location.search).get('reorder')==='1'){
+    const last=JSON.parse(localStorage.getItem('droplast')||'null');
+    if(last && last.rid==rid && last.items){
+      cart=last.items;
+      localStorage.setItem('dropcart_'+rid, JSON.stringify(cart));
+    }
+  }
+}catch(e){}
+async function load(){
+  const cfg = await (await fetch('/api/config')).json();
+  fee = cfg.delivery_fee;
+  const r = await (await fetch('/api/restaurants')).json();
+  rest = r.find(x=>x.id==rid);
+  if(!rest){ document.body.innerHTML='<p>Restaurant not found. <a href="/">Home</a></p>'; return; }
+  menu = rest.menu;
+  document.getElementById('head').innerHTML =
+    `${rest.photo?`<div class="hero-photo" style="background-image:url('${rest.photo}')"></div>`:''}
+     <h1>${rest.logo?`<img class="rlogo-lg" src="${rest.logo}" alt="">`:rest.emoji} ${rest.name}</h1><p class="sub">${rest.cuisine} · Delivery $${fee.toFixed(2)} · ${rest.open?'Open now':'Closed'}</p>`;
+  loadReviews();
+  document.getElementById('menu').innerHTML = menu.map(m=>`
+    <div class="card menu-item">
+      <div class="info"><b>${m.name}</b><span>${m.description||''}</span><span class="price">$${m.price.toFixed(2)}</span></div>
+      <div class="qty">
+        <button onclick="ch(${m.id},-1)">−</button>
+        <b id="q${m.id}">${cart[m.id]||0}</b>
+        <button onclick="ch(${m.id},1)">+</button>
+      </div>
+    </div>`).join('');
+  draw();
+}
+function ch(id,d){
+  cart[id]=(cart[id]||0)+d;
+  if(cart[id]<=0) delete cart[id];
+  localStorage.setItem('dropcart_'+rid, JSON.stringify(cart));
+  document.getElementById('q'+id).textContent = cart[id]||0;
+  draw();
+}
+function draw(){
+  let t=0,n=0;
+  for(const [id,q] of Object.entries(cart)){
+    const m=menu.find(x=>x.id==id); if(m){t+=m.price*q;n+=q;}
+  }
+  document.getElementById('ctotal').textContent=t.toFixed(2);
+  document.getElementById('cartbar').style.display = n? 'block':'none';
+}
+document.getElementById('gocheck').onclick=()=>location.href='/checkout.html?rid='+rid;
+document.getElementById('clearcart').onclick=()=>{
+  if(!confirm('Remove everything from your cart?'))return;
+  cart={};
+  localStorage.setItem('dropcart_'+rid, JSON.stringify(cart));
+  menu.forEach(m=>{const q=document.getElementById('q'+m.id); if(q)q.textContent='0';});
+  draw();
+};
+
+// reviews
+async function loadReviews(){
+  const j=await (await fetch('/api/reviews/'+rid)).json();
+  const stars=n=>'★'.repeat(Math.round(n))+'☆'.repeat(5-Math.round(n));
+  document.getElementById('reviews-sec').innerHTML=`
+    <div class="card">
+      <div class="row"><b>⭐ Reviews</b>
+        <span class="small">${j.count?stars(j.avg)+' '+j.avg+' ('+j.count+')':'No reviews yet'}</span></div>
+      <div id="revlist">${j.reviews.map(r=>`
+        <div style="border-top:1px solid #222;padding:8px 0">
+          <b class="small">${'★'.repeat(r.rating)}${'☆'.repeat(5-r.rating)}</b>
+          <span class="small" style="opacity:.7"> · ${(r.name||'Drop customer').replace(/</g,'&lt;')}</span>
+          ${r.text?`<p class="small" style="margin:4px 0">${r.text.replace(/</g,'&lt;')}</p>`:''}
+        </div>`).join('')}</div>
+      <div style="margin-top:10px">
+        <label class="small">Leave a review</label>
+        <div class="row" style="gap:4px;margin:6px 0" id="starpick">
+          ${[1,2,3,4,5].map(n=>`<button class="btn small ghost" data-s="${n}" style="width:auto;font-size:1.3rem">☆</button>`).join('')}
+        </div>
+        <textarea id="revtext" rows="2" placeholder="How was it? (optional)" style="width:100%"></textarea>
+        <button class="btn small" id="revgo" style="margin-top:8px">Post review</button>
+        <p class="small" id="revmsg"></p>
+      </div>
+    </div>`;
+  let picked=0;
+  document.querySelectorAll('#starpick button').forEach(b=>b.onclick=()=>{
+    picked=+b.dataset.s;
+    document.querySelectorAll('#starpick button').forEach(x=>
+      x.textContent=+x.dataset.s<=picked?'★':'☆');
+  });
+  document.getElementById('revgo').onclick=async()=>{
+    if(!picked){document.getElementById('revmsg').textContent='Pick a star rating first.';return;}
+    const r=await fetch('/api/reviews',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({restaurant_id:+rid,rating:picked,text:document.getElementById('revtext').value})});
+    const j2=await r.json();
+    document.getElementById('revmsg').textContent=r.ok?'✅ Thanks for the review!':'Error: '+(j2.detail||'log in first');
+    if(r.ok)loadReviews();
+  };
+}
+load();
+</script>
+<script src="/static/chat.js"></script><script src="/static/seasonal.js"></script>
+</body></html>

@@ -123,9 +123,9 @@ async function loadAvail(){
   const a=await (await fetch('/api/drivers/available')).json();
   $('alist').innerHTML='<h2>Available pickups ('+a.length+')</h2>'+(a.map(o=>`
     <div class="card order">
-      <div class="row"><b>#${o.id} · ${o.kind==='courier'?'📦 Pickup':'🚗 Ride'}</b>
+      <div class="row"><b>#${o.id} · ${o.kind==='courier'?'📦 Pickup':'🍔 Food'}</b>
         <b>$${((o.delivery_fee||0)+(o.tip||0)).toFixed(2)}</b></div>
-      <p><b>Pick up:</b> ${o.pickup_name||''}<br>
+      <p><b>Pick up:</b> ${o.kind==='courier'?(o.pickup_name||''):o.restaurant_name||''}<br>
         <span class="small">📍 ${o.kind==='courier'?(o.pickup_address||''):''}</span></p>
       <p><b>Drop at:</b> ${o.customer_name}<br><span class="small">🏠 ${o.address||''}</span></p>
       <p class="small">Fee $${(o.delivery_fee||0).toFixed(2)} + tip $${(o.tip||0).toFixed(2)}</p>
@@ -168,7 +168,7 @@ async function loadOrders(){
     const restDest=o.plat?`${o.plat},${o.plng}`:encodeURIComponent(o.pickup_addr||'');
     const custDest=o.cust_lat?`${o.cust_lat},${o.cust_lng}`:encodeURIComponent(o.address||'');
     return `<div class="card order">
-      <div class="row"><b>#${o.id} · ${o.kind==='courier'?'📦 Courier':'🚗 Ride'}</b>
+      <div class="row"><b>#${o.id} · ${o.kind==='courier'?'📦 Courier':'🍔 Food'}</b>
         <span class="badge">${o.status_label}</span></div>
       <p><b>Pick up:</b> ${o.pickup_label}<br><span class="small">📍 ${o.pickup_addr||''}</span></p>
       ${o.kind==='courier'?`<p><b>Items:</b> ${o.items.map(i=>i.name).join(', ')}</p>`:o.items.map(i=>`<div class="row small"><span>${i.qty}× ${i.name}</span></div>`).join('')}
@@ -263,5 +263,5 @@ $('locToggle').onclick=()=>{
 
 setInterval(()=>{ if($('app').style.display!=='none') loadOrders(); },10000);
 </script>
-<script src="/static/seasons.js"></script>
-<script src="/static/chat.js"></script></body></html>
+<script src="/static/chat.js"></script><script src="/static/seasonal.js"></script>
+</body></html>

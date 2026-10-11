@@ -3,20 +3,26 @@
 <title>Drop — Operator</title>
 <link rel="icon" href="/static/logo-mark.jpg">
 <link rel="stylesheet" href="/static/styles.css">
-<style>
-.tabs{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
-.tabs button{flex:1 1 30%;background:#1c1c22;color:#fff;border:1px solid #2a2a33;border-radius:12px;padding:10px 4px;font-weight:700;font-size:.85rem;white-space:nowrap}
-.tabs button.on{background:var(--acc);border-color:var(--acc)}
-.tab{display:none}.tab.on{display:block}
-.subtabs{display:flex;gap:6px;margin:0 0 12px;overflow-x:auto;padding-bottom:2px}
-.subtabs button{flex:0 0 auto;background:#1c1c22;color:#ccc;border:1px solid #2a2a33;border-radius:20px;padding:7px 14px;font-size:.8rem;font-weight:700}
-.subtabs button.on{background:#2a2a33;color:#fff;border-color:var(--acc)}
-.subtab{display:none}.subtab.on{display:block}
-.card{margin:10px 0;padding:14px}
-.card h2{font-size:1.15rem}.card h3{font-size:1rem;margin:8px 0}
-</style>
+<style>.tabs{display:flex;gap:6px;margin:10px 0}.tabs button{flex:1;background:#2a2a33;color:#fff;border:0;border-radius:10px;padding:11px 4px;font-weight:700}.tabs button.on{background:var(--acc)}.tab{display:none}.tab.on{display:block}</style>
 </head><body>
-<header class="topbar"><a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg" alt="Drop"><b>Drop</b></a><span class="small">&nbsp;operator</span></header>
+<header class="topbar"><a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg" alt="Drop"><b>Drop</b></a><span class="small">&nbsp;operator</span>
+<button class="btn small ghost" id="logoutbtn" style="width:auto;margin-left:auto">🚪 Log out</button></header>
+<style>
+/* compact operator dashboard */
+#app{max-width:720px;margin:0 auto;padding:0 12px}
+#app .card{padding:12px;margin:10px 0;border-radius:12px}
+#app h2{font-size:1.1rem;margin:8px 0}
+#app h3{font-size:1rem;margin:6px 0}
+.tabs{display:flex;gap:4px;margin:8px 0;overflow-x:auto;padding-bottom:4px}
+.tabs button{flex:0 0 auto;padding:8px 10px;font-size:.82rem;border-radius:8px}
+.order .row{font-size:.9rem}
+.small{font-size:.78rem}
+.btn.small{padding:7px 12px;font-size:.82rem}
+.statgrid{gap:8px!important;margin:8px 0!important}
+.stat{padding:10px!important}
+.stat b{font-size:1.2rem!important}
+input,textarea,select{padding:9px!important;font-size:.9rem}
+</style>
 <div class="alert" id="alert"></div>
 
 <div id="login" class="card">
@@ -27,20 +33,23 @@
 </div>
 
 <div id="app" style="display:none">
-  <div class="row" style="padding:8px 12px 0;justify-content:space-between">
-    <span class="small" style="opacity:.6">🔐 Operator dashboard</span>
-    <button class="btn small ghost" id="logoutbtn" style="width:auto;padding:6px 14px">Log out</button>
-  </div>
   <div class="tabs">
-    <button class="on" data-t="orders">📦 Orders</button>
-    <button data-t="rides">🚗 Rides <span id="ridebadge"></span></button>
+    <button class="on" data-t="orders">Orders</button>
     <button data-t="money">💰 Money</button>
-    <button data-t="drv">👥 Drivers <span id="drvbadge"></span></button>
-    <button data-t="growth">📈 Growth <span id="growthbadge"></span></button>
-    <button data-t="sup">💬 Support <span id="tixbadge"></span></button>
-    <button data-t="insights">📊 Insights</button>
+    <button data-t="deals">🤝 Deals <span id="dealbadge"></span></button>
+    <button data-t="drv">Drivers <span id="drvbadge"></span></button>
+    <button data-t="biz">Drop More</button>
+    <button data-t="earn">Earnings</button>
+    <button data-t="menu">Menu</button>
+    <button data-t="promo">Promos</button>
+    <button data-t="upd">Updates <span id="updbadge"></span></button>
+    <button data-t="sup">Support <span id="tixbadge"></span></button>
+    <button data-t="stats">Stats</button>
+    <button data-t="inv">Investors <span id="invbadge"></span></button>
+    <button data-t="out">📧 Outreach <span id="outbadge"></span></button>
     <button data-t="live">⚡ Live</button>
-    <button data-t="set">⚙️ Settings</button>
+    <button data-t="audit">Audit</button>
+    <button data-t="set">Settings</button>
   </div>
 
   <div class="tab on" id="t-orders">
@@ -52,34 +61,8 @@
     <div id="olist"></div>
   </div>
 
-  <div class="tab" id="t-rides">
-    <div class="card" style="background:linear-gradient(135deg,#0d0d10,#1a1405);border:1px solid #d4af37">
-      <div class="row"><b style="color:#d4af37">🚗 Drop Rides</b><span id="ride-launch" class="small"></span></div>
-      <p class="small">Customers request rides, you accept or decline. Drivers need your separate rides approval (photo of them + photo of their car + waiver).</p>
-    </div>
-    <h3>🚨 Ride requests <span id="ridepend"></span></h3>
-    <div id="ridelist"></div>
-    <h3>🛣️ Active rides</h3>
-    <div id="rideactive"></div>
-    <h3>💰 Ride pricing</h3>
-    <div class="card"><div class="row">
-      <div style="flex:1"><label class="small">Base fare $</label><input id="rbase" inputmode="decimal"></div>
-      <div style="flex:1"><label class="small">Per mile $</label><input id="rmile" inputmode="decimal"></div></div>
-      <div class="row" style="margin-top:8px">
-      <div style="flex:1"><label class="small">Wait free min</label><input id="rwaitfree" inputmode="numeric"></div>
-      <div style="flex:1"><label class="small">Wait $/min</label><input id="rwaitmin" inputmode="decimal"></div>
-      <div style="flex:1"><label class="small">Max miles</label><input id="rmaxmi" inputmode="numeric"></div></div>
-      <button class="btn small" id="rsave" style="margin-top:8px">Save ride pricing</button>
-      <p class="small" id="rmsg"></p></div>
-  </div>
-
   <div class="tab" id="t-money">
-    <div class="subtabs">
-      <button class="on" data-s="m-overview">Overview</button>
-      <button data-s="m-earn">Earnings</button>
-    </div>
-    <div class="subtab on" id="s-m-overview">
-<div class="card"><h2 style="margin:0">💰 Company money</h2>
+    <div class="card"><h2 style="margin:0">💰 Company money</h2>
       <p class="small" id="finwarn" style="color:#f66"></p>
       <div class="statgrid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0">
         <div class="stat"><b id="f-rev">–</b><span class="small">Gross revenue</span></div>
@@ -87,7 +70,6 @@
         <div class="stat"><b id="f-driver">–</b><span class="small">Driver pay owed</span></div>
         <div class="stat"><b id="f-tips">–</b><span class="small">Tips owed (100% to drivers)</span></div>
         <div class="stat"><b id="f-stripe">–</b><span class="small">Stripe fees</span></div>
-        <div class="stat"><b id="f-gas" style="color:#fbbf24">–</b><span class="small">⛽ Gas fund</span></div>
         <div class="stat"><b id="f-payout">–</b><span class="small">Payouts requested</span></div>
       </div>
       <div id="f-alerts"></div></div>
@@ -104,69 +86,16 @@
     <div class="card"><h3>🔗 Stripe Connect</h3><div id="connectbox"><p class="small">Loading…</p></div></div>
     <h3>Per-order breakdown</h3>
     <div id="finorders"></div>
-    </div>
-    <div class="subtab" id="s-m-earn">
-<div class="card"><h2 style="margin:0">Delivery fees earned</h2>
-      <div class="total" id="etotal">$0.00</div>
-      <p class="small" id="ecount"></p></div>
-    <div id="ebyday"></div>
-    </div>
   </div>
-  <div class="tab" id="t-growth">
-    <div class="subtabs">
-      <button class="on" data-s="g-deals">🤝 Pipeline</button>
-      <button data-s="g-out">📧 Outreach</button>
-      <button data-s="g-biz">📦 Businesses</button>
-      <button data-s="g-promo">🎟️ Promos</button>
-      <button data-s="g-inv">💰 Investors</button>
-    </div>
-    <div class="subtab on" id="s-g-deals">
-<div class="card"><b>🤝 Partnership pipeline</b>
+
+  <div class="tab" id="t-deals">
+    <div class="card"><b>🤝 Partnership pipeline</b>
       <p class="small">Every deal moves: Submitted → Under Review → Financial Evaluation → Negotiation → Contract Review → Approved → Active. <b>You</b> approve every stage.</p></div>
     <div class="row" id="dealstages" style="flex-wrap:wrap;gap:6px;margin-bottom:10px"></div>
     <div id="deallist"></div>
-    </div>
-    <div class="subtab" id="s-g-out">
-<div class="card"><b>📧 AI outreach</b>
-      <p class="small">AI drafts partnership emails. <b>You approve every one</b> before it sends. Nothing goes out automatically.</p></div>
-    <div class="card"><h3>Draft a new outreach email</h3>
-      <input id="o-email" placeholder="Business email" inputmode="email">
-      <input id="o-biz" placeholder="Business name">
-      <div class="row"><input id="o-contact" placeholder="Contact name (optional)" style="flex:1;margin-right:6px">
-      <input id="o-type" placeholder="Type (e.g. auto parts)" style="flex:1"></div>
-      <button class="btn" id="o-draft">✨ AI draft email</button>
-      <p class="small" id="o-msg"></p></div>
-    <div id="outlist"></div>
-    </div>
-    <div class="subtab" id="s-g-biz">
-<div class="card"><b>📦 Drop More businesses</b>
-      <p class="small">Auto parts, clothing, supplies — the pickup points for courier orders.</p></div>
-    <div id="bizlist"></div>
-    <div class="card"><h3>Add business</h3>
-      <input id="bname" placeholder="Name"><input id="bcat" placeholder="Category (Auto Parts, Clothing, …)">
-      <input id="baddr" placeholder="Street address, Bismarck, ND">
-      <input id="bphone" placeholder="Phone"><input id="bweb" placeholder="Website URL">
-      <button class="btn" id="addbiz">Add business</button></div>
-    </div>
-    <div class="subtab" id="s-g-promo">
-<div class="card"><h3>Create promo code</h3>
-      <div class="row"><input id="pcode" placeholder="CODE (e.g. WELCOME5)" style="text-transform:uppercase">
-      <select id="pkind" style="max-width:110px"><option value="fixed">$ off</option><option value="percent">% off</option></select></div>
-      <div class="row"><input id="pvalue" placeholder="Value (5 or 10)" inputmode="decimal">
-      <input id="pmin" placeholder="Min order $ (0=none)" inputmode="decimal"></div>
-      <div class="row"><input id="pmax" placeholder="Max uses (0=unlimited)" inputmode="numeric">
-      <button class="btn small" id="pcreate" style="width:auto;padding:10px 20px">Create</button></div>
-      <p class="small" id="pmsg"></p></div>
-    <div id="plist"></div>
-    </div>
-    <div class="subtab" id="s-g-inv">
-<div class="card"><b>💰 Investor interest</b>
-      <p class="small">People who want to invest in Drop. Reach out personally — investment paperwork needs a lawyer.</p></div>
-    <div id="invlist"></div>
-    </div>
   </div>
 
-<div class="tab" id="t-drv">
+  <div class="tab" id="t-drv">
     <div class="card"><b>🚗 Dropper applications</b>
       <p class="small">Nobody drives without your approval. Review each application, then <b>Approve</b> or <b>Deny</b>.</p></div>
     <h3>Pending review <span id="drvpend"></span></h3>
@@ -175,38 +104,67 @@
     <div id="drvactive"></div>
   </div>
 
-  
+  <div class="tab" id="t-biz">
+    <div class="card"><b>📦 Drop More businesses</b>
+      <p class="small">Auto parts, clothing, supplies — the pickup points for courier orders.</p></div>
+    <div id="bizlist"></div>
+    <div class="card"><h3>Add business</h3>
+      <input id="bname" placeholder="Name"><input id="bcat" placeholder="Category (Auto Parts, Clothing, …)">
+      <input id="baddr" placeholder="Street address, Bismarck, ND">
+      <input id="bphone" placeholder="Phone"><input id="bweb" placeholder="Website URL">
+      <button class="btn" id="addbiz">Add business</button></div>
+  </div>
 
-  
+  <div class="tab" id="t-earn">
+    <div class="card"><h2 style="margin:0">Delivery fees earned</h2>
+      <div class="total" id="etotal">$0.00</div>
+      <p class="small" id="ecount"></p></div>
+    <div id="ebyday"></div>
+  </div>
 
-  
+  <div class="tab" id="t-menu">
+    <div id="rlist"></div>
+    <div class="card"><h3>Add restaurant</h3>
+      <input id="nname" placeholder="Name"><input id="ncuisine" placeholder="Cuisine">
+      <input id="nemoji" placeholder="Emoji (e.g. 🍔)">
+      <button class="btn" id="addrest">Add</button></div>
+  </div>
 
-<div class="tab" id="t-sup">
+  <div class="tab" id="t-promo">
+    <div class="card"><h3>Create promo code</h3>
+      <div class="row"><input id="pcode" placeholder="CODE (e.g. WELCOME5)" style="text-transform:uppercase">
+      <select id="pkind" style="max-width:110px"><option value="fixed">$ off</option><option value="percent">% off</option></select></div>
+      <div class="row"><input id="pvalue" placeholder="Value (5 or 10)" inputmode="decimal">
+      <input id="pmin" placeholder="Min order $ (0=none)" inputmode="decimal"></div>
+      <div class="row"><input id="pmax" placeholder="Max uses (0=unlimited)" inputmode="numeric">
+      <button class="btn small" id="pcreate" style="width:auto;padding:10px 20px">Create</button></div>
+      <p class="small" id="pmsg"></p></div>
+    <div id="plist"></div>
+  </div>
+
+  <div class="tab" id="t-upd">
+    <div class="card"><b>🤖 AI menu watchdog</b>
+      <p class="small">Once a week the AI checks every restaurant's menu online. When it spots a changed price, new item, or removed item, it lands here. Nothing changes on your menu until you tap <b>Approve</b>.</p></div>
+    <div id="updlist"><p class="small">Loading…</p></div>
+  </div>
+
+  <div class="tab" id="t-sup">
     <div id="tixlist"></div>
   </div>
 
-  
-
-  
-
-    <div class="tab" id="t-insights">
-    <div class="subtabs">
-      <button class="on" data-s="i-stats">Stats</button>
-      <button data-s="i-audit">Audit log</button>
-    </div>
-    <div class="subtab on" id="s-i-stats">
-<div class="card"><h2 style="margin:0">Last 14 days</h2>
+  <div class="tab" id="t-stats">
+    <div class="card"><h2 style="margin:0">Last 14 days</h2>
       <p class="small" id="statsum">Loading…</p>
       <div id="statbars"></div></div>
-    </div>
-    <div class="subtab" id="s-i-audit">
-<div class="card"><b>📋 Audit trail</b>
-      <p class="small">Every admin decision, recorded. Nothing happens in the dark.</p></div>
-    <div id="auditlist"></div>
-    </div>
   </div>
 
-<div class="tab" id="t-live">
+  <div class="tab" id="t-inv">
+    <div class="card"><b>💰 Investor interest</b>
+      <p class="small">People who want to invest in Drop. Reach out personally — investment paperwork needs a lawyer.</p></div>
+    <div id="invlist"></div>
+  </div>
+
+  <div class="tab" id="t-live">
     <div class="card"><b>🗺️ Live driver map</b>
       <p class="small">All your drivers, right now. Auto-refreshes every 15 seconds.</p>
       <div id="drivermap" style="height:300px;border-radius:12px;z-index:1"></div>
@@ -218,10 +176,13 @@
         <button class="btn small" id="blastgo" style="width:auto">📢 Send blast</button>
         <span class="small" id="blaststatus"></span></div>
       <div id="blasthist" style="margin-top:8px"></div></div>
-    <div class="card"><b>👀 Watcher chat <span id="watchbadge"></span></b>
-      <p class="small">Messages from people with the watch code (5683). They can see but not touch.</p>
+    <div class="card" id="watchercard" style="border:2px solid #fbbf24"><b>👀 VIP Watcher chat <span id="watchbadge"></span></b>
+      <p class="small">Messages from your VIPs & investors (code 5683).</p>
       <div id="watchchat" style="max-height:250px;overflow-y:auto;margin:8px 0"></div>
-    </div>
+      <div class="row">
+        <input id="watchreply" placeholder="Reply to watchers…" style="flex:1;margin-right:8px">
+        <button class="btn small" id="watchsend" style="width:auto">Reply</button>
+      </div></div>
     <div class="card"><b>🤖 AI suggestions</b>
       <p class="small">What needs your attention right now, based on live data.</p>
       <div id="sugglist"><p class="small">Loading…</p></div></div>
@@ -230,9 +191,24 @@
       <div id="actlist"><p class="small">Loading…</p></div></div>
   </div>
 
-  
+  <div class="tab" id="t-audit">
+    <div class="card"><b>📋 Audit trail</b>
+      <p class="small">Every admin decision, recorded. Nothing happens in the dark.</p></div>
+    <div id="auditlist"></div>
+  </div>
 
-  
+  <div class="tab" id="t-out">
+    <div class="card"><b>📧 AI outreach</b>
+      <p class="small">AI drafts partnership emails. <b>You approve every one</b> before it sends. Nothing goes out automatically.</p></div>
+    <div class="card"><h3>Draft a new outreach email</h3>
+      <input id="o-email" placeholder="Business email" inputmode="email">
+      <input id="o-biz" placeholder="Business name">
+      <div class="row"><input id="o-contact" placeholder="Contact name (optional)" style="flex:1;margin-right:6px">
+      <input id="o-type" placeholder="Type (e.g. auto parts)" style="flex:1"></div>
+      <button class="btn" id="o-draft">✨ AI draft email</button>
+      <p class="small" id="o-msg"></p></div>
+    <div id="outlist"></div>
+  </div>
 
   <div class="tab" id="t-set">
     <div class="card"><h3>🟢 Accepting orders</h3>
@@ -248,17 +224,10 @@
       <h3>Minutes per delivery</h3>
       <input id="smpd" inputmode="numeric" placeholder="18">
       <p class="small">Used to estimate customer wait times. Your average door-to-door minutes.</p>
-      <h3>Max live orders (capacity)</h3>
-      <input id="smaxq" inputmode="numeric" placeholder="8">
-      <p class="small">How many active orders you juggle at once. Hit the cap and the site shows "At capacity" for real.</p>
       <h3>Delivery fee ($)</h3>
-      <input id="sfee" inputmode="decimal"><h3>⛽ Gas fund %</h3>
-      <input id="sgas" inputmode="decimal" placeholder="10"><h3>Change PIN</h3>
-      <input id="spin" inputmode="numeric" placeholder="4–8 digits">
-      <h3>Owner driver PIN</h3>
-      <input id="sopin" inputmode="numeric" maxlength="6" placeholder="6 digits">
-      <p class="small">Your master key: type it in the Driver Hub PIN box to open the 👑 Master Hub — claim any delivery, all driver features.</p>
-      <h3>ntfy push topic</h3>
+      <input id="sfee" inputmode="decimal"><h3>Minimum food order ($)</h3>
+      <input id="smin" inputmode="decimal" placeholder="10.00"><h3>Change PIN</h3>
+      <input id="spin" inputmode="numeric" placeholder="4–8 digits"><h3>ntfy push topic</h3>
       <input id="stopic" placeholder="secret-topic-name">
       <button class="btn" id="saveset">Save settings</button>
       <p class="small" id="setmsg"></p></div>
@@ -285,33 +254,11 @@ function beep(){
 }
 function banner(t){const a=$('alert');a.textContent=t;a.style.display='block';setTimeout(()=>a.style.display='none',8000);}
 
-const _gbadge={deals:0,inv:0,out:0};
-function _gbadgeUpdate(){
-  const n=_gbadge.deals+_gbadge.inv+_gbadge.out;
-  const el=document.getElementById('growthbadge');
-  if(el) el.textContent=n?`(${n})`:'';
-}
 document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
   b.classList.add('on'); $('t-'+b.dataset.t).classList.add('on');
-  if(b.dataset.t==='money'){loadMoney();loadEarn();}
-  if(b.dataset.t==='growth'){loadDeals();loadOutreach();loadBiz();loadPromos();loadInv();}
-  if(b.dataset.t==='insights'){loadStats();loadAudit();}
-  if(b.dataset.t==='set') loadSet(); if(b.dataset.t==='sup') loadTix();
-  if(b.dataset.t==='drv') loadDrivers(); if(b.dataset.t==='rides') loadRides(); if(b.dataset.t==='live') loadLive();
-});
-// sub-tab switching (wired once)
-document.querySelectorAll('.subtabs').forEach(st=>{
-  st.querySelectorAll('button').forEach(sb=>{
-    sb.onclick=()=>{
-      st.querySelectorAll('button').forEach(x=>x.classList.remove('on'));
-      sb.classList.add('on');
-      const tab=st.closest('.tab');
-      tab.querySelectorAll('.subtab').forEach(x=>x.classList.remove('on'));
-      tab.querySelector('#s-'+sb.dataset.s).classList.add('on');
-    };
-  });
+  if(b.dataset.t==='earn') loadEarn(); if(b.dataset.t==='menu') loadMenu(); if(b.dataset.t==='set') loadSet(); if(b.dataset.t==='sup') loadTix(); if(b.dataset.t==='promo') loadPromos(); if(b.dataset.t==='stats') loadStats(); if(b.dataset.t==='upd') loadProposals(); if(b.dataset.t==='drv') loadDrivers(); if(b.dataset.t==='biz') loadBiz(); if(b.dataset.t==='inv') loadInv(); if(b.dataset.t==='money') loadMoney(); if(b.dataset.t==='deals') loadDeals(); if(b.dataset.t==='audit') loadAudit(); if(b.dataset.t==='out') loadOutreach(); if(b.dataset.t==='live') loadLive();
 });
 
 async function loadStats(){
@@ -331,13 +278,21 @@ $('gobtn').onclick=async()=>{
   PIN=$('pin').value.trim();
   const r=await fetch('/api/operator/orders',{headers:H()});
   if(r.status===401){$('loginmsg').textContent='Wrong PIN.';return;}
-  localStorage.setItem('droppin',PIN);
+  sessionStorage.setItem('droppin',PIN);
   $('login').style.display='none';$('app').style.display='block';
   loadOrders(true);
 };
-PIN=localStorage.getItem('droppin')||'';
-if(PIN){$('login').style.display='none';$('app').style.display='block';loadOrders(true);}
-$('logoutbtn').onclick=()=>{doLogout();};
+PIN=sessionStorage.getItem('droppin')||'';
+if(PIN){
+  $('login').style.display='none';$('app').style.display='block';
+  loadOrders(true);
+}
+$('logoutbtn').onclick=()=>{
+  if(!confirm('Log out of the operator portal?'))return;
+  sessionStorage.removeItem('droppin');
+  PIN='';
+  location.reload();
+};
 
 async function activateSched(oid){
   if(!confirm('Activate order #'+oid+' now?'))return;
@@ -345,17 +300,9 @@ async function activateSched(oid){
     body:JSON.stringify({status:'confirmed'})});
   loadOrders();
 }
-function doLogout(){
-  localStorage.removeItem('droppin');
-  PIN='';
-  $('app').style.display='none';
-  $('login').style.display='block';
-  $('pin').value='';
-  $('loginmsg').textContent='';
-}
 async function loadOrders(first){
   const r=await fetch('/api/operator/orders',{headers:H()});
-  if(r.status===401){doLogout();$('loginmsg').textContent='Session expired — enter your PIN.';return;}
+  if(r.status===401){location.reload();return;}
   const orders=await r.json();
   // scheduled orders
   try{
@@ -363,7 +310,7 @@ async function loadOrders(first){
     $('schedlist').innerHTML=sch.length?`<div class="card" style="border:2px solid #a78bfa">
       <b>📅 Scheduled (${sch.length})</b>
       ${sch.map(o=>`<div class="row" style="padding:6px 0;border-top:1px solid #222">
-        <div><b>#${o.id} · ${o.pickup_name||'Drop Ride'}</b><br>
+        <div><b>#${o.id} · ${o.restaurant_name||'Drop'}</b><br>
         <span class="small">${o.customer_name} · $${o.total.toFixed(2)}</span></div>
         <div style="text-align:right"><span class="small">${o.scheduled_for.replace('T',' ').slice(0,16)}</span><br>
         <button class="btn small ghost" style="width:auto;margin-top:4px" onclick="activateSched(${o.id})">▶ Activate</button></div>
@@ -378,20 +325,20 @@ async function loadOrders(first){
   const open=orders.filter(o=>!['delivered','cancelled'].includes(o.status));
   const done=orders.filter(o=>['delivered','cancelled'].includes(o.status));
   const card=(o,i)=>{
-    const restDest=o.pickup_lat?`${o.pickup_lat},${o.pickup_lng}`:encodeURIComponent(o.pickup_address||'');
+    const restDest=o.rest_lat?`${o.rest_lat},${o.rest_lng}`:encodeURIComponent(o.rest_address||o.restaurant_name||'');
     const custDest=o.cust_lat?`${o.cust_lat},${o.cust_lng}`:encodeURIComponent(o.address||'');
     const active=!['delivered','cancelled'].includes(o.status);
     return `
     <div class="card order ${o.id>lastSeen-2&&o.status==='placed'?'new':''}">
-      <div class="row"><b>${i>=0?`#${i+1} · `:''}${o.id} · ${o.pickup_name||'Ride'}</b>
+      <div class="row"><b>${i>=0?`#${i+1} · `:''}${o.id} · ${o.restaurant_name}</b>
         <span class="badge ${o.status==='placed'?'closed':''}">${o.status_label}</span></div>
       <p><b>${o.customer_name}</b> · <a href="tel:${o.phone}">${o.phone}</a><br>
       📍 ${o.address}${o.notes?`<br>📝 ${o.notes}`:''}</p>
       ${o.items.map(i=>`<div class="row small"><span>${i.qty}× ${i.name}</span><span>$${i.line.toFixed(2)}</span></div>`).join('')}
-      <div class="row"><span class="small">Fare $${(o.total-(o.tip||0)-(o.discount||0)).toFixed(2)}${o.tip?` + tip $${o.tip.toFixed(2)}`:''}</span><b>$${o.total.toFixed(2)}</b></div>
+      <div class="row"><span class="small">Food $${o.food_total.toFixed(2)} + fee $${o.delivery_fee.toFixed(2)}${o.tip?` + tip $${o.tip.toFixed(2)}`:''}${o.discount?` − disc $${o.discount.toFixed(2)}`:''}</span><b>$${o.total.toFixed(2)}</b></div>
       <div class="small">${o.paid?'💰 Paid ✓':'⚠️ NOT PAID'} · ${o.driver_name?`🚗 ${o.driver_name}`:'🚗 Ken'} · ${new Date(o.created_at).toLocaleString()}</div>
       ${active?`<div style="display:flex;gap:8px;margin-top:10px">
-        <a class="btn small" href="https://www.google.com/maps/dir/?api=1&destination=${restDest}" target="_blank" style="flex:1;text-decoration:none;text-align:center">🧭 To pickup</a>
+        <a class="btn small" href="https://www.google.com/maps/dir/?api=1&destination=${restDest}" target="_blank" style="flex:1;text-decoration:none;text-align:center">🧭 To restaurant</a>
         <a class="btn small" href="https://www.google.com/maps/dir/?api=1&destination=${custDest}" target="_blank" style="flex:1;text-decoration:none;text-align:center">🏠 To customer</a>
       </div>`:''}
       <div style="margin-top:8px">
@@ -439,6 +386,57 @@ async function loadEarn(){
     `<div class="card"><div class="row"><b>${d}</b><b>$${(v.fees+v.tips).toFixed(2)}</b></div>
      <span class="small">${v.orders} deliveries · $${v.fees.toFixed(2)} fees + $${v.tips.toFixed(2)} tips</span></div>`).join('')||'<p class="small">No earnings yet.</p>';
 }
+async function loadMenu(){
+  const r=await (await fetch('/api/restaurants')).json();
+  $('rlist').innerHTML=r.map(x=>`
+    <div class="card"><div class="row"><b>${x.emoji} ${x.name}</b>
+      <span><button class="btn small ${x.open?'ghost':''}" onclick="toggleR(${x.id},${x.open?0:1})">${x.open?'Close':'Open'}</button>
+      <button class="btn small ghost" onclick="delR(${x.id})">✕</button></span></div>
+      <span class="small">${x.cuisine}${x.sample?' · SAMPLE':''}</span>
+      <div class="row" style="margin-top:6px"><span class="small">⏱️ ETA:</span>
+        <input id="eta-${x.id}" value="${(x.eta||'').replace(/"/g,'&quot;')}" placeholder="25–35 min" style="flex:1;margin:0 6px;max-width:140px">
+        <button class="btn small ghost" onclick="saveEta(${x.id})">Save</button></div>
+      <div class="row" style="margin-top:6px"><span class="small">🖼️ Photo:</span>
+        <input id="ph-${x.id}" value="${(x.photo||'').replace(/"/g,'&quot;')}" placeholder="image URL" style="flex:1;margin:0 6px">
+        <button class="btn small ghost" onclick="savePh(${x.id})">Save</button></div>
+      <div class="row" style="margin-top:6px"><span class="small">🔰 Logo:</span>
+        <input id="lg-${x.id}" value="${(x.logo||'').replace(/"/g,'&quot;')}" placeholder="logo URL" style="flex:1;margin:0 6px">
+        <button class="btn small ghost" onclick="saveLg(${x.id})">Save</button></div>
+      ${x.menu.map(m=>`<div class="row"><span class="small">${m.available?'':'🚫 '}${m.name} — $${m.price.toFixed(2)}</span>
+        <span><button class="btn small ghost" onclick="toggleM(${m.id},${m.available?0:1})">${m.available?'Hide':'Show'}</button>
+        <button class="btn small ghost" onclick="delM(${m.id})">✕</button></span></div>`).join('')}
+      <div class="row" style="margin-top:8px"><input id="mi-n-${x.id}" placeholder="New item name" style="flex:2;margin-right:6px">
+      <input id="mi-p-${x.id}" placeholder="$" inputmode="decimal" style="flex:1;margin-right:6px">
+      <button class="btn small" onclick="addM(${x.id})">Add</button></div>
+    </div>`).join('');
+}
+async function toggleR(id,open){await fetch('/api/operator/restaurants/'+id,{method:'PUT',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({open})});loadMenu();}
+async function delR(id){if(confirm('Delete this restaurant and its menu?')){await fetch('/api/operator/restaurants/'+id,{method:'DELETE',headers:H()});loadMenu();}}
+async function addM(rid){const n=$('mi-n-'+rid).value.trim(),p=parseFloat($('mi-p-'+rid).value);
+  if(!n||!(p>0)){alert('Need a name and price');return;}
+  await fetch('/api/operator/menu-items',{method:'POST',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({restaurant_id:rid,name:n,price:p})});loadMenu();}
+async function toggleM(id,a){await fetch('/api/operator/menu-items/'+id,{method:'PUT',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({available:!!a})});loadMenu();}
+async function delM(id){await fetch('/api/operator/menu-items/'+id,{method:'DELETE',headers:H()});loadMenu();}
+async function saveEta(id){const v=$('eta-'+id).value.trim();
+  await fetch('/api/operator/restaurants/'+id,{method:'PUT',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({eta:v})});}
+async function savePh(id){const v=$('ph-'+id).value.trim();
+  await fetch('/api/operator/restaurants/'+id,{method:'PUT',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({photo:v})});}
+async function saveLg(id){const v=$('lg-'+id).value.trim();
+  await fetch('/api/operator/restaurants/'+id,{method:'PUT',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({logo:v})});}
+$('addrest').onclick=async()=>{
+  const n=$('nname').value.trim(); if(!n){alert('Name required');return;}
+  await fetch('/api/operator/restaurants',{method:'POST',headers:{...H(),'Content-Type':'application/json'},
+    body:JSON.stringify({name:n,cuisine:$('ncuisine').value,emoji:$('nemoji').value||'🍽️'})});
+  $('nname').value='';$('ncuisine').value='';$('nemoji').value='';loadMenu();
+};
+async function loadSet(){
+  const s=await (await fetch('/api/operator/settings',{headers:H()})).json();
+  $('sfee').value=s.delivery_fee;$('smin').value=s.min_order;$('smpd').value=s.mins_per_delivery;$('stopic').value=s.ntfy_topic||'';
+  $('sopen').value=s.open_hour;$('sclose').value=s.close_hour;$('szone').value=s.delivery_zone||'';
+  const pt=$('pausetoggle');
+  pt.textContent=s.accepting_orders?'Pause':'Resume';
+  pt.classList.toggle('ghost',!s.accepting_orders);
+}
 $('pausetoggle').onclick=async()=>{
   const s=await (await fetch('/api/operator/settings',{headers:H()})).json();
   await fetch('/api/operator/settings',{method:'PUT',headers:{...H(),'Content-Type':'application/json'},
@@ -446,16 +444,15 @@ $('pausetoggle').onclick=async()=>{
   loadSet();
 };
 $('saveset').onclick=async()=>{
-  const body={delivery_fee:parseFloat($('sfee').value),gas_pct:parseFloat($('sgas').value)||0,
-    mins_per_delivery:parseInt($('smpd').value)||18,max_queue:parseInt($('smaxq').value)||8,
-    ntfy_topic:$('stopic').value.trim(),delivery_zone:$('szone').value.trim()};
+  const body={delivery_fee:parseFloat($('sfee').value),min_order:parseFloat($('smin').value)||0,
+    mins_per_delivery:parseInt($('smpd').value)||18,ntfy_topic:$('stopic').value.trim(),
+    delivery_zone:$('szone').value.trim()};
   const oh=parseInt($('sopen').value),ch=parseInt($('sclose').value);
   if(!isNaN(oh))body.open_hour=oh; if(!isNaN(ch))body.close_hour=ch;
   if($('spin').value.trim()) body.pin=$('spin').value.trim();
-  body.owner_pin=$('sopin').value.trim();
   const r=await fetch('/api/operator/settings',{method:'PUT',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify(body)});
   const j=await r.json();
-  if(r.ok){$('setmsg').textContent='Saved ✓';if(body.pin)PIN=body.pin,localStorage.setItem('droppin',PIN);$('spin').value='';}
+  if(r.ok){$('setmsg').textContent='Saved ✓';if(body.pin)PIN=body.pin,sessionStorage.setItem('droppin',PIN);$('spin').value='';}
   else $('setmsg').textContent='Error: '+(j.detail||'save failed');
 };
 async function loadPromos(){
@@ -510,6 +507,27 @@ function stopLoc(){
 
 // ---- AI menu watchdog proposals ----
 const KINDLBL={price_change:'💲 Price change',new_item:'✨ New item',unavailable:'🚫 Removed item',back_available:'✅ Back on menu'};
+async function loadProposals(){
+  const p=await (await fetch('/api/operator/proposals',{headers:H()})).json();
+  $('updbadge').textContent=p.length?`(${p.length})`:'';
+  $('updlist').innerHTML=p.map(x=>{
+    let desc='';
+    if(x.kind==='price_change') desc=`<b>${x.item_name}</b>: $${x.old_price.toFixed(2)} → <b>$${x.new_price.toFixed(2)}</b>`;
+    else if(x.kind==='new_item') desc=`<b>${x.item_name}</b> — $${x.new_price.toFixed(2)}${x.detail?`<br><span class="small">${x.detail}</span>`:''}`;
+    else desc=`<b>${x.item_name}</b>`;
+    return `<div class="card"><div class="row"><b>${KINDLBL[x.kind]||x.kind}</b>
+      <span class="small">${x.restaurant_name}</span></div>
+      <p>${desc}</p>
+      ${x.source_url?`<p class="small">Source: <a href="${x.source_url}" target="_blank">menu page</a></p>`:''}
+      <div><button class="btn small" onclick="proposalAct(${x.id},'approve')">✓ Approve</button>
+      <button class="btn small ghost" onclick="proposalAct(${x.id},'reject')">✕ Reject</button></div>
+    </div>`;
+  }).join('')||'<p class="small">All clear — no pending menu changes. The watchdog checks weekly.</p>';
+}
+async function proposalAct(id,act){
+  await fetch(`/api/operator/proposals/${id}/${act}`,{method:'POST',headers:H()});
+  loadProposals();
+}
 setInterval(()=>{if(PIN) loadOrders();},5000);
 async function loadTix(){
   const t=await (await fetch('/api/operator/tickets',{headers:H()})).json();
@@ -561,73 +579,6 @@ async function resolveTix(id){
 }
 
 /* --- Drivers: approve / deny --- */
-async function loadRides(){
-  const j=await (await fetch('/api/operator/rides',{headers:H()})).json();
-  const esc=s=>(s||'').replace(/</g,'&lt;');
-  $('ride-launch').textContent=j.rides_open?'🟢 LIVE — taking ride requests':'🌙 Launches '+new Date(j.launch_at).toLocaleString();
-  const pend=j.rides.filter(x=>x.status==='new'), act=j.rides.filter(x=>['accepted','waiting'].includes(x.status));
-  $('ridebadge').textContent=pend.length?`(${pend.length})`:'';
-  $('ridepend').textContent=pend.length?`(${pend.length})`:'';
-  $('ridelist').innerHTML=pend.map(x=>`
-    <div class="card order new">
-      <div class="row"><b>🚗 Ride #${x.id} — ${esc(x.customer_name)}</b><span class="badge">NEW</span></div>
-      <p class="small">📍 ${esc(x.pickup_address)}<br>🏁 ${esc(x.address)}<br>
-      🛣️ ${x.distance_miles||'?'} mi · 💵 $${(x.total||0).toFixed(2)} (fare $${(x.delivery_fee||0).toFixed(2)} + gas $${(x.gas_fee||0).toFixed(2)}${x.tip?` + tip $${x.tip.toFixed(2)}`:''})<br>
-      📞 ${esc(x.phone)} ${x.notes?`<br>📝 ${esc(x.notes)}`:''}</p>
-      <div class="row">
-        <select id="rd-${x.id}" style="flex:1"><option value="0">Assign: me (owner)</option></select>
-        <button class="btn small" onclick="rideDecide(${x.id},'accept')">✅ Accept</button>
-        <button class="btn small ghost" onclick="rideDecide(${x.id},'decline')">❌ Decline</button>
-      </div>
-    </div>`).join('')||'<p class="small">No ride requests right now.</p>';
-  // driver dropdown options
-  const dd=await (await fetch('/api/operator/drivers?status=approved',{headers:H()})).json();
-  const rideDrvs=dd.filter(d=>d.rides_approved);
-  pend.forEach(x=>{
-    const sel=document.getElementById('rd-'+x.id);
-    if(sel) rideDrvs.forEach(d=>{const o=document.createElement('option');o.value=d.id;o.textContent=d.name;sel.appendChild(o);});
-  });
-  $('rideactive').innerHTML=act.map(x=>`
-    <div class="card"><div class="row"><b>🚗 Ride #${x.id} — ${esc(x.customer_name)}</b>
-      <span class="badge ${x.status==='waiting'?'closed':'open'}">${x.status.toUpperCase()}</span></div>
-      <p class="small">📍 ${esc(x.pickup_address)} → 🏁 ${esc(x.address)}<br>
-      👤 Driver: ${esc(x.driver_name||('Me' ))} · 💵 $${(x.total||0).toFixed(2)}
-      ${x.wait_fee?`<br>⏳ Wait: ${x.wait_minutes} min = <b>$${x.wait_fee.toFixed(2)}</b>`:''}</p>
-      ${x.wait_fee?`<button class="btn small" onclick="rideWaitCharge(${x.id})">💳 Create wait-fee payment link ($${x.wait_fee.toFixed(2)})</button>`:''}
-    </div>`).join('')||'<p class="small">No active rides.</p>';
-  // pricing
-  const s=await (await fetch('/api/operator/settings',{headers:H()})).json();
-  $('rbase').value=s.ride_base_fare||4.99; $('rmile').value=s.ride_per_mile||2;
-  $('rwaitfree').value=s.ride_wait_free_min||5; $('rwaitmin').value=s.ride_wait_per_min||0.5; $('rmaxmi').value=s.ride_max_miles||150;
-}
-async function rideDecide(id,action){
-  const driverId=action==='accept'?(document.getElementById('rd-'+id)||{}).value||0:0;
-  if(action==='decline'&&!confirm('Decline this ride request?'))return;
-  const r=await fetch(`/api/operator/rides/${id}/decision`,{method:'POST',
-    headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({action,driver_id:+driverId})});
-  const j=await r.json();
-  if(!r.ok)alert('Error: '+(j.detail||'failed')); else loadRides();
-}
-async function rideWaitCharge(id){
-  const r=await fetch(`/api/operator/rides/${id}/wait-charge`,{method:'POST',headers:H()});
-  const j=await r.json();
-  if(r.ok){ prompt('Send this payment link to the customer for the wait fee:', j.url); }
-  else alert('Error: '+(j.detail||'failed'));
-}
-document.addEventListener('click',e=>{
-  if(e.target&&e.target.id==='rsave'){
-    (async()=>{
-      const body={ride_base_fare:parseFloat($('rbase').value)||4.99,
-        ride_per_mile:parseFloat($('rmile').value)||2,
-        ride_wait_free_min:parseInt($('rwaitfree').value)||5,
-        ride_wait_per_min:parseFloat($('rwaitmin').value)||0.5,
-        ride_max_miles:parseFloat($('rmaxmi').value)||150};
-      const r=await fetch('/api/operator/settings',{method:'PUT',
-        headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify(body)});
-      $('rmsg').textContent=r.ok?'Saved ✓':'Error saving';
-    })();
-  }
-});
 async function loadDrivers(){
   const d=await (await fetch('/api/operator/drivers',{headers:H()})).json();
   const pend=d.filter(x=>x.status==='pending'), act=d.filter(x=>x.status==='approved');
@@ -641,18 +592,6 @@ async function loadDrivers(){
       🪪 ${esc(x.license_number)} (${esc(x.license_state)}) · 🛡️ ${esc(x.insurance)||'—'}<br>
       🚗 ${esc(x.vehicle_year)} ${esc(x.vehicle_make)} ${esc(x.vehicle_model)} ${esc(x.vehicle_color)}<br>
       🕐 ${esc(x.availability)||'—'}<br>💼 ${esc(x.experience)||'—'}</p>
-      ${x.wants_rides?`<div class="card" style="background:#0d0d10;border:1px solid #d4af37;margin:8px 0">
-        <b style="color:#d4af37">🚗 Also applied for Drop Rides</b><br>
-        <span class="small">🛡️ Rideshare insurance: ${esc(x.rideshare_insurance)||'—'}<br>
-        📝 Rides waiver: ${x.rides_waiver?'✅ signed':'❌ missing'}</span><br>
-        <div class="row" style="margin-top:6px">
-          ${x.selfie_photo?`<a href="${esc(x.selfie_photo)}" target="_blank"><img src="${esc(x.selfie_photo)}" style="width:70px;height:70px;object-fit:cover;border-radius:8px"></a>`:'<span class="small">No selfie</span>'}
-          ${x.car_photo?`<a href="${esc(x.car_photo)}" target="_blank"><img src="${esc(x.car_photo)}" style="width:70px;height:70px;object-fit:cover;border-radius:8px"></a>`:'<span class="small">No car photo</span>'}
-        </div>
-        <p class="small">Approve for Drop first, then enable rides:</p>
-        <div class="row"><button class="btn small" onclick="drvRides(${x.id},'approve')">🚗 Approve for rides</button>
-        <button class="btn small ghost" onclick="drvRides(${x.id},'decline')">Decline rides</button></div>
-      </div>`:''}
       <div class="row" style="margin-bottom:8px">
         <button class="btn small ghost" style="width:auto" onclick="viewDocs(${x.id},'docview-${x.id}')">📄 View documents</button>
       </div>
@@ -664,15 +603,14 @@ async function loadDrivers(){
     const rate=x.deliveries?Math.round(100*x.on_time/x.deliveries):100;
     return `<div class="card"><div class="row"><b>${esc(x.name)}</b>
       <span class="badge open">⭐ ${rate}% · ${x.deliveries} deliveries</span></div>
-      <p class="small">📞 ${esc(x.phone)} · 🚗 ${esc(x.vehicle_year)} ${esc(x.vehicle_make)} ${esc(x.vehicle_model)}
-      ${x.rides_approved?'<b style="color:#d4af37">· 🚗 RIDES ✓</b>':(x.wants_rides?'· <b>🚗 wants rides</b>':'')}</p>
-      ${(!x.rides_approved&&x.wants_rides)?`<button class="btn small" onclick="drvRides(${x.id},'approve')">🚗 Approve for rides</button>`:''}
+      <p class="small">📞 ${esc(x.phone)} · 🚗 ${esc(x.vehicle_year)} ${esc(x.vehicle_make)} ${esc(x.vehicle_model)}</p>
       <div class="row">
         <button class="btn small ghost" style="width:auto" onclick="viewDocs(${x.id},'adocview-${x.id}')">📄 Documents</button>
         <button class="btn small" onclick="driverProfile(${x.id})">📊 AI Performance</button>
-      <button class="btn small" onclick="sendBoost(${x.id})">💪 Send boost</button>
-      <button class="btn small ghost" onclick="drvAct(${x.id},'suspend')">⏸ Suspend</button></div>
+      </div>
       <div id="adocview-${x.id}" style="display:none;margin-top:8px"></div>
+      <div class="row" style="margin-top:8px"><button class="btn small" onclick="sendBoost(${x.id})">💪 Send boost</button>
+      <button class="btn small ghost" onclick="drvAct(${x.id},'suspend')">⏸ Suspend</button></div>
       <div id="dprof-${x.id}" style="display:none;margin-top:8px"></div></div>`;
   }).join('')||'<p class="small">No active drivers yet.</p>';
 }
@@ -682,6 +620,7 @@ async function viewDocs(id, elId){
   el.style.display='block';
   el.innerHTML='<p class="small">Loading documents…</p>';
   const d=await (await fetch(`/api/operator/drivers/${id}/docs`,{headers:H()})).json();
+  const pin=localStorage.getItem('droppin')||'';
   el.innerHTML=`
     <div style="border:1px solid var(--line);border-radius:10px;padding:10px;margin:8px 0">
       <b class="small">📄 Documents ${d.complete?'✅ complete':'⚠️ incomplete'}</b>
@@ -713,13 +652,6 @@ async function drvAct(id,act){
   if(act==='deny'&&!confirm('Deny this application?'))return;
   if(act==='suspend'&&!confirm('Suspend this driver?'))return;
   await fetch(`/api/operator/drivers/${id}/${act}`,{method:'POST',headers:H()});
-  loadDrivers();
-}
-async function drvRides(id,act){
-  const r=await fetch(`/api/operator/drivers/${id}/rides`,{method:'POST',
-    headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({action:act})});
-  const j=await r.json();
-  if(!r.ok)alert('Cannot approve: '+(j.detail||'failed'));
   loadDrivers();
 }
 async function sendBoost(id){
@@ -759,7 +691,7 @@ async function delBiz(id){
 /* --- Investor leads --- */
 async function loadInv(){
   const l=await (await fetch('/api/operator/investor-leads',{headers:H()})).json();
-  _gbadge.inv=l.length||0; _gbadgeUpdate();
+  $('invbadge').textContent=l.length?`(${l.length})`:'';
   const esc=s=>(s||'').replace(/</g,'&lt;');
   $('invlist').innerHTML=l.map(x=>`
     <div class="card"><div class="row"><b>${esc(x.name)}</b><span class="badge open">${esc(x.amount_range)||'—'}</span></div>
@@ -777,7 +709,6 @@ async function loadMoney(){
   $('f-driver').textContent='$'+f.driver_pay_owed.toFixed(2);
   $('f-tips').textContent='$'+f.tips_owed.toFixed(2);
   $('f-stripe').textContent='$'+f.stripe_fees.toFixed(2);
-  $('f-gas').textContent='$'+(f.gas_fund||0).toFixed(2);
   $('f-payout').textContent=f.pending_payout_requests+' ($'+f.pending_payout_amount.toFixed(2)+')';
   $('f-alerts').innerHTML=f.alerts.map(a=>`<p class="small" style="color:#fbbf24">⚠️ ${a}</p>`).join('')
     ||'<p class="small" style="color:#4ade80">✅ All orders meet your minimum profit.</p>';
@@ -836,7 +767,7 @@ async function loadDeals(stage){
   const counts={};
   j.partners.forEach(p=>counts[p.status]=(counts[p.status]||0)+1);
   const newCount=(counts['submitted']||0);
-  _gbadge.deals=newCount||0; _gbadgeUpdate();
+  $('dealbadge').textContent=newCount?`(${newCount})`:'';
   $('dealstages').innerHTML=Object.entries(j.stages).map(([k,v])=>
     `<button class="btn small ${stage===k?'':'ghost'}" onclick="loadDeals('${k}')">${v}${counts[k]?` (${counts[k]})`:''}</button>`).join('')
     +`<button class="btn small ghost" onclick="loadDeals()">All</button>`;
@@ -908,7 +839,7 @@ async function driverProfile(id){
 async function loadOutreach(){
   const list=await (await fetch('/api/operator/outreach',{headers:H()})).json();
   const drafts=list.filter(x=>x.status==='draft');
-  _gbadge.out=drafts.length||0; _gbadgeUpdate();
+  $('outbadge').textContent=drafts.length?`(${drafts.length})`:'';
   const esc=s=>(s||'').replace(/</g,'&lt;');
   $('outlist').innerHTML=list.map(e=>`
     <div class="card"><div class="row"><b>${esc(e.business_name)}</b>
@@ -945,9 +876,34 @@ async function outDiscard(id){
 
 /* --- Live activity + AI suggestions --- */
 let liveTimer=null, driverMap=null, driverMarkers={};
+async function loadLive(){
+  // suggestions
+  const s=await (await fetch('/api/operator/suggestions',{headers:H()})).json();
+  const pcol={high:'#ff6b6b',medium:'#ffa94d',low:'#69db7c'};
+  $('sugglist').innerHTML=s.map(x=>`
+    <div class="card" style="border-left:4px solid ${pcol[x.priority]||'#888'}">
+      <b>${x.icon} ${x.text.replace(/</g,'&lt;')}</b>
+      <p class="small">→ ${x.action.replace(/</g,'&lt;')}</p></div>`).join('')
+    ||'<p class="small">✅ All clear — nothing needs your attention right now.</p>';
+  // activity feed
+  await loadActivity();
+  await loadDriverMap();
+  await loadBlastHist();
+  await loadWatchChat();
+  if(liveTimer)clearInterval(liveTimer);
+  liveTimer=setInterval(()=>{loadActivity();loadDriverMap();loadWatchChat();},15000);
+}
 async function loadWatchChat(){
   const j=await (await fetch('/api/operator/watcher-messages',{headers:H()})).json();
-  $('watchbadge').textContent=j.unseen?`(${j.unseen} new)`:'';
+  const unseen=j.unseen||0;
+  $('watchbadge').textContent=unseen?`🔴 ${unseen} NEW`:'';
+  // flash the card border + banner when VIPs are waiting
+  const card=$('watchercard');
+  if(card)card.style.border=unseen?'2px solid #f66':'2px solid #fbbf24';
+  if(unseen){
+    banner(`👀 ${unseen} new VIP message${unseen>1?'s':''} — check Watcher chat!`);
+    try{beep();}catch(e){}
+  }
   const box=$('watchchat');
   box.innerHTML=j.messages.map(m=>`
     <div style="padding:6px 10px;border-radius:10px;margin:4px 0;max-width:90%;
@@ -966,23 +922,6 @@ document.addEventListener('click',async e=>{
     $('watchreply').value=''; loadWatchChat();
   }
 });
-async function loadLive(){
-  // suggestions
-  const s=await (await fetch('/api/operator/suggestions',{headers:H()})).json();
-  const pcol={high:'#ff6b6b',medium:'#ffa94d',low:'#69db7c'};
-  $('sugglist').innerHTML=s.map(x=>`
-    <div class="card" style="border-left:4px solid ${pcol[x.priority]||'#888'}">
-      <b>${x.icon} ${x.text.replace(/</g,'&lt;')}</b>
-      <p class="small">→ ${x.action.replace(/</g,'&lt;')}</p></div>`).join('')
-    ||'<p class="small">✅ All clear — nothing needs your attention right now.</p>';
-  // activity feed
-  await loadActivity();
-  await loadDriverMap();
-  await loadBlastHist();
-  await loadWatchChat();
-  if(liveTimer)clearInterval(liveTimer);
-  liveTimer=setInterval(()=>{loadActivity();loadDriverMap();loadWatchChat();},15000);
-}
 async function loadBlastHist(){
   const b=await (await fetch('/api/operator/blasts',{headers:H()})).json();
   $('blasthist').innerHTML=b.map(x=>`
@@ -1019,7 +958,7 @@ async function loadDriverMap(){
   const d=await (await fetch('/api/operator/drivers/live',{headers:H()})).json();
   if(!driverMap){
     driverMap=L.map('drivermap').setView([46.8083,-100.7837],12);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,
       {attribution:'©OpenStreetMap ©CARTO',maxZoom:19}).addTo(driverMap);
   }
   // clear old markers
@@ -1064,4 +1003,5 @@ async function loadAudit(){
       <p class="small">${x.actor} · ${x.entity_type} #${x.entity_id}${x.details?` · ${x.details.replace(/</g,'&lt;')}`:''}</p></div>`).join('')
     ||'<p class="small">No admin actions recorded yet.</p>';
 }
-</script></body></html>
+</script><script src="/static/seasonal.js"></script>
+</body></html>

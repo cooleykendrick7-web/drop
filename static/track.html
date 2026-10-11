@@ -13,44 +13,41 @@
 <p class="sub" id="rname"></p>
 <div id="queuepos"></div>
 <div class="card" id="items"></div>
-<h2 id="wherehead">Where's my ride?</h2>
+<h2>Where's my food?</h2>
 <div id="map"></div>
 <div id="driverbanner"></div>
-<div id="photos"></div>
-<div class="card" id="chatcard" style="margin-top:12px">
-  <b>💬 Message your driver</b>
-  <div id="cchatlog" style="max-height:200px;overflow-y:auto;background:#141419;border-radius:10px;padding:8px;margin:8px 0"><p class="small">Loading…</p></div>
-  <div class="row"><input id="cchatin" placeholder="Write to your driver…" style="flex:1;margin-right:6px">
-  <button class="btn small" id="cchatsend" style="width:auto">➤</button></div>
-  <p class="small" id="cchatnote" style="margin:4px 0 0"></p>
-</div>
 <div class="steps" id="steps"></div>
 <p class="small" id="note">Live updates every few seconds.</p>
 <div id="cancelwrap" style="margin-top:12px"></div>
 <script>
 const oid = new URLSearchParams(location.search).get('id');
-const FLOW_RIDE=[['placed','Ride requested','Looking for your driver'],['confirmed','Driver confirmed','Your driver is on the way to you'],['picked_up','Picked up','You\'re in the car'],['on_the_way','On the way','Enjoy the ride'],['delivered','Arrived','Thanks for riding with Drop!']];
+const FLOW_FOOD=[['placed','Order placed','Your order was received'],['confirmed','Confirmed','Your driver is heading to the restaurant'],['picked_up','Picked up','Your driver has your food'],['on_the_way','On the way','Your driver is on the way to you'],['delivered','Delivered','Enjoy!']];
 const FLOW_COURIER=[['placed','Request received','Your pickup request was received'],['confirmed','Confirmed','Your driver is heading to the pickup'],['picked_up','Picked up','Your driver has your items'],['on_the_way','On the way','Your driver is on the way to you'],['delivered','Delivered','Enjoy!']];
-let FLOW=FLOW_RIDE;
+let FLOW=FLOW_FOOD;
 let map=null, driverMarker=null;
 const emojiIcon=e=>L.divIcon({className:'leaflet-divicon',html:e,iconSize:[30,30],iconAnchor:[15,15]});
 function drawMap(o){
   const pts=[];
-    if(o.cust_lat) pts.push(['cust',o.cust_lat,o.cust_lng]);
+  if(o.restaurant_lat) pts.push(['rest',o.restaurant_lat,o.restaurant_lng]);
+  if(o.cust_lat) pts.push(['cust',o.cust_lat,o.cust_lng]);
   if(!pts.length) return;
   document.getElementById('map').style.display='block';
   if(!map){
     map=L.map('map',{scrollWheelZoom:false}).setView([pts[0][1],pts[0][2]],13);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,
       {attribution:'© OpenStreetMap © CARTO',maxZoom:19}).addTo(map);
   }
-    }
+  if(o.restaurant_lat && !map._restM){
+    map._restM=L.marker([o.restaurant_lat,o.restaurant_lng],{icon:emojiIcon(o.kind==='courier'?'📦':'🍔')})
+      .addTo(map).bindPopup('<b>'+o.restaurant+'</b><br>'+(o.restaurant_address||''));
+  }
   if(o.cust_lat && !map._custM){
     map._custM=L.marker([o.cust_lat,o.cust_lng],{icon:emojiIcon('🏠')})
       .addTo(map).bindPopup('<b>Your door</b><br>'+(o.address||''));
   }
   const bounds=[];
-    if(o.cust_lat) bounds.push([o.cust_lat,o.cust_lng]);
+  if(o.restaurant_lat) bounds.push([o.restaurant_lat,o.restaurant_lng]);
+  if(o.cust_lat) bounds.push([o.cust_lat,o.cust_lng]);
   if(o.driver_lat && o.driver_updated){
     const age=(Date.now()-new Date(o.driver_updated).getTime())/1000;
     if(age<600){  // driver's dot only if shared in the last 10 min
@@ -66,11 +63,10 @@ function drawMap(o){
 }
 async function poll(){
   const o = await (await fetch('/api/orders/'+oid+'/public')).json();
-  FLOW = o.kind==='courier' ? FLOW_COURIER : FLOW_RIDE;
+  FLOW = o.kind==='courier' ? FLOW_COURIER : FLOW_FOOD;
   if(o.id===undefined){document.body.innerHTML='<p>Order not found.</p>';return;}
-  
   document.getElementById('oid').textContent='#'+o.id;
-  document.getElementById('rname').textContent=(o.pickup_name||'Drop Ride')+' · '+(o.paid?'Paid ✓':'Payment pending');
+  document.getElementById('rname').textContent=o.restaurant+' · '+(o.paid?'Paid ✓':'Payment pending');
   document.getElementById('items').innerHTML =
     o.items.map(i=>`<div class="row"><span>${i.qty}× ${i.name}</span><span>$${i.line.toFixed(2)}</span></div>`).join('')+
     `<div class="row"><span>Delivery fee</span><span>$${o.delivery_fee.toFixed(2)}</span></div>
@@ -106,8 +102,6 @@ async function poll(){
     return `<div class="step ${cls}"><div class="dot">${icon}</div><div class="t"><b>${s[1]}</b><span>${s[2]}</span></div></div>`;
   }).join('');
   drawMap(o);
-  loadPhotos();
-  loadChat();
   // live driver banner
   const db=$('driverbanner');
   if(o.driver_lat && o.driver_updated && ['picked_up','on_the_way'].includes(o.status)){
@@ -120,49 +114,7 @@ async function poll(){
   if(o.status!=='delivered') setTimeout(poll,5000);
   else document.getElementById('note').textContent='Delivered! Thanks for using Drop. 🧡';
 }
-/* proof photos from the driver */
-async function loadPhotos(){
-  try{
-    const ps=await(await fetch('/api/orders/'+oid+'/photos')).json();
-    const pk=ps.find(p=>p.photo_type==='pickup'), dp=ps.find(p=>p.photo_type==='dropoff');
-    document.getElementById('photos').innerHTML=
-      (pk?`<div class="card" style="border-color:var(--ok)"><b>📸 Picked up!</b><br><img src="${pk.photo_path}" style="width:100%;border-radius:12px;margin-top:8px" alt="Pickup proof"><br><span class="small">Your driver grabbed your order.</span></div>`:'')+
-      (dp?`<div class="card" style="border-color:var(--ok)"><b>📸 Delivered!</b><br><img src="${dp.photo_path}" style="width:100%;border-radius:12px;margin-top:8px" alt="Delivery proof"><br><span class="small">Left at your door as pictured.</span></div>`:'');
-  }catch(e){}
-}
-/* customer <-> driver chat */
-function chatPhone(){
-  let p=localStorage.getItem('dropchatphone')||'';
-  if(!p){
-    p=prompt('Enter your phone number to chat with your driver (one time):')||'';
-    p=p.trim();
-    if(p) localStorage.setItem('dropchatphone',p);
-  }
-  return p;
-}
-async function loadChat(){
-  try{
-    const ms=await(await fetch('/api/orders/'+oid+'/messages')).json();
-    const log=document.getElementById('cchatlog');
-    log.innerHTML=ms.map(m=>`
-      <div style="margin:4px 0;text-align:${m.sender==='customer'?'right':'left'}">
-        <span style="display:inline-block;background:${m.sender==='customer'?'#ff6a00':'#2a2a33'};color:#fff;border-radius:10px;padding:6px 10px;max-width:85%;font-size:.85rem">${m.body.replace(/</g,'&lt;')}</span>
-      </div>`).join('')||'<p class="small">No messages yet — your driver is a tap away. 👋</p>';
-    log.scrollTop=log.scrollHeight;
-  }catch(e){}
-}
-document.getElementById('cchatsend').onclick=async()=>{
-  const inp=document.getElementById('cchatin');
-  const v=inp.value.trim(); if(!v) return;
-  const phone=chatPhone(); if(!phone){document.getElementById('cchatnote').textContent='Phone needed to verify it\'s you.';return;}
-  inp.value='';
-  const r=await(await fetch('/api/orders/'+oid+'/messages',{method:'POST',
-    headers:{'Content-Type':'application/json'},body:JSON.stringify({body:v,phone})})).json();
-  if(r.ok) loadChat();
-  else document.getElementById('cchatnote').textContent=r.detail||'Could not send — check the phone number.';
-};
 poll();
 </script>
-<script src="/static/seasons.js"></script>
-<script src="/static/chat.js"></script><script src="/static/drop-live.js"></script>
+<script src="/static/chat.js"></script><script src="/static/seasonal.js"></script>
 </body></html>
