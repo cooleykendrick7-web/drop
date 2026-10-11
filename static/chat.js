@@ -21,8 +21,10 @@
     }
   })();
   const FAQ = [
+    {k:["how does","how it work","how do i","what is drop"],
+     a:"Easy: <b>1)</b> order your food directly from the restaurant, <b>2)</b> request a pickup here, <b>3)</b> we grab it and drop it at your door. You only pay Drop the pickup + delivery fee."},
     {k:["fee","cost","delivery charge","how much","price of delivery"],
-     a:"Delivery is a flat <b>$3.99</b> — no surge pricing, no hidden fees. You see the full total before you pay."},
+     a:"You pay a <b>pickup + delivery fee</b> (from $3.99, based on distance) plus a small % for our gas fund — no surge pricing, no hidden fees. You see the full total before you pay."},
     {k:["how long","fast","time","when will","arrive","fresher","fresh"],
      a:"Your driver heads out as soon as your order is confirmed — most orders arrive in <b>30–45 minutes</b>, straight from the restaurant to your door."},
     {k:["where","deliver","area","bismarck","zone"],
@@ -34,11 +36,11 @@
     {k:["who","driver","ken"],
      a:"Your driver is <b>a local</b>, not a random gig driver — one person handling your food from pickup to doorstep."},
     {k:["hour","open","close","when"],
-     a:"Restaurants show <b>OPEN</b> or <b>CLOSED</b> right on the list. Drivers deliver whenever restaurants are open."},
+     a:"Spots show <b>OPEN</b> or <b>CLOSED</b> right on the list. Order your food from the spot first, then request a pickup here."},
     {k:["refund","wrong","cold","missing","late","problem","issue","complaint","bad"],
      a:"Sorry about that — tap <b>Message us</b> below, include your order number if you have it, and we'll make it right."},
     {k:["account","sign up","log in","login"],
-     a:"No account needed — just pick your food, check out, and track it. Simple."},
+     a:"No account needed — order your food from the restaurant, request a pickup, pay, and track it. Simple."},
     {k:["contact","email","phone number","call you","reach you","talk to someone","human"],
      a:"You can reach us anytime at <b>wearedropservicesllc@gmail.com</b> or <b>(262) 977-7869</b> — or tap <b>Message us</b> and we'll get back to you."},
   ];

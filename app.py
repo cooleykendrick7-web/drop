@@ -283,6 +283,12 @@ def init_db():
         message TEXT NOT NULL,
         sent_count INTEGER DEFAULT 0,
         created_at TEXT NOT NULL)""")
+    # Courier model (2026-10-11): Drop is pickup+delivery only — customer orders
+    # food directly from the restaurant. Gas surcharge % builds the company gas fund.
+    ocols_g = [r[1] for r in c.execute("PRAGMA table_info(orders)").fetchall()]
+    if "gas_fee" not in ocols_g:
+        c.execute("ALTER TABLE orders ADD COLUMN gas_fee REAL DEFAULT 0")
+    c.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('gas_pct', '10')")
     # Business accounts (Drop More B2B)
     c.execute("""CREATE TABLE IF NOT EXISTS business_accounts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1490,6 +1496,7 @@ def config():
         "stripe_publishable_key": STRIPE_PUBLISHABLE_KEY if STRIPE_LIVE else "",
         "delivery_fee": float(get_setting("delivery_fee")),
         "min_order": float(get_setting("min_order") or 10),
+        "gas_pct": float(get_setting("gas_pct") or 10),
         "tagline": get_setting("tagline"),
         "open_now": is_open_now(),
         "open_hour": oh,
@@ -2261,21 +2268,37 @@ async def checkout(req: Request):
                 "note": "Paid with referral credit"}
     if STRIPE_LIVE:
         base = str(req.base_url).rstrip("/")
-        line_items = [{
+        line_items = []
+        if (o["food_total"] or 0) > 0:
+            line_items.append({
                 "price_data": {
                     "currency": "usd",
                     "product_data": {"name": f"Drop order #{oid} — food"},
                     "unit_amount": int(round(o["food_total"] * 100)),
                 },
                 "quantity": 1,
-            }, {
+            })
+        line_items.append({
                 "price_data": {
                     "currency": "usd",
-                    "product_data": {"name": "Drop delivery fee"},
+                    "product_data": {"name": "Drop pickup + delivery fee"},
                     "unit_amount": int(round(o["delivery_fee"] * 100)),
                 },
                 "quantity": 1,
-            }]
+            })
+        try:
+            _gas = o["gas_fee"] or 0
+        except Exception:
+            _gas = 0
+        if _gas > 0:
+            line_items.append({
+                "price_data": {
+                    "currency": "usd",
+                    "product_data": {"name": "⛽ Gas fund"},
+                    "unit_amount": int(round(_gas * 100)),
+                },
+                "quantity": 1,
+            })
         if (o["tip"] or 0) > 0:
             line_items.append({
                 "price_data": {
@@ -2607,6 +2630,7 @@ def op_get_settings(x_pin: str = Header(default="")):
             "pin": get_setting("pin"),
             "owner_pin": get_setting("owner_pin") or "",
             "ntfy_topic": get_setting("ntfy_topic"),
+            "gas_pct": float(get_setting("gas_pct") or 10),
             "tagline": get_setting("tagline")}
 
 
@@ -2655,6 +2679,10 @@ async def op_put_settings(req: Request, x_pin: str = Header(default="")):
         topic = str(body["ntfy_topic"]).strip()
         set_setting("ntfy_topic", topic)
         out["ntfy_topic"] = topic
+    if "gas_pct" in body:
+        gp = max(0, min(50, float(body["gas_pct"])))
+        set_setting("gas_pct", str(gp))
+        out["gas_pct"] = gp
     if "tagline" in body:
         set_setting("tagline", str(body["tagline"]).strip()[:80])
         out["tagline"] = "updated"
@@ -4641,12 +4669,16 @@ def order_financials(o):
     tip = o["tip"] or 0
     total = o["total"] or 0
     driver_pay = o["driver_pay"] or 0
+    try:
+        gas = o["gas_fee"] or 0
+    except Exception:
+        gas = 0
     # Stripe fee on the whole charge
     stripe_fee = round(total * 0.029 + 0.30, 2) if total > 0 else 0
-    # Company keeps: delivery fee minus driver pay minus Stripe's cut of the fee portion
-    # Tips pass through 100% to driver — never counted as profit.
-    company = round(fee - driver_pay - (fee * 0.029 + 0.30 if fee else 0), 2)
-    return {"delivery_fee": fee, "tip": tip, "total": total,
+    # Company keeps: delivery fee minus driver pay minus Stripe's cut of the fee portion,
+    # plus the gas fund surcharge. Tips pass through 100% to driver — never profit.
+    company = round(fee + gas - driver_pay - (fee * 0.029 + 0.30 if fee else 0), 2)
+    return {"delivery_fee": fee, "gas_fee": gas, "tip": tip, "total": total,
             "driver_pay": driver_pay, "driver_total": round(driver_pay + tip, 2),
             "stripe_fee_est": stripe_fee,
             "company_profit": company}
@@ -6307,6 +6339,7 @@ def op_financials(x_pin: str = Header(default="")):
     total_tips = 0.0
     total_stripe = 0.0
     total_profit = 0.0
+    total_gas = 0.0
     per_order = []
     alerts = []
     min_profit = fin_setting("min_profit_per_order", 1.00)
@@ -6324,6 +6357,7 @@ def op_financials(x_pin: str = Header(default="")):
         total_tips += f["tip"]
         total_stripe += f["stripe_fee_est"]
         total_profit += f["company_profit"]
+        total_gas += f["gas_fee"]
         per_order.append({"id": od["id"], "kind": od["kind"] or "food",
                           "total": f["total"], "driver_pay": f["driver_pay"],
                           "tip": f["tip"], "stripe_fee": f["stripe_fee_est"],
@@ -6345,6 +6379,7 @@ def op_financials(x_pin: str = Header(default="")):
         "tips_owed": round(total_tips, 2),
         "stripe_fees": round(total_stripe, 2),
         "net_profit": round(total_profit, 2),
+        "gas_fund": round(total_gas, 2),
         "profit_margin": round(100 * total_profit / total_rev, 1) if total_rev else 0,
         "pending_payout_requests": pending_payouts["c"],
         "pending_payout_amount": round(pending_payouts["s"], 2),
@@ -6866,18 +6901,21 @@ async def drop_request(req: Request):
     # Price: $1.50/mile, min $3.99
     miles = math.hypot(dlat - plat, dlng - plng) * 69 if all([plat, plng, dlat, dlng]) else 0
     fee = round(max(3.99, miles * 1.50), 2) if miles > 0 else (quoted if quoted > 0 else 3.99)
+    gas_pct = float(get_setting("gas_pct") or 10)
+    gas_fee = round(fee * gas_pct / 100, 2)
+    total = round(fee + gas_fee, 2)
     conn = db()
     cur = conn.execute(
         """INSERT INTO orders(restaurant_id, items_json, customer_name, phone, address,
-                              notes, food_total, delivery_fee, tip, total, status,
+                              notes, food_total, delivery_fee, gas_fee, tip, total, status,
                               stripe_status, created_at, updated_at, kind,
                               pickup_name, pickup_address, pickup_lat, pickup_lng,
                               cust_lat, cust_lng)
-           VALUES(0, '[]', ?, ?, ?, ?, 0, ?, 0, ?, 'new', 'pending', ?, ?, 'drop',
+           VALUES(0, '[]', ?, ?, ?, ?, 0, ?, ?, 0, ?, 'new', 'pending', ?, ?, 'drop',
                    ?, ?, ?, ?, ?, ?)""",
         (name, phone, delivery_addr,
          f"{what}. {details}",
-         fee, fee, now_iso(), now_iso(),
+         fee, gas_fee, total, now_iso(), now_iso(),
          what, pickup_addr, plat, plng, dlat, dlng))
     oid = cur.lastrowid
     # Check for nearby available drivers (within 15 miles) BEFORE closing
@@ -6921,7 +6959,9 @@ def watchpage():
 
 @app.post("/api/pickup/request")
 async def pickup_request(req: Request):
-    """Customer already ordered food, Drop just picks it up and delivers. Works anywhere."""
+    """Courier model: customer ordered food directly from the restaurant,
+    Drop just picks it up and delivers. Customer pays delivery fee + gas % + tip."""
+    import math
     body = await req.json()
     restaurant = (body.get("restaurant") or "").strip()[:100]
     pickup_addr = (body.get("pickup_address") or "").strip()[:200]
@@ -6929,43 +6969,61 @@ async def pickup_request(req: Request):
     order_details = (body.get("order_details") or "").strip()[:300]
     name = (body.get("customer_name") or "").strip()[:80]
     phone = (body.get("phone") or "").strip()[:30]
+    try:
+        tip = round(max(0.0, min(100.0, float(body.get("tip", 0)))), 2)
+    except (TypeError, ValueError):
+        tip = 0.0
     if not restaurant or not pickup_addr or not delivery_addr or not name:
         raise HTTPException(400, "Restaurant, both addresses, and your name are required")
-    # Geocode pickup for driver matching
-    lat, lng = 0.0, 0.0
+    # Geocode both addresses for distance-based fee
+    plat, plng, dlat, dlng = 0.0, 0.0, 0.0, 0.0
     try:
         import urllib.request, urllib.parse, json
-        geo_url = f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(pickup_addr)}&format=json&limit=1"
-        geo_req = urllib.request.Request(geo_url, headers={"User-Agent": "DropApp/1.0"})
-        geo = json.loads(urllib.request.urlopen(geo_req, timeout=10).read())
-        if geo:
-            lat, lng = float(geo[0]["lat"]), float(geo[0]["lon"])
+        for addr, which in ((pickup_addr, "p"), (delivery_addr, "d")):
+            geo_url = f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(addr)}&format=json&limit=1"
+            geo_req = urllib.request.Request(geo_url, headers={"User-Agent": "DropApp/1.0"})
+            geo = json.loads(urllib.request.urlopen(geo_req, timeout=10).read())
+            if geo:
+                if which == "p":
+                    plat, plng = float(geo[0]["lat"]), float(geo[0]["lon"])
+                else:
+                    dlat, dlng = float(geo[0]["lat"]), float(geo[0]["lon"])
     except Exception:
         pass
-    fee = float(get_setting("delivery_fee") or 3.99)
+    # Fee: base + $1.50/mile (same smart pricing as courier)
+    base_fee = float(get_setting("delivery_fee") or 3.99)
+    miles = math.hypot(dlat - plat, dlng - plng) * 69 if all([plat, plng, dlat, dlng]) else 0
+    fee = round(max(base_fee, miles * 1.50), 2) if miles > 0 else base_fee
+    # Gas fund: small % of the delivery fee
+    gas_pct = float(get_setting("gas_pct") or 10)
+    gas_fee = round(fee * gas_pct / 100, 2)
+    total = round(fee + gas_fee + tip, 2)
+    me = get_session_user(req)
+    user_id = me["id"] if me else 0
     conn = db()
-    # Create as a courier-type order (food already paid, just pickup + deliver)
     cur = conn.execute(
         """INSERT INTO orders(restaurant_id, items_json, customer_name, phone, address,
-                              notes, food_total, delivery_fee, tip, total, status,
-                              stripe_status, created_at, updated_at, kind,
-                              pickup_name, pickup_address, pickup_lat, pickup_lng)
-           VALUES(0, '[]', ?, ?, ?, ?, 0, ?, 0, ?, 'new', 'pending', ?, ?, 'pickup',
-                   ?, ?, ?, ?)""",
+                              notes, food_total, delivery_fee, gas_fee, tip, total, status,
+                              stripe_status, created_at, updated_at, kind, user_id,
+                              pickup_name, pickup_address, pickup_lat, pickup_lng,
+                              cust_lat, cust_lng)
+           VALUES(0, '[]', ?, ?, ?, ?, 0, ?, ?, ?, ?, 'new',
+                   'pending', ?, ?, 'pickup', ?,
+                   ?, ?, ?, ?, ?, ?)""",
         (name, phone, delivery_addr,
          f"Pickup from {restaurant}. {order_details}",
-         fee, fee, now_iso(), now_iso(),
-         restaurant, pickup_addr, lat, lng))
+         fee, gas_fee, tip, total, now_iso(), now_iso(), user_id,
+         restaurant, pickup_addr, plat, plng, dlat, dlng))
     oid = cur.lastrowid
     conn.commit()
     conn.close()
-    log_event("order", f"🛵 Pickup request #{oid}", f"{restaurant} → {delivery_addr[:40]}")
+    log_event("order", f"🛵 Pickup request #{oid}", f"{restaurant} → {delivery_addr[:40]} — ${total:.2f}")
     # Notify Ken
     try:
         topic = get_setting("ntfy_topic")
         if topic:
             import urllib.request, urllib.parse, threading
-            msg = f"🛵 PICKUP #{oid}\n{restaurant}\n→ {delivery_addr[:60]}"
+            msg = f"🛵 PICKUP #{oid}\n{restaurant}\n→ {delivery_addr[:60]}\n${total:.2f}"
             r2 = urllib.request.Request(
                 f"https://ntfy.sh/{urllib.parse.quote(topic)}",
                 data=msg.encode(), headers={"Title": "Drop pickup request"}, method="POST")
@@ -6974,7 +7032,10 @@ async def pickup_request(req: Request):
                 daemon=True).start()
     except Exception:
         pass
-    return {"ok": True, "order_id": oid}
+    return {"ok": True, "order_id": oid, "fee": fee, "gas_fee": gas_fee,
+            "gas_pct": gas_pct, "tip": tip, "total": total, "miles": round(miles, 1)}
+
+
 
 
 @app.get("/partner.html", response_class=HTMLResponse)

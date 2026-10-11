@@ -1,90 +1,135 @@
 <!DOCTYPE html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Drop — Menu</title>
+<title>Drop — Request Pickup</title>
 <link rel="icon" href="/static/logo-mark.jpg">
 <link rel="stylesheet" href="/static/styles.css">
 </head><body>
 <header class="topbar"><a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg" alt="Drop"><b>Drop</b></a><a class="acct" href="/account.html">👤 Account</a></header>
-<a href="/" class="small">← All restaurants</a>
+<a href="/" class="small">← All spots</a>
 <div id="head"></div>
-<div id="reviews-sec"></div>
-<div id="menu"></div>
-<div class="cartbar" id="cartbar" style="display:none">
-  <div class="row">
-    <button class="btn" id="gocheck" style="flex:1">View cart · $<span id="ctotal">0.00</span></button>
-    <button class="btn ghost" id="clearcart" style="width:auto;margin-left:8px">🗑️ Clear</button>
+
+<div class="card" style="max-width:520px;margin:16px auto">
+  <h2 style="margin-top:0">🛵 Get it picked up</h2>
+  <p class="small">Order your food <b>directly from this spot</b> first — then tell us where to bring it. You only pay Drop for pickup + delivery, plus a small % for our gas fund. ⛽</p>
+
+  <label>Your delivery address</label>
+  <input id="daddr" placeholder="Where should we bring it?">
+
+  <label>Order details <span class="small">(confirmation #, name on the order)</span></label>
+  <input id="odetail" placeholder="e.g. Order #1234 under Mike">
+
+  <label>Your name</label>
+  <input id="cname" placeholder="Your name">
+
+  <label>Your phone</label>
+  <input id="cphone" placeholder="For driver updates" inputmode="tel">
+
+  <label>Tip your driver <span class="small">(100% goes to them)</span></label>
+  <div class="row" style="gap:8px;margin:6px 0" id="tips">
+    <button class="btn small tipbtn" data-t="0">$0</button>
+    <button class="btn small tipbtn" data-t="1">$1</button>
+    <button class="btn small tipbtn" data-t="2">$2</button>
+    <button class="btn small tipbtn" data-t="5">$5</button>
   </div>
+
+  <div class="card" style="margin:12px 0;background:#1a1a1a">
+    <div class="row"><span>Pickup + delivery</span><b id="qfee">$—</b></div>
+    <div class="row"><span class="small">⛽ Gas fund (<span id="gaspct">10</span>%)</span><b id="qgas" class="small">$—</b></div>
+    <div class="row"><span class="small">Driver tip</span><b id="qtip" class="small">$0.00</b></div>
+    <div class="row" style="border-top:1px solid #333;padding-top:8px;margin-top:4px"><span><b>You'll pay</b></span><b id="qtotal">$—</b></div>
+    <button class="btn small" id="quote" style="width:auto;margin-top:8px">Get exact quote</button>
+    <p class="small" id="qnote" style="margin:6px 0 0"></p>
+  </div>
+
+  <button class="btn" id="go">Pay &amp; Request Pickup →</button>
+  <p class="small" id="msg"></p>
 </div>
+
+<div id="reviews-sec"></div>
 <script>
 if(!sessionStorage.getItem('dropv')){sessionStorage.setItem('dropv','1');
 fetch('/api/visit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({page:'restaurant'})});}
 const rid = new URLSearchParams(location.search).get('id');
-let cart = JSON.parse(localStorage.getItem('dropcart_'+rid) || '{}');
-let menu = [], rest = null, fee = 3.99;
-// one-tap reorder: restore last order's items
-try{
-  if(new URLSearchParams(location.search).get('reorder')==='1'){
-    const last=JSON.parse(localStorage.getItem('droplast')||'null');
-    if(last && last.rid==rid && last.items){
-      cart=last.items;
-      localStorage.setItem('dropcart_'+rid, JSON.stringify(cart));
-    }
-  }
-}catch(e){}
+const $=id=>document.getElementById(id);
+let rest=null, tip=0, gasPct=10, quotedFee=0, quotedGas=0;
+
+document.querySelectorAll('.tipbtn').forEach(b=>{
+  b.onclick=()=>{ tip=parseFloat(b.dataset.t);
+    document.querySelectorAll('.tipbtn').forEach(x=>x.classList.remove('sel'));
+    b.classList.add('sel'); updateTotals(); };
+});
+
+async function geocode(addr){
+  try{
+    const r=await(await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(addr)}&format=json&limit=1`,{headers:{'User-Agent':'DropApp'}})).json();
+    return r[0]?{lat:parseFloat(r[0].lat),lng:parseFloat(r[0].lon)}:null;
+  }catch(e){return null;}
+}
+
+function updateTotals(){
+  $('qfee').textContent='$'+quotedFee.toFixed(2);
+  $('qgas').textContent='$'+quotedGas.toFixed(2);
+  $('qtip').textContent='$'+tip.toFixed(2);
+  $('qtotal').textContent='$'+(quotedFee+quotedGas+tip).toFixed(2);
+}
+
 async function load(){
   const cfg = await (await fetch('/api/config')).json();
-  fee = cfg.delivery_fee;
+  gasPct=parseFloat(cfg.gas_pct||10); $('gaspct').textContent=gasPct;
   const r = await (await fetch('/api/restaurants')).json();
   rest = r.find(x=>x.id==rid);
-  if(!rest){ document.body.innerHTML='<p>Restaurant not found. <a href="/">Home</a></p>'; return; }
-  menu = rest.menu;
-  document.getElementById('head').innerHTML =
+  if(!rest){ document.body.innerHTML='<p>Spot not found. <a href="/">Home</a></p>'; return; }
+  $('head').innerHTML =
     `${rest.photo?`<div class="hero-photo" style="background-image:url('${rest.photo}')"></div>`:''}
-     <h1>${rest.logo?`<img class="rlogo-lg" src="${rest.logo}" alt="">`:rest.emoji} ${rest.name}</h1><p class="sub">${rest.cuisine} · Delivery $${fee.toFixed(2)} · ${rest.open?'Open now':'Closed'}</p>`;
+     <h1>${rest.logo?`<img class="rlogo-lg" src="${rest.logo}" alt="">`:rest.emoji} ${rest.name}</h1>
+     <p class="sub">${rest.cuisine} · ${rest.address||rest.city} · ${rest.open?'Open now':'Closed'}</p>`;
   loadReviews();
-  if(menu.length===0){
-    document.getElementById('menu').innerHTML =
-      `<div class="card" style="text-align:center;padding:28px 16px">
-        <div style="font-size:2rem">📋</div>
-        <b>Menu coming soon</b>
-        <p class="sub">We're still setting up this spot's menu.<br>Try one of our other ${rest.city} spots for now!</p>
-        <a class="btn ghost" href="/" style="display:inline-block;margin-top:8px">← Browse restaurants</a>
-      </div>`;
-  } else {
-    document.getElementById('menu').innerHTML = menu.map(m=>`
-      <div class="card menu-item">
-        <div class="info"><b>${m.name}</b><span>${m.description||''}</span><span class="price">$${m.price.toFixed(2)}</span></div>
-        <div class="qty">
-          <button onclick="ch(${m.id},-1)">−</button>
-          <b id="q${m.id}">${cart[m.id]||0}</b>
-          <button onclick="ch(${m.id},1)">+</button>
-        </div>
-      </div>`).join('');
+}
+
+$('quote').onclick=async()=>{
+  const to=$('daddr').value.trim();
+  if(!to){$('msg').textContent='Enter your delivery address first.';return;}
+  if(!rest){return;}
+  $('qnote').textContent='Calculating…';
+  const from=`${rest.address||''} ${rest.city||''} ${rest.state||''}`.trim();
+  const f=await geocode(from), t=await geocode(to);
+  if(!f||!t){$('qnote').textContent='Could not locate addresses — we will still honor a fair price.';quotedFee=3.99;quotedGas=quotedFee*gasPct/100;updateTotals();return;}
+  const miles=Math.hypot(t.lat-f.lat,t.lng-f.lng)*69;
+  quotedFee=Math.max(3.99, Math.round(miles*1.50*100)/100);
+  quotedGas=Math.round(quotedFee*gasPct/100*100)/100;
+  $('qnote').textContent=`${miles.toFixed(1)} miles from ${rest.name} to you.`;
+  updateTotals();
+};
+
+$('go').onclick=async()=>{
+  if(!rest){return;}
+  const body={
+    restaurant:rest.name,
+    pickup_address:`${rest.address||''} ${rest.city||''} ${rest.state||''}`.trim(),
+    delivery_address:$('daddr').value.trim(),
+    order_details:$('odetail').value.trim(),
+    customer_name:$('cname').value.trim(),
+    phone:$('cphone').value.trim(),
+    tip:tip,
+  };
+  if(!body.delivery_address||!body.customer_name){
+    $('msg').textContent='Please fill in your delivery address and name.';return;
   }
-  draw();
-}
-function ch(id,d){
-  cart[id]=(cart[id]||0)+d;
-  if(cart[id]<=0) delete cart[id];
-  localStorage.setItem('dropcart_'+rid, JSON.stringify(cart));
-  document.getElementById('q'+id).textContent = cart[id]||0;
-  draw();
-}
-function draw(){
-  let t=0,n=0;
-  for(const [id,q] of Object.entries(cart)){
-    const m=menu.find(x=>x.id==id); if(m){t+=m.price*q;n+=q;}
+  $('go').disabled=true; $('go').textContent='Sending…';
+  try{
+    const r=await(await fetch('/api/pickup/request',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+    if(!r.ok&&r.order_id===undefined){throw new Error(r.detail||'Failed');}
+    const c=await(await fetch('/api/checkout',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({order_id:r.order_id})})).json();
+    if(c.url){ location.href=c.url; }
+    else if(c.dev){ location.href=c.pay_url; }
+    else if(c.track_url){ location.href=c.track_url; }
+    else { location.href='/track.html?id='+r.order_id; }
+  }catch(e){
+    $('msg').textContent='Error: '+(e.message||'network error');
+    $('go').disabled=false; $('go').textContent='Pay & Request Pickup →';
   }
-  document.getElementById('ctotal').textContent=t.toFixed(2);
-  document.getElementById('cartbar').style.display = n? 'block':'none';
-}
-document.getElementById('gocheck').onclick=()=>location.href='/checkout.html?rid='+rid;
-document.getElementById('clearcart').onclick=()=>{
-  if(!confirm('Remove everything from your cart?'))return;
-  cart={};
-  localStorage.setItem('dropcart_'+rid, JSON.stringify(cart));
-  menu.forEach(m=>{const q=document.getElementById('q'+m.id); if(q)q.textContent='0';});
-  draw();
 };
 
 // reviews
