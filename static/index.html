@@ -224,10 +224,17 @@ async function load(){
     document.getElementById('dev').innerHTML =
       '<div class="devbanner">🚧 Demo payments are on (test mode) — real cards come later.</div>';
   }
-  const cities = await (await fetch('/api/cities')).json();
+  let cities = [];
+  try{
+    cities = await (await fetch('/api/cities')).json();
+  }catch(e){ console.error('Cities fetch failed:', e); }
   const saved = localStorage.getItem('dropcity');
   const pick = document.getElementById('citypick');
-  pick.innerHTML = cities.map(c=>`<option value="${c.city}|${c.state}">${c.city}, ${c.state} (${c.n})</option>`).join('');
+  try{
+    pick.innerHTML = cities.map(c=>`<option value="${c.city}|${c.state}">${c.city}, ${c.state} (${c.n})</option>`).join('');
+  }catch(e){
+    console.error('Failed to populate cities:', e);
+  }
   // FIX: respect manually-entered cities even if not in DB yet — don't bounce to Bismarck
   let cur = saved || (cities[0]?`${cities[0].city}|${cities[0].state}`:'');
   if(saved && !cities.some(c=>`${c.city}|${c.state}`===saved)){
@@ -273,12 +280,16 @@ async function load(){
   }
   const [ccity, cstate] = (pick.value||'|').split('|');
   const manualMode = localStorage.getItem('dropcity_manual')==='1';
-  let r;
-  if(window._gps && window._gps.lat && !manualMode){
-    r = await (await fetch(`/api/nearby?lat=${window._gps.lat}&lng=${window._gps.lng}&radius=50`)).json();
-    document.getElementById('count').textContent = r.length + ' spots within 50 miles';
-  } else {
-    r = (await (await fetch('/api/restaurants')).json()).filter(x=>(x.city||'')===ccity && (x.state||'')===cstate);
+  let r = [];
+  try{
+    if(window._gps && window._gps.lat && !manualMode){
+      r = await (await fetch(`/api/nearby?lat=${window._gps.lat}&lng=${window._gps.lng}&radius=50`)).json();
+      document.getElementById('count').textContent = r.length + ' spots within 50 miles';
+    } else {
+      const allR = await (await fetch('/api/restaurants')).json();
+      r = allR.filter(x=>(x.city||'')===ccity && (x.state||'')===cstate);
+    }
+  }catch(e){ console.error('Restaurants fetch failed:', e); r = []; }
     if(r.length===0 && ccity){
       // Try LIVE restaurants from OpenStreetMap (free, real data)
       try{
