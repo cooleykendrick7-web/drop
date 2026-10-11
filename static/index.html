@@ -1,27 +1,45 @@
 <!DOCTYPE html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Drop — Food Delivery in Bismarck, ND | Faster Than DoorDash</title>
-<meta name="description" content="Drop delivers your favorite Bismarck restaurants to your door — McDonald's, Taco Bell, Pizza Hut, local spots & more. One flat $3.99 fee, one local driver, real-time tracking.">
-<meta property="og:title" content="Drop — Bismarck Food Delivery">
-<meta property="og:description" content="Bismarck's favorite food, dropped at your door. $3.99 flat delivery.">
+<title>Drop — Pick Up. Deliver. Done.</title>
+<meta name="description" content="Drop delivers your favorites to your door — food, auto parts, supplies & more. One flat fee, one local driver, real-time tracking.">
+<meta property="og:title" content="Drop — Pick Up. Deliver. Done.">
 <meta property="og:image" content="/static/logo.jpg">
 <link rel="icon" href="/static/logo-mark.jpg">
 <link rel="stylesheet" href="/static/styles.css">
+<style>
+#splash{position:fixed;inset:0;background:#0a0a0c;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:100;transition:opacity .5s}
+#splash.hide{opacity:0;pointer-events:none}
+#splash img{width:min(70vw,320px);border-radius:20px;margin-bottom:32px}
+#enterbtn{font-size:1.3rem;padding:16px 48px}
+#gpstext{color:#888;margin-top:16px;font-size:.9rem;text-align:center;padding:0 24px}
+#main{display:none}
+#main.show{display:block}
+.citytag{background:var(--acc);color:#000;font-weight:800;padding:2px 10px;border-radius:12px;font-size:.8rem}
+</style>
 </head><body>
+
+<!-- SPLASH: logo + enter button -->
+<div id="splash">
+  <img src="/static/logo.jpg" alt="Drop — Pick up. Deliver. Done.">
+  <button class="btn" id="enterbtn">Enter Drop →</button>
+  <p id="gpstext">We use your location to show what's available near you.</p>
+</div>
+
+<!-- MAIN APP (after GPS) -->
+<div id="main">
 <header class="topbar">
-  <a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg" alt="Drop"><b>Drop</b><span class="tag">Bismarck</span></a>
+  <a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg" alt="Drop"><b>Drop</b><span class="citytag" id="citytag">📍 Locating…</span></a>
   <a class="acct" href="/account.html">👤 Account</a>
 </header>
 
 <div class="hero">
-  <img class="logo-full" src="/static/logo.jpg" alt="Drop — Pick up. Deliver. Done.">
-  <h1>Bismarck's favorite food,<br><span class="hl">dropped at your door.</span></h1>
-  <p class="tagline" id="tagline">One local driver. One flat $3.99 fee. Real-time tracking.</p>
+  <h1 id="hero-title">Your favorites,<br><span class="hl">dropped at your door.</span></h1>
+  <p class="tagline" id="tagline">One local driver. One flat fee. Real-time tracking.</p>
   <a class="cta" href="#restaurants">Order now</a>
   <div class="trust">
     <span class="pill">🔒 Secure checkout</span>
-    <span class="pill">🛵 <b>$3.99</b> flat delivery</span>
-    <span class="pill">📍 <span id="zonepill">Bismarck, ND</span></span>
+    <span class="pill">🛵 <b id="feepill">$3.99</b> flat delivery</span>
+    <span class="pill">📍 <span id="zonepill">Your area</span></span>
   </div>
   <div id="openstat" class="small" style="margin-top:10px"></div>
 </div>
@@ -34,54 +52,95 @@
 </div></a>
 
 <div class="section-title" id="restaurants">
-  <h2>Order from local spots</h2><span id="count"></span>
+  <h2>Order near you</h2><span id="count"></span>
 </div>
 <div id="list"></div>
 
-<div class="section-title" style="margin-top:34px">
-  <h2>Why Bismarck loves Drop</h2>
-</div>
+<div class="section-title" style="margin-top:34px"><h2>Why people love Drop</h2></div>
 <div class="card" style="padding:0;overflow:hidden">
   <video src="/static/promo-commercial.mp4" controls playsinline preload="metadata"
     style="width:100%;display:block;aspect-ratio:16/9;background:#000"></video>
-</div>
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">
-  <img src="/static/promo-doorstep.webp" alt="Drop driver delivering to a happy customer" style="width:100%;border-radius:14px;display:block">
-  <img src="/static/promo-family.webp" alt="Happy family enjoying Drop delivery" style="width:100%;border-radius:14px;display:block">
-  <img src="/static/promo-kids.webp" alt="Kids excited for their Drop delivery" style="width:100%;border-radius:14px;display:block">
-  <img src="/static/promo-driver.webp" alt="Drop driver on the way" style="width:100%;border-radius:14px;display:block">
 </div>
 <p class="small" style="text-align:center;margin-top:10px">Real driver. Real fast. Real fresh. 🧡</p>
 
 <footer>
   <div class="motto"><a class="secret" href="/dash">PICK UP &nbsp;•&nbsp; DELIVER &nbsp;•&nbsp; DONE</a></div>
-  <div>Drop — Bismarck, North Dakota</div>
+  <div>Drop — <span id="footcity">your city</span></div>
   <div style="margin-top:8px">📧 <a href="mailto:wearedropservicesllc@gmail.com">wearedropservicesllc@gmail.com</a><br>📞 <a href="tel:+12629777869">(262) 977-7869</a></div>
   <div style="margin-top:8px"><a href="/courier.html">📦 Drop More</a> · <a href="/partner.html">🤝 Partner With Us</a> · <a href="/drive.html">🚗 Drive for Drop</a> · <a href="/investors.html">💰 Investors</a> · <a href="/terms">Terms & refund policy</a></div>
+  <div style="margin-top:12px"><button class="btn ghost small" id="resetbtn" style="width:auto">🔄 Reset app data</button></div>
 </footer>
+</div>
 
 <script src="/static/chat.js"></script>
 <script>
 if(!sessionStorage.getItem('dropv')){sessionStorage.setItem('dropv','1');
 fetch('/api/visit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({page:'home'})});}
+
+// GPS → city detection
+let userCity='', userLat=0, userLng=0;
+document.getElementById('enterbtn').onclick=()=>{
+  document.getElementById('gpstext').textContent='Requesting your location…';
+  if(!navigator.geolocation){enterApp('your area');return;}
+  navigator.geolocation.getCurrentPosition(
+    async pos=>{
+      userLat=pos.coords.latitude; userLng=pos.coords.longitude;
+      try{
+        // reverse geocode via free Nominatim
+        const r=await (await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${userLat}&lon=${userLng}&format=json`,{headers:{'Accept':'application/json'}})).json();
+        const a=r.address||{};
+        userCity=a.city||a.town||a.village||a.county||'your area';
+        const state=a.state_code||a.state||'';
+        if(state) userCity+=', '+state;
+      }catch(e){ userCity='your area'; }
+      try{localStorage.setItem('dropcity',userCity);localStorage.setItem('droplat',userLat);localStorage.setItem('droplng',userLng);}catch(e){}
+      enterApp(userCity);
+    },
+    ()=>{ enterApp(localStorage.getItem('dropcity')||'your area'); }, // denied → use last or generic
+    {timeout:8000}
+  );
+};
+function enterApp(city){
+  userCity=city;
+  document.getElementById('splash').classList.add('hide');
+  document.getElementById('main').classList.add('show');
+  document.getElementById('citytag').textContent='📍 '+city;
+  document.getElementById('zonepill').textContent=city;
+  document.getElementById('footcity').textContent=city;
+  document.getElementById('hero-title').innerHTML=`Drop in ${city.replace(/</g,'&lt;')},<br><span class="hl">dropped at your door.</span>`;
+  document.title=`Drop — Delivery in ${city}`;
+  load();
+}
+// returning visitor who already entered: skip splash
+try{
+  const c=localStorage.getItem('dropcity');
+  if(c){document.getElementById('splash').style.display='none';enterApp(c);}
+}catch(e){}
+
+document.getElementById('resetbtn').onclick=()=>{
+  if(!confirm('Reset all Drop data on this device? (carts, saved city, preferences)'))return;
+  Object.keys(localStorage).filter(k=>k.startsWith('drop')).forEach(k=>localStorage.removeItem(k));
+  sessionStorage.clear();
+  location.reload();
+};
+
 async function load(){
   const cfg = await (await fetch('/api/config')).json();
   if(cfg.tagline) document.getElementById('tagline').textContent = cfg.tagline;
-  if(cfg.delivery_zone) document.getElementById('zonepill').textContent = cfg.delivery_zone;
   const os=document.getElementById('openstat');
   os.innerHTML = cfg.open_now
-    ? `🟢 <b>Open now</b> · ${cfg.hours_label} · delivering in ${cfg.delivery_zone}`
-    : `🔴 <b>Closed</b> — back at ${cfg.hours_label.split('–')[0]} · delivering in ${cfg.delivery_zone}`;
+    ? `🟢 <b>Open now</b> · ${cfg.hours_label}`
+    : `🔴 <b>Closed</b> — back at ${cfg.hours_label.split('–')[0]}`;
   const cta=document.querySelector('.cta');
   if(!cfg.open_now){cta.style.opacity=.5;}
   const fee = cfg.delivery_fee || 3.99;
+  document.getElementById('feepill').textContent='$'+fee.toFixed(2);
   if(!cfg.stripe_live){
     document.getElementById('dev').innerHTML =
       '<div class="devbanner">🚧 Demo payments are on (test mode) — real cards come later.</div>';
   }
   const r = await (await fetch('/api/restaurants')).json();
   document.getElementById('count').textContent = r.length + ' spots';
-  // one-tap reorder
   let reorder='';
   try{
     const last=JSON.parse(localStorage.getItem('droplast')||'null');
@@ -103,5 +162,4 @@ async function load(){
       </div>
     </a>`).join('') || '<p>No restaurants yet — check back soon.</p>';
 }
-load();
 </script></body></html>
