@@ -201,6 +201,7 @@
   </div>
 
   <div class="tab" id="t-crew">
+    <div class="card"><h3>👥 Driver Monitor</h3><p class="small">All drivers, PINs, status, live activity.</p><div id="drivermon"></div></div>
     <div class="card"><h3>📢 Broadcast to Drivers</h3>
       <p class="small">Post updates, bonuses, news — all drivers see it in their News tab.</p>
       <label>Title</label><input id="bc-title" placeholder="e.g. Weekend bonus!">
@@ -315,6 +316,16 @@ document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
 
 /* ---- Payment Control Center ---- */
 async function loadCrew(){
+  // Driver monitor
+  try{
+    const dm=await(await fetch('/api/operator/drivers/monitor',{headers:H()})).json();
+    $('drivermon').innerHTML=dm.map(d=>`
+      <div class="card" style="margin:8px 0">
+        <div class="row"><b>${d.name.replace(/</g,'&lt;')}</b><span class="badge">${d.status.toUpperCase()}</span></div>
+        <p class="small">📞 ${d.phone} · 🔑 PIN: <b>${d.login_pin||'—'}</b> · ⭐ ${d.rating||'5.0'} · 📦 ${d.deliveries||0} deliveries</p>
+        ${d.last_active?`<p class="small">Last active: ${d.last_active}</p>`:''}
+      </div>`).join('')||'<p class="small">No drivers yet.</p>';
+  }catch(e){ $('drivermon').innerHTML='<p class="small">Failed to load.</p>'; }
   // Complaints
   const c=await(await fetch('/api/operator/complaints',{headers:H()})).json();
   $('complist').innerHTML=c.map(x=>`

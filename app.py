@@ -200,7 +200,9 @@ def init_db():
     for _col, _ddl in (("selfie_photo", "TEXT DEFAULT ''"), ("car_photo", "TEXT DEFAULT ''"),
                        ("selfie_approved", "INTEGER DEFAULT 0"), ("car_approved", "INTEGER DEFAULT 0"),
                        ("rating", "REAL DEFAULT 5.0"), ("rating_count", "INTEGER DEFAULT 0"),
-                       ("stripe_account_id", "TEXT DEFAULT ''")):
+                       ("stripe_account_id", "TEXT DEFAULT ''"),
+                       ("login_pin", "TEXT DEFAULT ''"),
+                       ("ntfy_topic", "TEXT DEFAULT ''")):
         if _col not in dcols:
             c.execute(f"ALTER TABLE drivers ADD COLUMN {_col} {_ddl}")
     # Delivery photo proof (pickup + dropoff, DoorDash-style)
@@ -1380,6 +1382,18 @@ def driver_my_complaints(driver_id: int = 0):
     rows = conn.execute(
         "SELECT * FROM driver_complaints WHERE driver_id=? ORDER BY id DESC",
         (driver_id,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+@app.get("/api/operator/drivers/monitor")
+def op_driver_monitor(x_pin: str = Header(default="")):
+    """Ken monitors all drivers: PINs, status, activity."""
+    check_pin(x_pin)
+    conn = db()
+    rows = conn.execute(
+        "SELECT id, name, phone, status, login_pin, rating, deliveries,"
+        " last_location_at as last_active FROM drivers ORDER BY id DESC").fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
@@ -2815,14 +2829,20 @@ def op_approve_driver(did: int, x_pin: str = Header(default="")):
         raise HTTPException(400,
             "Cannot approve: driver has not provided insurance information. "
             "Insurance is required — no exceptions.")
-    conn.execute("UPDATE drivers SET status='approved' WHERE id=?", (did,))
+    # Generate unique 6-digit PIN
+    import random
+    pin = str(random.randint(100000, 999999))
+    # Ensure uniqueness
+    while conn.execute("SELECT id FROM drivers WHERE login_pin=?", (pin,)).fetchone():
+        pin = str(random.randint(100000, 999999))
+    conn.execute("UPDATE drivers SET status='approved', login_pin=? WHERE id=?", (pin, did))
     conn.commit()
     # Notify driver via ntfy if they have a topic set
     try:
         topic = d["ntfy_topic"] if "ntfy_topic" in d.keys() else None
         if topic:
             import urllib.request, urllib.parse, threading
-            msg = f"🎉 You're approved! Log into your driver portal to start working."
+            msg = f"🎉 You're approved! Your Drop Driver Hub PIN is: {pin}. Log in at drop-52yj.onrender.com/hub.html"
             r2 = urllib.request.Request(
                 f"https://ntfy.sh/{urllib.parse.quote(topic)}",
                 data=msg.encode(), headers={"Title": "Drop driver approved"}, method="POST")
@@ -2832,9 +2852,9 @@ def op_approve_driver(did: int, x_pin: str = Header(default="")):
     except Exception:
         pass
     conn.close()
-    audit("operator", "driver_approved", "driver", did, d["name"])
-    log_event("driver", f"✅ Driver #{did} approved", d["name"])
-    return {"ok": True, "message": "Driver approved! They can now log in and start working."}
+    audit("operator", "driver_approved", "driver", did, f"{d['name']} PIN:{pin}")
+    log_event("driver", f"✅ Driver #{did} approved", f"{d['name']} — PIN {pin}")
+    return {"ok": True, "pin": pin, "message": f"Driver approved! Their login PIN is {pin}. Share it with them securely."}
 
 
 @app.post("/api/operator/drivers/{did}/photo-approve")
@@ -2874,6 +2894,29 @@ def op_suspend_driver(did: int, x_pin: str = Header(default="")):
     conn.commit()
     conn.close()
     return {"ok": True}
+
+
+@app.post("/api/drivers/pin-login")
+async def driver_pin_login(req: Request):
+    """Driver Hub login via 6-digit PIN."""
+    body = await req.json()
+    pin = (body.get("pin") or "").strip()
+    if len(pin) != 6 or not pin.isdigit():
+        raise HTTPException(401, "Invalid PIN")
+    conn = db()
+    d = conn.execute("SELECT * FROM drivers WHERE login_pin=?", (pin,)).fetchone()
+    conn.close()
+    if not d:
+        raise HTTPException(401, "Invalid PIN")
+    if d["status"] != "approved":
+        raise HTTPException(403, "Driver account not active")
+    return {"ok": True, "id": d["id"], "driver_id": d["id"], "name": d["name"]}
+
+
+@app.get("/hub.html", response_class=HTMLResponse)
+def hubpage():
+    with open(os.path.join(BASE, "static", "hub.html")) as f:
+        return f.read()
 
 
 @app.post("/api/drivers/login")

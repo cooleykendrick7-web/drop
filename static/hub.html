@@ -1,0 +1,323 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Drop Driver Hub</title>
+<link rel="icon" href="/static/logo-mark.jpg">
+<link rel="stylesheet" href="/static/styles.css">
+<style>.tabs{display:flex;gap:6px;margin:10px 0}.tabs button{flex:1;background:#2a2a33;color:#fff;border:0;border-radius:10px;padding:11px 4px;font-weight:700}.tabs button.on{background:var(--acc)}.tab{display:none}.tab.on{display:block}</style>
+</head><body>
+<header class="topbar"><a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg" alt="Drop"><b>Drop</b><span class="tag">dropper</span></a><span class="small" id="dname"></span></header>
+
+<div id="login" class="card" style="max-width:400px;margin:40px auto;text-align:center">
+  <div style="font-size:3rem">🚗</div>
+  <h1>Drop Driver Hub</h1>
+  <p class="small">Enter your 6-digit driver PIN to access your hub.</p>
+  <label style="text-align:left">Driver PIN</label>
+  <input id="pin" inputmode="numeric" maxlength="6" placeholder="••••••" style="text-align:center;font-size:1.5rem;letter-spacing:8px">
+  <button class="btn" id="gobtn" style="margin-top:12px">Enter Hub →</button>
+  <p class="small" id="loginmsg"></p>
+  <p class="small" style="margin-top:16px">Don't have a PIN? <a href="/drive.html">Apply to drive</a></p>
+</div>
+
+<div id="app" style="display:none">
+  <div class="card" id="loccard"><div class="row"><span><b>📍 Share my location</b><br>
+    <span class="small">While ON, customers watch your car on their tracking map.</span></span>
+    <button class="btn small ghost" id="locToggle" style="width:auto;padding:10px 20px">Start</button></div>
+    <p class="small" id="locmsg"></p></div>
+
+  <div class="tabs">
+    <button class="on" data-t="del">Deliveries</button>
+    <button data-t="msg">Inbox <span id="msgbadge"></span></button>
+    <button data-t="earn">Earnings</button>
+    <button data-t="news">📢 News</button>
+    <button data-t="help">🆘 Help</button>
+    <button data-t="me">Profile</button>
+  </div>
+
+  <div class="tab on" id="t-del"><div id="olist"><p class="small">Loading…</p></div></div>
+
+  <div class="tab" id="t-msg">
+    <div class="card"><h3>📬 Messages</h3><div id="msglist"><p class="small">Loading…</p></div></div>
+    <div class="card"><h3>🔔 Push notifications</h3>
+      <p class="small">Enter your ntfy topic to get instant alerts for new deliveries, messages, and safety warnings.</p>
+      <div class="row"><input id="ntfy" placeholder="your-secret-topic" style="flex:1;margin-right:6px">
+      <button class="btn small" id="ntfysave" style="width:auto">Save</button></div>
+      <p class="small" id="ntfymsg"></p></div>
+  </div>
+
+  <div class="tab" id="t-earn">
+    <div class="card"><h2 style="margin:0">💼 Driver wallet</h2>
+      <div class="statgrid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0">
+        <div class="stat"><b id="w-avail">$0.00</b><span class="small">Available</span></div>
+        <div class="stat"><b id="w-pend">$0.00</b><span class="small">Pending</span></div>
+        <div class="stat"><b id="w-paid">$0.00</b><span class="small">Paid out</span></div>
+        <div class="stat"><b id="w-req">$0.00</b><span class="small">Requested</span></div>
+      </div>
+      <p class="small">Pending = deliveries not finished yet. Only <b>available</b> money can be cashed out.</p>
+      <div class="row"><input id="w-amt" inputmode="decimal" placeholder="Amount $" style="flex:1;margin-right:6px">
+      <button class="btn small" id="w-cashout" style="width:auto">💸 Cash out</button></div>
+      <p class="small" id="w-msg"></p></div>
+    <h3>Per-delivery earnings</h3>
+    <div id="whist"></div>
+    <h3>Payout history</h3>
+    <div id="wpay"></div>
+  </div>
+
+  <div class="tab" id="t-news">
+    <div class="card"><h3>📢 Driver Broadcasts</h3><p class="small">Updates from Drop HQ — new features, bonuses, important news.</p><div id="newslist"><p class="small">Loading…</p></div></div>
+  </div>
+
+  <div class="tab" id="t-help">
+    <div class="card"><h3>🎯 My Goals</h3>
+      <div class="row"><span>Today: <b id="goal-today">$0</b> / <b id="goal-daily-t">$100</b></span></div>
+      <div style="background:#222;border-radius:10px;height:12px;margin:8px 0"><div id="goal-daily-bar" style="background:#2ecc71;height:100%;border-radius:10px;width:0%"></div></div>
+      <div class="row"><span>This week: <b id="goal-week">$0</b> / <b id="goal-weekly-t">$500</b></span></div>
+      <div style="background:#222;border-radius:10px;height:12px;margin:8px 0"><div id="goal-weekly-bar" style="background:#3498db;height:100%;border-radius:10px;width:0%"></div></div>
+      <div class="row"><input id="goal-d" type="number" placeholder="Daily $" style="flex:1;margin-right:6px"><input id="goal-w" type="number" placeholder="Weekly $" style="flex:1;margin-right:6px"><button class="btn small" id="goal-save" style="width:auto">Set</button></div>
+    </div>
+    <div class="card"><h3>🆘 File a complaint</h3>
+      <p class="small">Something wrong? Tell us. AI will categorize it and suggest a fix to management.</p>
+      <label>Subject</label><input id="comp-subject" placeholder="What's the issue?">
+      <label>Details</label><textarea id="comp-msg" rows="3" placeholder="Describe what happened…" style="width:100%"></textarea>
+      <button class="btn" id="comp-send" style="margin-top:8px">Submit complaint</button>
+      <p class="small" id="comp-msg-status"></p></div>
+    <div class="card"><h3>My complaints</h3><div id="complist"><p class="small">Loading…</p></div></div>
+  </div>
+
+  <div class="tab" id="t-me">
+    <div class="card"><h2 style="margin:0" id="mname"></h2>
+      <p class="small" id="mstats"></p>
+      <p class="small" id="mvehicle"></p>
+      <button class="btn small ghost" id="logout">Log out</button></div>
+    <div class="card"><h3>📸 Profile Photos</h3>
+      <p class="small">Customers see your selfie and car. AI checks quality, Ken approves.</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div><p class="small"><b>Selfie</b> <span id="selfiestatus"></span></p>
+          <img id="selfieprev" style="width:100%;border-radius:8px;display:none">
+          <input type="file" id="selfiefile" accept="image/*" style="font-size:.8rem">
+          <button class="btn small" id="selfiebtn" style="margin-top:6px">Upload selfie</button></div>
+        <div><p class="small"><b>Car</b> <span id="carstatus"></span></p>
+          <img id="carprev" style="width:100%;border-radius:8px;display:none">
+          <input type="file" id="carfile" accept="image/*" style="font-size:.8rem">
+          <button class="btn small" id="carbtn" style="margin-top:6px">Upload car</button></div>
+      </div></div>
+    <div class="card"><h3>Need help?</h3>
+      <p class="small">Message Drop support anytime from the 💬 chat bubble — we typically reply fast.</p></div>
+  </div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const NEXT={picked_up:'on_the_way',on_the_way:'delivered'};
+const NEXTLBL={on_the_way:'🛵 On the way',delivered:'📦 Delivered'};
+
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
+  b.classList.add('on'); $('t-'+b.dataset.t).classList.add('on');
+  if(b.dataset.t==='earn') loadEarn(); if(b.dataset.t==='me') loadMe(); if(b.dataset.t==='msg') loadMsgs();
+});
+
+$('gobtn').onclick=async()=>{
+  const pin=$('pin').value.trim();
+  if(pin.length!==6){$('loginmsg').textContent='Enter your 6-digit PIN.';return;}
+  const r=await fetch('/api/drivers/pin-login',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({pin})});
+  const j=await r.json();
+  if(!r.ok){$('loginmsg').textContent=j.detail||'Invalid PIN.';return;}
+  $('login').style.display='none';$('app').style.display='block';
+  $('dname').textContent='· '+j.name;
+  DID=j.id||j.driver_id||0;
+  try{ localStorage.setItem('driver_pin', pin); }catch(e){}
+  loadOrders(); loadNews();
+};
+// Auto-login if PIN saved
+try{
+  const savedPin = localStorage.getItem('driver_pin');
+  if(savedPin && savedPin.length===6){
+    $('pin').value = savedPin;
+  }
+}catch(e){}
+// Photo uploads
+async function uploadPhoto(type){
+  const inp=$(type+'file'); const f=inp.files[0];
+  if(!f){alert('Pick a photo first');return;}
+  const fd=new FormData();
+  fd.append('driver_id', ME.id); fd.append('type', type==='selfiefile'?'selfie':'car'); fd.append('file', f);
+  const btn=$(type==='selfiefile'?'selfiebtn':'carbtn');
+  btn.disabled=true; btn.textContent='Uploading…';
+  try{
+    const r=await(await fetch('/api/drivers/photo',{method:'POST',body:fd})).json();
+    if(r.ok){alert('Photo uploaded! Ken will review it.');location.reload();}
+    else alert(r.detail||'Upload failed');
+  }catch(e){alert('Upload failed');}
+  btn.disabled=false; btn.textContent='Upload';
+}
+$('selfiebtn').onclick=()=>uploadPhoto('selfiefile');
+$('carbtn').onclick=()=>uploadPhoto('carfile');
+$('logout').onclick=async()=>{
+  await fetch('/api/drivers/logout',{method:'POST'});
+  location.reload();
+};
+
+async function loadOrders(){
+  const r=await fetch('/api/drivers/orders');
+  if(r.status===401){location.reload();return;}
+  const orders=await r.json();
+  $('olist').innerHTML='<h2>My deliveries ('+orders.length+')</h2>'+(orders.map(o=>{
+    const restDest=o.plat?`${o.plat},${o.plng}`:encodeURIComponent(o.pickup_addr||'');
+    const custDest=o.cust_lat?`${o.cust_lat},${o.cust_lng}`:encodeURIComponent(o.address||'');
+    return `<div class="card order">
+      <div class="row"><b>#${o.id} · ${o.kind==='courier'?'📦 Courier':'🍔 Food'}</b>
+        <span class="badge">${o.status_label}</span></div>
+      <p><b>Pick up:</b> ${o.pickup_label}<br><span class="small">📍 ${o.pickup_addr||''}</span></p>
+      ${o.kind==='courier'?`<p><b>Items:</b> ${o.items.map(i=>i.name).join(', ')}</p>`:o.items.map(i=>`<div class="row small"><span>${i.qty}× ${i.name}</span></div>`).join('')}
+      <p><b>Deliver to:</b> ${o.customer_name} · <a href="tel:${o.phone}">${o.phone}</a><br>
+        <span class="small">🏠 ${o.address}</span>${o.notes?`<br><span class="small">📝 ${o.notes}</span>`:''}</p>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <a class="btn small" href="https://www.google.com/maps/dir/?api=1&destination=${restDest}" target="_blank" style="flex:1;text-decoration:none;text-align:center">🧭 To pickup</a>
+        <a class="btn small" href="https://www.google.com/maps/dir/?api=1&destination=${custDest}" target="_blank" style="flex:1;text-decoration:none;text-align:center">🏠 To customer</a>
+      </div>
+      <div style="margin-top:8px">
+        ${NEXT[o.status]?`<button class="btn small" onclick="setStatus(${o.id},'${NEXT[o.status]}')">${NEXTLBL[NEXT[o.status]]}</button>`:''}
+        ${o.status==='confirmed'?`<button class="btn small" onclick="setStatus(${o.id},'picked_up')">🛍️ Picked up</button>`:''}
+      </div>
+    </div>`;
+  }).join('')||'<p class="small">No deliveries assigned right now. New orders will appear here.</p>');
+}
+async function setStatus(id,s){
+  await fetch('/api/drivers/orders/'+id+'/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:s})});
+  if(s==='on_the_way'&&!locWatch) $('locToggle').click();
+  loadOrders();
+}
+async function loadEarn(){
+  const w=await (await fetch('/api/drivers/wallet')).json();
+  $('w-avail').textContent='$'+w.available.toFixed(2);
+  $('w-pend').textContent='$'+w.pending.toFixed(2);
+  $('w-paid').textContent='$'+w.paid_out.toFixed(2);
+  $('w-req').textContent='$'+w.requested.toFixed(2);
+  $('whist').innerHTML=w.history.map(h=>`
+    <div class="card"><div class="row"><b>Order #${h.order_id}</b><b>$${h.total.toFixed(2)}</b></div>
+      <p class="small">Base $${h.base.toFixed(2)} + tip $${h.tip.toFixed(2)} (tips are 100% yours)</p></div>`).join('')
+    ||'<p class="small">No completed deliveries yet.</p>';
+  $('wpay').innerHTML=w.payouts.map(p=>`
+    <div class="card"><div class="row"><b>$${p.amount.toFixed(2)}</b>
+      <span class="badge ${p.status==='paid'?'open':''}">${p.status.toUpperCase()}</span></div>
+      <p class="small">${p.created_at.slice(0,16).replace('T',' ')}</p></div>`).join('')
+    ||'<p class="small">No payouts yet.</p>';
+}
+$('w-cashout').onclick=async()=>{
+  const amt=parseFloat($('w-amt').value);
+  if(!amt||amt<=0){$('w-msg').textContent='Enter an amount.';return;}
+  if(!confirm(`Cash out $${amt.toFixed(2)}? Your manager will send it and mark it paid.`))return;
+  const r=await fetch('/api/drivers/payout-request',{method:'POST',
+    headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})});
+  const j=await r.json();
+  $('w-msg').textContent=r.ok?'✅ Request sent! You\'ll get it soon.':'Error: '+(j.detail||'failed');
+  $('w-amt').value=''; loadEarn();
+};
+async function loadMe(){
+  const m=await (await fetch('/api/drivers/me')).json();
+  $('mname').textContent=m.name;
+  $('mstats').innerHTML=`⭐ On-time rate: <b>${m.on_time_rate}%</b> · ${m.deliveries} deliveries`;
+  $('mvehicle').textContent=`${m.vehicle_year} ${m.vehicle_make} ${m.vehicle_model} ${m.vehicle_color}`.trim();
+  if(m.ntfy_topic) $('ntfy').value=m.ntfy_topic;
+}
+async function loadMsgs(){
+  const msgs=await (await fetch('/api/drivers/messages')).json();
+  $('msgbadge').textContent='';
+  const icons={boost:'💪',warning:'⚠️',info:'ℹ️',delay_check:'⏰'};
+  $('msglist').innerHTML=msgs.map(m=>`
+    <div class="card"><div class="row"><b>${icons[m.kind]||'💬'} ${m.title.replace(/</g,'&lt;')}</b>
+      <span class="small">${m.created_at.slice(0,16).replace('T',' ')}</span></div>
+      <p class="small">${m.body.replace(/</g,'&lt;')}</p></div>`).join('')
+    ||'<p class="small">No messages yet.</p>';
+}
+$('ntfysave').onclick=async()=>{
+  const t=$('ntfy').value.trim();
+  await fetch('/api/drivers/ntfy',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({topic:t})});
+  $('ntfymsg').textContent=t?'✅ Saved! You\'ll get push alerts.':'Cleared.';
+};
+
+// GPS sharing
+let locWatch=null, lastPost=0;
+$('locToggle').onclick=()=>{
+  if(locWatch){
+    navigator.geolocation.clearWatch(locWatch); locWatch=null;
+    $('locToggle').textContent='Start'; $('locToggle').classList.add('ghost');
+    $('loccard').style.border=''; $('locmsg').textContent=''; return;
+  }
+  if(!navigator.geolocation){$('locmsg').textContent='GPS not available.';return;}
+  $('locmsg').textContent='Sharing… keep this page open while you deliver.';
+  $('locToggle').textContent='Stop'; $('locToggle').classList.remove('ghost');
+  $('loccard').style.border='2px solid var(--ok)';
+  locWatch=navigator.geolocation.watchPosition(p=>{
+    const now=Date.now(); if(now-lastPost<15000) return; lastPost=now;
+    fetch('/api/drivers/location',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({lat:p.coords.latitude,lng:p.coords.longitude})}).catch(()=>{});
+    $('locmsg').textContent='📍 Live — updated '+new Date().toLocaleTimeString();
+  },()=>{$('locmsg').textContent='GPS blocked — allow location for this site.';},
+  {enableHighAccuracy:true,maximumAge:10000,timeout:20000});
+};
+
+setInterval(()=>{ if($('app').style.display!=='none') loadOrders(); },10000);
+
+// Broadcasts
+async function loadNews(){
+  const b=await(await fetch('/api/drivers/broadcasts')).json();
+  $('newslist').innerHTML=b.map(x=>`
+    <div class="card" style="margin:8px 0"><b>📢 ${x.title.replace(/</g,'&lt;')}</b>
+    <p class="small">${x.message.replace(/</g,'&lt;')}</p>
+    <span class="small">${x.created_at.slice(0,10)}</span></div>`).join('')
+    ||'<p class="small">No announcements yet.</p>';
+}
+
+// Goals
+let DID=0;
+async function loadGoals(){
+  if(!DID) return;
+  const g=await(await fetch(`/api/drivers/goals?driver_id=${DID}`)).json();
+  $('goal-today').textContent='$'+g.today_earned.toFixed(2);
+  $('goal-daily-t').textContent='$'+g.daily_target.toFixed(2);
+  $('goal-week').textContent='$'+g.week_earned.toFixed(2);
+  $('goal-weekly-t').textContent='$'+g.weekly_target.toFixed(2);
+  $('goal-daily-bar').style.width=Math.min(100,g.today_earned/g.daily_target*100)+'%';
+  $('goal-weekly-bar').style.width=Math.min(100,g.week_earned/g.weekly_target*100)+'%';
+}
+document.getElementById('goal-save').onclick=async()=>{
+  const d=parseFloat(document.getElementById('goal-d').value)||100;
+  const w=parseFloat(document.getElementById('goal-w').value)||500;
+  await fetch('/api/drivers/goals',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({driver_id:DID,daily_target:d,weekly_target:w})});
+  loadGoals();
+};
+
+// Complaints
+document.getElementById('comp-send').onclick=async()=>{
+  const s=document.getElementById('comp-subject').value.trim();
+  const m=document.getElementById('comp-msg').value.trim();
+  if(!s||!m){document.getElementById('comp-msg-status').textContent='Fill in both fields.';return;}
+  const r=await(await fetch('/api/drivers/complaint',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({driver_id:DID,subject:s,message:m})})).json();
+  document.getElementById('comp-msg-status').textContent=r.ok?`✅ Submitted (${r.ai_category}). We'll review it.`:'Failed.';
+  document.getElementById('comp-subject').value='';document.getElementById('comp-msg').value='';
+  loadComplaints();
+};
+async function loadComplaints(){
+  if(!DID) return;
+  const c=await(await fetch(`/api/drivers/complaints?driver_id=${DID}`)).json();
+  $('complist').innerHTML=c.map(x=>`
+    <div class="card" style="margin:8px 0"><b>${x.subject.replace(/</g,'&lt;')}</b> <span class="badge">${x.status}</span>
+    <p class="small">${x.ai_summary}</p>
+    ${x.ken_response?`<p class="small" style="color:#2ecc71"><b>Response:</b> ${x.ken_response.replace(/</g,'&lt;')}</p>`:'<p class="small">Awaiting review…</p>'}</div>`).join('')
+    ||'<p class="small">No complaints filed.</p>';
+}
+// Load news/goals when tabs clicked
+document.querySelectorAll('.tabs button').forEach(b=>{
+  b.addEventListener('click',()=>{
+    if(b.dataset.t==='news') loadNews();
+    if(b.dataset.t==='help'){ loadGoals(); loadComplaints(); }
+  });
+});
+</script>
+<script src="/static/chat.js"></script></body></html>
