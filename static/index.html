@@ -236,7 +236,8 @@ async function load(){
     const opt=document.createElement('option');opt.value=saved;opt.textContent=`${mc}, ${ms} (new)`;
     pick.appendChild(opt);
   }
-  const gpsCity = await new Promise(resolve=>{
+  const manualModeEarly = localStorage.getItem('dropcity_manual')==='1';
+  const gpsCity = manualModeEarly ? null : await new Promise(resolve=>{
     let done=false;
     const finish=v=>{if(!done){done=true;resolve(v);}};
     // Force resolve after 12s no matter what — never hang
