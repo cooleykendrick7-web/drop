@@ -140,6 +140,27 @@ def init_db():
         c.execute("ALTER TABLE restaurants ADD COLUMN logo TEXT DEFAULT ''")
     if "photo" not in rcols:
         c.execute("ALTER TABLE restaurants ADD COLUMN photo TEXT DEFAULT ''")
+    # maps + AI watchdog (added 2026-10-10)
+    rcols = [r[1] for r in c.execute("PRAGMA table_info(restaurants)").fetchall()]
+    for _col, _ddl in (("address", "TEXT DEFAULT ''"), ("lat", "REAL DEFAULT 0"),
+                       ("lng", "REAL DEFAULT 0"), ("website", "TEXT DEFAULT ''")):
+        if _col not in rcols:
+            c.execute(f"ALTER TABLE restaurants ADD COLUMN {_col} {_ddl}")
+    ocols3 = [r[1] for r in c.execute("PRAGMA table_info(orders)").fetchall()]
+    for _col, _ddl in (("cust_lat", "REAL DEFAULT 0"), ("cust_lng", "REAL DEFAULT 0"),
+                       ("driver_lat", "REAL DEFAULT 0"), ("driver_lng", "REAL DEFAULT 0"),
+                       ("driver_updated", "TEXT DEFAULT ''")):
+        if _col not in ocols3:
+            c.execute(f"ALTER TABLE orders ADD COLUMN {_col} {_ddl}")
+    c.execute("""CREATE TABLE IF NOT EXISTS menu_proposals (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        restaurant_id INTEGER NOT NULL REFERENCES restaurants(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL DEFAULT 'price_change',
+        item_name TEXT NOT NULL DEFAULT '',
+        old_price REAL DEFAULT 0, new_price REAL DEFAULT 0,
+        detail TEXT DEFAULT '', source_url TEXT DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'pending',
+        created_at TEXT NOT NULL)""")
     defaults = {
         "delivery_fee": "3.99",
         "pin": "1234",
@@ -288,6 +309,22 @@ def check_pin(x_pin: str = Header(default="")):
         raise HTTPException(status_code=401, detail="Bad PIN")
 
 
+def geocode(address):
+    """Best-effort address -> (lat, lng) via Nominatim (OpenStreetMap, free).
+    Returns (0.0, 0.0) when it can't find it. Never raises."""
+    try:
+        q = urllib.parse.quote(address)
+        req = urllib.request.Request(
+            f"https://nominatim.openstreetmap.org/search?q={q}&format=json&limit=1",
+            headers={"User-Agent": "DropDelivery/1.0 (wearedropservicesllc@gmail.com)"})
+        data = json.load(urllib.request.urlopen(req, timeout=8))
+        if data:
+            return float(data[0]["lat"]), float(data[0]["lon"])
+    except Exception:
+        pass
+    return 0.0, 0.0
+
+
 # ---------------- public API ----------------
 @app.get("/api/health")
 def health():
@@ -401,6 +438,19 @@ async def create_order(req: Request):
          food_total, fee, tip, discount, promo_code, user_id, total, now_iso(), now_iso()))
     oid = cur.lastrowid
     conn.commit()
+    # pin the delivery address on the map (background — never slows the order)
+    def _geocode_order():
+        try:
+            glat, glng = geocode(address + ", Bismarck, ND")
+            if glat:
+                c2 = db()
+                c2.execute("UPDATE orders SET cust_lat=?, cust_lng=? WHERE id=?",
+                           (glat, glng, oid))
+                c2.commit()
+                c2.close()
+        except Exception:
+            pass
+    threading.Thread(target=_geocode_order, daemon=True).start()
     conn.close()
     return {"order_id": oid, "food_total": food_total, "delivery_fee": fee,
             "tip": tip, "discount": discount, "promo_code": promo_code,
@@ -519,7 +569,7 @@ def public_order(oid: int):
     if not o:
         conn.close()
         raise HTTPException(404, "Order not found")
-    rest = conn.execute("SELECT name FROM restaurants WHERE id=?",
+    rest = conn.execute("SELECT name, address, lat, lng FROM restaurants WHERE id=?",
                         (o["restaurant_id"],)).fetchone()
     pos = 0
     if o["status"] not in ("delivered", "cancelled"):
@@ -530,6 +580,13 @@ def public_order(oid: int):
     od = order_dict(o)
     return {
         "id": od["id"], "restaurant": rest["name"] if rest else "",
+        "restaurant_address": (rest["address"] or "") if rest else "",
+        "restaurant_lat": (rest["lat"] or 0) if rest else 0,
+        "restaurant_lng": (rest["lng"] or 0) if rest else 0,
+        "address": od["address"],
+        "cust_lat": od.get("cust_lat") or 0, "cust_lng": od.get("cust_lng") or 0,
+        "driver_lat": od.get("driver_lat") or 0, "driver_lng": od.get("driver_lng") or 0,
+        "driver_updated": od.get("driver_updated") or "",
         "items": od["items"], "food_total": od["food_total"],
         "delivery_fee": od["delivery_fee"], "tip": od.get("tip", 0),
         "discount": od.get("discount", 0), "promo_code": od.get("promo_code", ""),
@@ -545,7 +602,8 @@ def op_orders(x_pin: str = Header(default="")):
     check_pin(x_pin)
     conn = db()
     rows = conn.execute(
-        """SELECT o.*, r.name AS restaurant_name FROM orders o
+        """SELECT o.*, r.name AS restaurant_name, r.lat AS rest_lat, r.lng AS rest_lng,
+           r.address AS rest_address FROM orders o
            JOIN restaurants r ON r.id = o.restaurant_id
            ORDER BY o.id DESC""").fetchall()
     out = []
@@ -586,6 +644,117 @@ async def op_set_status(oid: int, req: Request, x_pin: str = Header(default=""))
     conn.close()
     return {"ok": True, "status": status, "label": STATUS_LABELS[status],
             "refunded": refunded, "rewards": punch}
+
+
+@app.post("/api/operator/location")
+async def op_location(req: Request, x_pin: str = Header(default="")):
+    """Ken's phone posts GPS while delivering. Updates all active orders so
+    customers see his live dot on the tracking map."""
+    check_pin(x_pin)
+    body = await req.json()
+    try:
+        lat = float(body.get("lat"))
+        lng = float(body.get("lng"))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "lat/lng required")
+    if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        raise HTTPException(400, "bad coordinates")
+    conn = db()
+    conn.execute("""UPDATE orders SET driver_lat=?, driver_lng=?, driver_updated=?
+                    WHERE status IN ('confirmed','picked_up','on_the_way')""",
+                 (lat, lng, now_iso()))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.get("/api/operator/proposals")
+def op_proposals(x_pin: str = Header(default="")):
+    """Pending AI menu-change proposals for Ken to approve/reject."""
+    check_pin(x_pin)
+    conn = db()
+    rows = conn.execute(
+        """SELECT p.*, r.name AS restaurant_name FROM menu_proposals p
+           JOIN restaurants r ON r.id = p.restaurant_id
+           WHERE p.status = 'pending' ORDER BY p.id DESC""").fetchall()
+    out = [dict(r) for r in rows]
+    conn.close()
+    return out
+
+
+@app.post("/api/operator/proposals")
+async def op_add_proposal(req: Request, x_pin: str = Header(default="")):
+    """Watchdog submits a proposed menu change. Deduplicates identical pendings."""
+    check_pin(x_pin)
+    body = await req.json()
+    rid = body.get("restaurant_id")
+    kind = (body.get("kind") or "price_change").strip()
+    if kind not in ("price_change", "new_item", "unavailable", "back_available"):
+        raise HTTPException(400, "bad kind")
+    item_name = (body.get("item_name") or "").strip()
+    if not rid or not item_name:
+        raise HTTPException(400, "restaurant_id and item_name required")
+    conn = db()
+    dup = conn.execute(
+        """SELECT id FROM menu_proposals WHERE restaurant_id=? AND kind=?
+           AND item_name=? AND status='pending'""",
+        (rid, kind, item_name)).fetchone()
+    if dup:
+        conn.close()
+        return {"ok": True, "duplicate": True}
+    cur = conn.execute(
+        """INSERT INTO menu_proposals
+           (restaurant_id, kind, item_name, old_price, new_price, detail,
+            source_url, status, created_at)
+           VALUES(?,?,?,?,?,?,?,'pending',?)""",
+        (rid, kind, item_name, float(body.get("old_price", 0)),
+         float(body.get("new_price", 0)), (body.get("detail") or "").strip()[:500],
+         (body.get("source_url") or "").strip()[:500], now_iso()))
+    pid = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return {"ok": True, "id": pid}
+
+
+@app.post("/api/operator/proposals/{pid}/approve")
+def op_approve_proposal(pid: int, x_pin: str = Header(default="")):
+    """Ken approves -> the change is applied to the live menu."""
+    check_pin(x_pin)
+    conn = db()
+    p = conn.execute("SELECT * FROM menu_proposals WHERE id=?", (pid,)).fetchone()
+    if not p or p["status"] != "pending":
+        conn.close()
+        raise HTTPException(404, "Proposal not found")
+    kind = p["kind"]
+    if kind == "price_change":
+        conn.execute("UPDATE menu_items SET price=? WHERE restaurant_id=? AND name=?",
+                     (p["new_price"], p["restaurant_id"], p["item_name"]))
+    elif kind == "new_item":
+        conn.execute(
+            "INSERT INTO menu_items(restaurant_id, name, description, price, available)"
+            " VALUES(?,?,?,?,1)",
+            (p["restaurant_id"], p["item_name"], p["detail"], p["new_price"]))
+    elif kind == "unavailable":
+        conn.execute("UPDATE menu_items SET available=0 WHERE restaurant_id=? AND name=?",
+                     (p["restaurant_id"], p["item_name"]))
+    elif kind == "back_available":
+        conn.execute("UPDATE menu_items SET available=1 WHERE restaurant_id=? AND name=?",
+                     (p["restaurant_id"], p["item_name"]))
+    conn.execute("UPDATE menu_proposals SET status='approved' WHERE id=?", (pid,))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.post("/api/operator/proposals/{pid}/reject")
+def op_reject_proposal(pid: int, x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    conn = db()
+    conn.execute("UPDATE menu_proposals SET status='rejected' WHERE id=? AND status='pending'",
+                 (pid,))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
 
 
 @app.get("/api/operator/earnings")
@@ -1085,14 +1254,25 @@ async def op_edit_restaurant(rid: int, req: Request, x_pin: str = Header(default
     body = await req.json()
     conn = db()
     fields, vals = [], []
-    for k in ("name", "cuisine", "emoji", "eta"):
+    for k in ("name", "cuisine", "emoji", "eta", "website"):
         if k in body:
             fields.append(f"{k}=?")
-            vals.append(str(body[k]).strip()[:20] if k == "eta" else str(body[k]).strip())
+            vals.append(str(body[k]).strip()[:20] if k == "eta" else str(body[k]).strip()[:500])
     for k in ("logo", "photo"):
         if k in body:
             fields.append(f"{k}=?")
             vals.append(str(body[k]).strip()[:500])
+    if "address" in body:
+        addr = str(body["address"]).strip()[:200]
+        fields.append("address=?")
+        vals.append(addr)
+        if addr:  # auto-pin the restaurant on the map
+            glat, glng = geocode(addr)
+            if glat:
+                fields.append("lat=?")
+                vals.append(glat)
+                fields.append("lng=?")
+                vals.append(glng)
     if "open" in body:
         fields.append("open=?")
         vals.append(1 if body["open"] else 0)
