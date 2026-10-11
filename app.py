@@ -8707,3 +8707,134 @@ def dpage():
 def termspage():
     with open(os.path.join(BASE, "static", "terms.html")) as f:
         return f.read()
+@app.get("/api/rides/mine")
+def my_rides(req: Request):
+    """Rides for the logged-in rider (matched by phone)."""
+    me = get_session_user(req)
+    if not me:
+        raise HTTPException(401, "Not logged in")
+    conn = db()
+    rides = conn.execute(
+        "SELECT * FROM rides WHERE rider_phone=? ORDER BY id DESC LIMIT 30",
+        (me.get("phone", ""),)).fetchall()
+    conn.close()
+    return {"rides": [dict(r) for r in rides]}
+
+
+@app.post("/api/rides/checkout")
+async def rides_checkout(req: Request):
+    """Create a ride and start Stripe payment. Returns Stripe URL."""
+    body = await req.json()
+    pickup = (body.get("pickup_address") or "").strip()
+    dropoff = (body.get("dropoff_address") or "").strip()
+    name = (body.get("customer_name") or "").strip()
+    phone = (body.get("phone") or "").strip()
+    notes = (body.get("notes") or "").strip()
+    tip = float(body.get("tip") or 0)
+
+    if not pickup or not dropoff:
+        raise HTTPException(400, "Pickup and dropoff required")
+    if not name or not phone:
+        raise HTTPException(400, "Name and phone required")
+
+    # fare calculation
+    p_lat = float(body.get("pickup_lat") or 0)
+    p_lng = float(body.get("pickup_lng") or 0)
+    d_lat = float(body.get("dropoff_lat") or 0)
+    d_lng = float(body.get("dropoff_lng") or 0)
+    if not p_lat:
+        p_lat, p_lng = geocode(pickup, {})
+    if not d_lat:
+        d_lat, d_lng = geocode(dropoff, {})
+
+    miles = driving_miles(p_lat, p_lng, d_lat, d_lng) if p_lat and d_lat else 0
+    base_fare = fin_setting("ride_base_fare", 4.99)
+    per_mile = fin_setting("ride_per_mile", 2.00)
+    gas_pct = fin_setting("ride_gas_pct", 10.0)
+    fare = round(base_fare + miles * per_mile, 2)
+    gas_fee = round(fare * gas_pct / 100, 2)
+    total = round(fare + gas_fee + tip, 2)
+    driver_pay = round(fare * 0.70 + tip, 2)
+    company_profit = round(total - driver_pay - gas_fee, 2)
+
+    # create the ride (unpaid until Stripe confirms)
+    now = datetime.now(timezone.utc).isoformat()
+    conn = db()
+    cur = conn.execute(
+        """INSERT INTO rides (rider_name, rider_phone, pickup_address, pickup_lat,
+           pickup_lng, dropoff_address, dropoff_lat, dropoff_lng, miles, fare,
+           tip, total, driver_pay, company_profit, notes, created_at, updated_at,
+           payment_status)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (name, phone, pickup, p_lat, p_lng, dropoff, d_lat, d_lng,
+         miles, fare, tip, total, driver_pay, company_profit, notes, now, now,
+         "pending"))
+    rid = cur.lastrowid
+    conn.commit()
+    conn.close()
+
+    if not STRIPE_LIVE:
+        return {"dev": True,
+                "pay_url": f"/api/rides/dev-pay/{rid}",
+                "note": "DEV MODE: no Stripe keys. Test payment only."}
+
+    base = str(req.base_url).rstrip("/")
+    line_items = [{
+        "price_data": {
+            "currency": "usd",
+            "product_data": {"name": f"Drop ride #{rid}: {pickup} → {dropoff}"},
+            "unit_amount": int(round(fare * 100)),
+        },
+        "quantity": 1,
+    }, {
+        "price_data": {
+            "currency": "usd",
+            "product_data": {"name": "Gas fund"},
+            "unit_amount": int(round(gas_fee * 100)),
+        },
+        "quantity": 1,
+    }]
+    if tip > 0:
+        line_items.append({
+            "price_data": {
+                "currency": "usd",
+                "product_data": {"name": "Tip for your driver"},
+                "unit_amount": int(round(tip * 100)),
+            },
+            "quantity": 1,
+        })
+
+    session = stripe.checkout.Session.create(
+        mode="payment",
+        line_items=line_items,
+        success_url=f"{base}/pay/success?session_id={{CHECKOUT_SESSION_ID}}",
+        cancel_url=f"{base}/rides.html?cancelled=1",
+        metadata={"drop_ride_id": str(rid)},
+    )
+    conn = db()
+    conn.execute("UPDATE rides SET stripe_payment_id=?, updated_at=? WHERE id=?",
+                 (session.id, now, rid))
+    conn.commit()
+    conn.close()
+    return {"url": session.url, "ride_id": rid}
+
+
+@app.post("/api/rides/dev-pay/{rid}")
+def ride_dev_pay(rid: int):
+    """DEV ONLY: simulate successful ride payment."""
+    if STRIPE_LIVE:
+        raise HTTPException(400, "Stripe is live; use real checkout")
+    conn = db()
+    r = conn.execute("SELECT * FROM rides WHERE id=?", (rid,)).fetchone()
+    if not r:
+        conn.close()
+        raise HTTPException(404, "Ride not found")
+    conn.execute("UPDATE rides SET payment_status='paid', status='requested',"
+                 " updated_at=? WHERE id=?", (now_iso(), rid))
+    conn.commit()
+    conn.close()
+    log_event("ride", f"💰 Ride #{rid} paid (dev)", "")
+    return {"ok": True, "ride_id": rid}
+
+
+# ---------------- Rides (passenger) quote ----------------
