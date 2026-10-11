@@ -9,153 +9,70 @@
 .rwcard::after{content:'D';position:absolute;right:8px;top:-24px;font-size:9rem;font-weight:900;opacity:.14}
 .rwcard .brand{font-weight:900;letter-spacing:2px;font-size:.8rem;opacity:.9}
 .rwcard h2{margin:6px 0 2px;font-size:1.4rem}
-.rwcard .dots{display:flex;gap:8px;margin:14px 0;flex-wrap:wrap}
-.rwcard .dot{width:30px;height:30px;border-radius:50%;border:2px solid rgba(255,255,255,.55);
-  display:flex;align-items:center;justify-content:center;font-size:.85rem;font-weight:800}
-.rwcard .dot.on{background:#fff;color:#e63900;border-color:#fff}
 .rwcard .sub{font-size:.85rem;opacity:.92}
+.bigbtn{display:block;text-align:center;padding:18px;border-radius:14px;text-decoration:none;font-weight:800;font-size:1.15rem;margin:12px 0}
+.ridebtn{background:var(--acc);color:#000}
+.drivebtn{background:#1a1a1e;color:#fff;border:1px solid var(--line)}
 </style>
 </head><body>
 <header class="topbar"><a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg" alt="Drop"><b>Drop</b></a>
-<a href="/" style="font-size:.85rem">← Order food</a></header>
+<a href="/" style="font-size:.85rem">← Home</a></header>
 <div style="max-width:560px;margin:20px auto;padding:0 16px" id="wrap"><p>Loading…</p></div>
 <script>
 const $=id=>document.getElementById(id);
-function driverCardHTML(){
-  return `<div class="card" style="border-left:4px solid #ff6a00">
-    <b>🚗 Drive for Drop?</b>
-    <p class="small">Approved drivers sign in to the <b>Driver Hub</b> with the 6-digit PIN emailed to you after approval.</p>
-    <div class="row"><input id="dpin" inputmode="numeric" maxlength="6" placeholder="••••••" style="flex:1;margin-right:6px;text-align:center;letter-spacing:6px">
-    <button class="btn small" id="dgo" style="width:auto">Driver sign-in →</button></div>
-    <p class="small" id="dmsg"></p>
-    <p class="small">🪪 To get approved you <b>must</b> submit a <b>valid driver's license</b> and <b>valid vehicle insurance</b>. <a href="/drive.html">Apply here →</a></p>
-  </div>`;
-}
-function wireDriverCard(){
-  const go=$('dgo'); if(!go) return;
-  go.onclick=async()=>{
-    const pin=$('dpin').value.trim();
-    if(pin.length!==6){$('dmsg').textContent='Enter your 6-digit driver PIN.';return;}
-    const r=await fetch('/api/drivers/pin-login',{method:'POST',
-      headers:{'Content-Type':'application/json'},body:JSON.stringify({pin})});
-    const j=await r.json();
-    if(!r.ok){$('dmsg').textContent=j.detail||'Invalid PIN — check the email we sent you.';return;}
-    try{localStorage.setItem('driver_pin',pin);}catch(e){}
-    location.href='/hub.html';
-  };
-}
 async function load(){
   const r=await fetch('/api/auth/me');
-  if(!r.ok){
-    // not a customer — still offer driver sign-in
-    $('wrap').innerHTML=`<h1>Drop Account</h1>
-      <p class="small"><a href="/login.html">Customer sign-in →</a></p>
-      <div style="margin-top:16px">${driverCardHTML()}</div>`;
-    wireDriverCard();
-    return;
-  }
-  const {user,rewards,orders}=await r.json();
-  const dots=Array.from({length:10},(_,i)=>
-    `<div class="dot ${i<rewards.punches?'on':''}">${i<rewards.punches?'✓':i+1}</div>`).join('');
-  const rwmsg=rewards.free_fee
-    ? '🎉 <b>FREE delivery</b> waiting for you — it applies automatically at checkout!'
-    : rewards.punches===0
-      ? 'Order 10 times, get your 11th delivery fee <b>free</b>.'
-      : `${10-rewards.punches} more ${10-rewards.punches===1?'delivery':'deliveries'} for a <b>FREE</b> delivery fee!`;
+  if(!r.ok){location.href='/login.html';return;}
+  const {user}=await r.json();
+  // check if they're also a driver
+  let isDriver=false;
+  try{
+    const d=await(await fetch('/api/drivers/me')).json();
+    isDriver=!!d.driver;
+  }catch(e){}
   $('wrap').innerHTML=`
     <h1>Hey, ${user.name.split(' ')[0]} 👋</h1>
-    ${driverCardHTML()}
     <div class="rwcard">
-      <div class="brand">DROP REWARDS</div>
+      <div class="brand">DROP RIDER</div>
       <h2>${user.name}</h2>
       <div class="sub">${user.phone.replace(/(\d{3})(\d{3})(\d{4})/,'($1) $2-$3')}</div>
-      <div class="dots">${dots}</div>
-      <div class="sub">${rwmsg}</div>
+      <div class="sub" style="margin-top:8px">Bismarck & Mandan's rideshare 🚗</div>
     </div>
-    <h2>Order history</h2>
-    <div id="hist">${orders.map(o=>`
-      <a class="card" href="/track.html?id=${o.id}" style="display:block;text-decoration:none;color:inherit">
-        <div class="row"><b>#${o.id} · ${o.restaurant_name||'Drop'}</b><b>$${o.total.toFixed(2)}</b></div>
-        <span class="small">${new Date(o.created_at).toLocaleDateString()} · ${o.status.replace(/_/g,' ')}</span>
-      </a>`).join('')||'<p class="small">No orders yet — <a href="/">fix that 🧡</a></p>'}</div>
-    <h2>💸 Referrals — give $5, get $5</h2>
-    <div class="card" id="refcard"><p class="small">Loading…</p></div>
+    <a href="/rides.html" class="bigbtn ridebtn">🚗 Catch a ride</a>
+    ${isDriver
+      ? `<a href="/driver.html" class="bigbtn drivebtn">👨‍✈️ Open driver portal</a>`
+      : `<a href="/drive.html" class="bigbtn drivebtn">💰 Become a Drop driver</a>
+         <p class="small" style="text-align:center">Earn money driving in Bismarck & Mandan.<br>Valid license + insurance + photos — that's the application.</p>`}
+    <h2>🧾 My rides</h2>
+    <div id="hist"><p class="small">Loading…</p></div>
     <h2>🔔 Push notifications</h2>
     <div class="card">
-      <p class="small">Get order updates on your phone (confirmed → picked up → on the way → delivered).</p>
+      <p class="small">Get ride updates on your phone (driver assigned → arriving → in progress → completed).</p>
       <div class="row"><input id="ntfy" placeholder="your-secret-topic" style="flex:1;margin-right:6px">
       <button class="btn small" id="ntfysave" style="width:auto">Save</button></div>
       <p class="small">1. Install the <b>ntfy</b> app (free) &nbsp;2. Subscribe to a secret topic &nbsp;3. Paste it here</p>
       <p class="small" id="ntfymsg"></p></div>
-    <button class="btn ghost" id="logout" style="margin-top:14px">Log out</button>
-    <button class="btn small" id="delacct" style="background:#e74c3c;margin-top:8px">🗑️ Delete my account</button>
-    <h2 style="margin-top:20px">💳 Saved cards</h2>
-    <div id="cards"></div>`;
+    <button class="btn ghost" id="logout" style="margin-top:14px">Log out</button>`;
   $('logout').onclick=async()=>{await fetch('/api/auth/logout',{method:'POST'});location.href='/';};
-  wireDriverCard();
-  loadCards();
-  $('delacct').onclick=async()=>{
-    if(!confirm('⚠️ Delete your account? This removes your profile, login, rewards, and saved cards.')) return;
-    if(!confirm('Really delete? This cannot be undone.')) return;
-    const pw = prompt('Enter your password to confirm deletion:');
-    if(!pw) return;
-    const v=await fetch('/api/auth/verify',{method:'POST',
-      headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pw})});
-    if(!v.ok){ alert('Wrong password — account NOT deleted.'); return; }
-    const r=await fetch('/api/user/account',{method:'DELETE'});
-    const j=await r.json().catch(()=>({}));
-    if(r.ok && j.ok){
-      alert('Account deleted.');
-      try{localStorage.removeItem('drop_phone');}catch(e){}
-      location.href='/';
-    }
-    else alert('Delete failed: '+(j.detail||'please try again'));
-  };
-  loadReferral(); loadNtfy();
-}
-async function loadCards(){
-  const phone = localStorage.getItem('drop_phone')||'';
-  if(!phone) return;
+  // load ride history
   try{
-    const cards = await(await fetch(`/api/user/cards?phone=${encodeURIComponent(phone)}`)).json();
-    document.getElementById('cards').innerHTML = cards.map(c=>
-      `<div class="card small">💳 •••• ${c.last4} <span class="small">${c.brand||''}</span></div>`).join('')
-      || '<p class="small">No saved cards.</p>';
-  }catch(e){}
-}
-
-async function loadReferral(){
-  const r=await fetch('/api/referral/code');
-  if(!r.ok)return;
-  const j=await r.json();
-  $('refcard').innerHTML=`
-    <p>Your code: <b style="font-size:1.2rem">${j.code}</b></p>
-    <p class="small">Share this link — friends get <b>$5 off</b> their first order, you get <b>$5 credit</b> when they order.</p>
-    <div class="row"><input id="reflink" readonly value="${j.link}" style="flex:1;margin-right:6px">
-      <button class="btn small" style="width:auto" onclick="navigator.clipboard.writeText('${j.link}');this.textContent='✅ Copied'">Copy</button></div>
-    <p class="small">👥 ${j.referrals} friend${j.referrals===1?'':'s'} joined · 💰 $${j.credit.toFixed(2)} credit</p>
-    ${j.referrals===0?`<div class="row"><input id="refapply" placeholder="Have a friend's code? Enter it" style="flex:1;margin-right:6px">
-      <button class="btn small" id="refgo" style="width:auto">Apply</button></div><p class="small" id="refmsg"></p>`:''}`;
-  const go=$('refgo');
-  if(go)go.onclick=async()=>{
-    const r2=await fetch('/api/referral/apply',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({code:$('refapply').value})});
-    const j2=await r2.json();
-    $('refmsg').textContent=r2.ok?'🎉 $5 credit added!':'Error: '+(j2.detail||'failed');
-    if(r2.ok)loadReferral();
-  };
-}
-async function loadNtfy(){
-  const r=await fetch('/api/auth/me');
-  const j=await r.json();
-  if(j.user.ntfy_topic)$('ntfy').value=j.user.ntfy_topic;
+    const rh=await(await fetch('/api/rides/mine')).json();
+    $('hist').innerHTML=rh.rides.map(r=>`
+      <div class="card" style="margin:8px 0">
+        <div class="row"><b>🚗 Ride #${r.id}</b><b>$${r.total.toFixed(2)}</b></div>
+        <span class="small">📍 ${r.pickup_address}</span><br>
+        <span class="small">🏠 ${r.dropoff_address}</span><br>
+        <span class="small">${new Date(r.created_at).toLocaleDateString()} · ${r.status.replace(/_/g,' ')}${r.driver_name?' · Driver: '+r.driver_name:''}</span>
+      </div>`).join('')||'<p class="small">No rides yet — <a href="/rides.html">catch your first ride 🚗</a></p>';
+  }catch(e){$('hist').innerHTML='<p class="small">No rides yet.</p>';}
+  // ntfy
   $('ntfysave').onclick=async()=>{
     const t=$('ntfy').value.trim();
-    const r2=await fetch('/api/account/ntfy',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({topic:t})});
-    $('ntfymsg').textContent=r2.ok?'✅ Saved! You\'ll get order updates.':'Failed.';
+    if(!t){$('ntfymsg').textContent='Enter a topic first.';return;}
+    const r=await(await fetch('/api/account/ntfy',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({topic:t})})).json();
+    $('ntfymsg').textContent=r.ok?'✅ Saved!':'❌ Failed';
   };
 }
 load();
 </script>
-<script src="/static/chat.js"></script></body></html>
+</body></html>
