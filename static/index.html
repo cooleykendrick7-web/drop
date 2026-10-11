@@ -1,252 +1,186 @@
 <!DOCTYPE html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Drop — Food Pickup & Delivery Anywhere | Faster Than DoorDash</title>
-<meta name="description" content="You order from the restaurant, we pick it up and drop it at your door. One pickup + delivery fee, one local driver, real-time tracking.">
-<meta property="og:title" content="Drop — Food Delivery">
-<meta property="og:description" content="You order, we pick it up, dropped at your door.">
+<title>Drop — Your Ride in Bismarck & Mandan</title>
+<meta name="description" content="Drop is Bismarck-Mandan's rideshare. Enter pickup + dropoff, see your exact fare, pay on the site, track your driver live.">
+<meta property="og:title" content="Drop — Your Ride in Bismarck & Mandan">
 <meta property="og:image" content="/static/logo.jpg">
 <link rel="icon" href="/static/logo-mark.jpg">
 <link rel="stylesheet" href="/static/styles.css">
+<style>
+.hero{text-align:center;padding:40px 20px;background:linear-gradient(135deg,#1a0f00,#0a0a0c);border-radius:20px;margin:16px 0}
+.hero h1{font-size:2.2rem;margin:0 0 8px}
+.hero .hl{color:var(--acc)}
+.farebox{background:#141416;border:1px solid var(--line);border-radius:16px;padding:20px;margin:16px 0}
+.farebox label{display:block;font-size:.85rem;font-weight:700;margin:10px 0 4px;color:#aaa}
+.farebox input{width:100%;padding:12px;border-radius:10px;border:1px solid var(--line);background:#0a0a0c;color:#fff;font-size:1rem;box-sizing:border-box}
+.addr-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.addr-grid .full{grid-column:1/-1}
+#fareout{margin-top:16px}
+.fare-result{background:linear-gradient(135deg,#1a2a00,#0a0a0c);border:2px solid #4ade80;border-radius:16px;padding:20px;text-align:center}
+.fare-result .price{font-size:2.5rem;font-weight:900;color:#4ade80}
+.steps{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin:20px 0}
+.step{text-align:center;padding:16px;background:#141416;border-radius:12px}
+.step .n{font-size:2rem;margin-bottom:8px}
+.cta-row{display:flex;gap:12px;margin:20px 0}
+.cta-row a{flex:1;text-align:center;padding:16px;border-radius:12px;text-decoration:none;font-weight:800;font-size:1.1rem}
+.rider-cta{background:var(--acc);color:#000}
+.driver-cta{background:#1a1a1e;color:#fff;border:1px solid var(--line)}
+#dropper{position:fixed;bottom:20px;right:20px;width:60px;height:60px;border-radius:50%;background:var(--acc);display:flex;align-items:center;justify-content:center;font-size:1.8rem;cursor:pointer;z-index:99;box-shadow:0 4px 20px rgba(0,0,0,.5)}
+#dropper-chat{position:fixed;bottom:90px;right:20px;width:min(90vw,340px);max-height:60vh;background:#141416;border:1px solid var(--line);border-radius:16px;display:none;flex-direction:column;z-index:99;overflow:hidden}
+#dropper-chat.open{display:flex}
+#dropper-msgs{flex:1;overflow-y:auto;padding:12px;max-height:40vh}
+#dropper-input{display:flex;gap:8px;padding:10px;border-top:1px solid var(--line)}
+#dropper-input input{flex:1;padding:10px;border-radius:8px;border:1px solid var(--line);background:#0a0a0c;color:#fff}
+.msg{margin:6px 0;padding:8px 12px;border-radius:12px;max-width:85%;font-size:.9rem}
+.msg.bot{background:#1c1c22;align-self:flex-start}
+.msg.user{background:var(--acc);color:#000;align-self:flex-end;margin-left:auto}
+</style>
 </head><body>
+
 <header class="topbar">
-  <a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg" alt="Drop"><b>Drop</b><span class="tag" id="headcity" style="display:none"></span></a>
-  <a href="/rides.html" style="color:#d4af37;text-decoration:none;font-weight:700;font-size:.9rem">🚗 Rides</a>
+  <a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg" alt="Drop"><b>Drop</b></a>
   <a class="acct" href="/account.html">👤 Account</a>
 </header>
 
 <div class="hero">
-  <div class="orb o1" aria-hidden="true"></div>
-  <div class="orb o2" aria-hidden="true"></div>
-  <img class="logo-full" src="/static/logo.jpg" alt="Drop — Pick up. Deliver. Done.">
-  <h1>Your favorite food,<br><span class="hl">dropped at your door.</span></h1>
-  <p class="tagline" id="tagline">We drop it at your door.</p>
-  <div style="max-width:340px;margin:0 auto 14px">
-    <input id="search" placeholder="🔍 Search restaurants or cities…" style="width:100%;padding:12px 16px;border-radius:24px;border:2px solid var(--acc);font-size:1rem;text-align:center">
-  </div>
-  <a class="cta" href="#restaurants">🍽️ Pick a spot for pickup</a>
-  <div class="card" style="max-width:340px;margin:16px auto;text-align:center;border:2px solid var(--acc)">
-    <div style="font-size:2rem">📦</div>
-    <h3 style="margin:8px 0">Need anything picked up?</h3>
-    <p class="small">Already ordered food? Packages, anything. We pick it up and bring it to you. Works in every city.</p>
-    <a href="/drop.html" class="btn" style="margin-top:8px">Request a Drop →</a>
-  </div>
-  <div class="trust">
-    <span class="pill">🔒 Secure checkout</span>
-    <span class="pill">🛵 <b id="feepill">$3.99</b> delivery</span>
-    <span class="pill">📍 <span id="zonepill">Locating you…</span></span>
-  </div>
-  <div id="openstat" class="small" style="margin-top:10px"></div>
+  <h1>Welcome to Drop.<br><span class="hl">Choose your destination today.</span></h1>
+  <p class="tagline">Bismarck & Mandan's rideshare. Real drivers, upfront pricing, live tracking.</p>
 </div>
 
-<div id="dev"></div>
+<div class="farebox">
+  <h2 style="margin-top:0">💰 Ride fare calculator</h2>
+  <p class="small">Enter where you're going — see your exact price before you ride.</p>
 
-<a href="/courier.html" style="text-decoration:none"><div class="card" style="background:linear-gradient(135deg,#1a0f00,#2a1a05);border:1px solid var(--acc);margin:18px 0">
-  <div class="row"><div><b style="font-size:1.2rem">📦 Drop <span style="color:var(--acc)">More</span></b><br>
-  <span class="small">Auto parts · Clothing · Supplies · Documents — we pick it up, we drop it off. Tap to request a pickup →</span></div></div>
-</div></a>
+  <div style="border:1px solid var(--line);border-radius:10px;padding:12px;margin:8px 0">
+    <b class="small">📍 PICKUP — where are you?</b>
+    <div class="addr-grid" style="margin-top:8px">
+      <div class="full"><label>Street address *</label><input id="f-pickup-street" placeholder="123 Main St"></div>
+      <div><label>Apt / Unit <span class="small">(optional)</span></label><input id="f-pickup-apt" placeholder="Apt 4B"></div>
+      <div><label>City *</label><input id="f-pickup-city" placeholder="Bismarck" value="Bismarck"></div>
+      <div><label>State *</label><input id="f-pickup-state" placeholder="ND" maxlength="2" value="ND" style="text-transform:uppercase"></div>
+      <div><label>ZIP</label><input id="f-pickup-zip" placeholder="58501" inputmode="numeric"></div>
+    </div>
+  </div>
 
-<a href="/rides.html" style="text-decoration:none"><div class="card" style="background:linear-gradient(135deg,#0d0d10,#1a1405);border:1px solid #d4af37;margin:18px 0;text-align:center">
-  <div style="font-size:.7rem;letter-spacing:3px;color:#d4af37">DROP&nbsp;RIDES</div>
-  <div style="font-size:1.4rem;margin:6px 0">🚗 <b>Coming soon</b></div>
-  <div class="small" id="rides-cd" style="color:#d4af37">Launching in …</div>
-  <div class="small" style="margin-top:6px">Your ride, your way — upfront pricing, no surge games. Tap to see fares →</div>
-</div></a>
+  <div style="border:1px solid var(--line);border-radius:10px;padding:12px;margin:8px 0">
+    <b class="small">🏠 DROPOFF — where to?</b>
+    <div class="addr-grid" style="margin-top:8px">
+      <div class="full"><label>Street address *</label><input id="f-drop-street" placeholder="456 Oak Ave"></div>
+      <div><label>Apt / Unit <span class="small">(optional)</span></label><input id="f-drop-apt" placeholder="Suite 200"></div>
+      <div><label>City *</label><input id="f-drop-city" placeholder="Mandan" value="Mandan"></div>
+      <div><label>State *</label><input id="f-drop-state" placeholder="ND" maxlength="2" value="ND" style="text-transform:uppercase"></div>
+      <div><label>ZIP</label><input id="f-drop-zip" placeholder="58554" inputmode="numeric"></div>
+    </div>
+  </div>
 
-<div class="section-title" id="restaurants">
-  <h2>Pick a spot — we'll grab your order</h2><span id="count"></span>
+  <button class="btn" id="calc-fare" style="width:100%;margin-top:12px">Calculate my fare →</button>
+  <div id="fareout"></div>
 </div>
-<div id="list"></div>
 
-<div class="card" id="suggest" style="text-align:center;margin-top:18px">
-  <h3>📍 Know a spot we're missing?</h3>
-  <p class="small">Tell us and we'll reach out to them.</p>
-  <div class="row"><input id="spotname" placeholder="Restaurant name" style="flex:1;margin-right:6px">
-  <input id="spotcity" placeholder="City" style="flex:1"></div>
-  <button class="btn" id="spotsend" style="margin-top:8px">Suggest it</button>
-  <p class="small" id="spotmsg"></p>
+<div class="steps">
+  <div class="step"><div class="n">📍</div><b>Enter trip</b><br><span class="small">Pickup + dropoff</span></div>
+  <div class="step"><div class="n">💳</div><b>Pay upfront</b><br><span class="small">Secure checkout</span></div>
+  <div class="step"><div class="n">🚗</div><b>Track live</b><br><span class="small">Watch your driver</span></div>
 </div>
+
+<div class="cta-row">
+  <a href="/account.html?mode=rider" class="rider-cta">🧍 Ride with Drop</a>
+  <a href="/drive.html" class="driver-cta">🚗 Drive for Drop</a>
+</div>
+
+<div class="card">
+  <b>📍 Serving Bismarck & Mandan, ND</b>
+  <p class="small">Local drivers. Upfront prices. No surge nonsense.</p>
+  <div style="margin-top:8px"><a href="/rides.html">🚗 Book a ride</a> · <a href="/drive.html">🚗 Drive for Drop</a> · <a href="/investors.html">💰 Investors</a> · <a href="/terms">Terms</a></div>
+</div>
+
+<!-- Dropper AI assistant -->
+<div id="dropper" title="Chat with Dropper">🤖</div>
+<div id="dropper-chat">
+  <div style="padding:12px;border-bottom:1px solid var(--line);font-weight:800">🤖 Dropper <span class="small" style="font-weight:400">— here to help!</span></div>
+  <div id="dropper-msgs"></div>
+  <div id="dropper-input">
+    <input id="dropper-text" placeholder="Ask me anything…">
+    <button class="btn small" id="dropper-send" style="width:auto">Send</button>
+  </div>
+</div>
+
 <script>
-document.getElementById('spotsend').onclick=async()=>{
-  const n=document.getElementById('spotname').value.trim();
-  if(!n){document.getElementById('spotmsg').textContent='Give us a name first!';return;}
-  await fetch('/api/spot/suggest',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({name:n,city:document.getElementById('spotcity').value.trim()})});
-  document.getElementById('spotmsg').textContent='Thanks! We\'ll check them out. 🧡';
-  document.getElementById('spotname').value='';
+const $=id=>document.getElementById(id);
+
+function buildAddr(p){
+  const s=$(p+'street').value.trim(), a=$(p+'apt').value.trim();
+  const c=$(p+'city').value.trim(), st=$(p+'state').value.trim().toUpperCase();
+  const z=$(p+'zip').value.trim();
+  if(!s||!c||!st) return null;
+  let out=s;
+  if(a) out+=', '+a;
+  out+=`, ${c}, ${st}`;
+  if(z) out+=' '+z;
+  return out;
+}
+
+$('calc-fare').onclick=async()=>{
+  const from=buildAddr('f-pickup-'), to=buildAddr('f-drop-');
+  const out=$('fareout');
+  if(!from||!to){out.innerHTML='<p class="small" style="color:#f66">Fill in street, city, and state for both pickup and dropoff.</p>';return;}
+  out.innerHTML='<p class="small">Calculating your fare…</p>';
+  try{
+    const r=await(await fetch(`/api/rides/quote?pickup_address=${encodeURIComponent(from)}&dropoff_address=${encodeURIComponent(to)}`)).json();
+    if(r.detail){out.innerHTML=`<p class="small" style="color:#f66">${r.detail}</p>`;return;}
+    out.innerHTML=`<div class="fare-result">
+      <div class="price">$${r.total.toFixed(2)}</div>
+      <div class="small">${r.miles} miles · Base $${r.base_fare.toFixed(2)} + $${r.mileage_charge.toFixed(2)} mileage</div>
+      <a class="btn" href="/rides.html" style="margin-top:12px;text-decoration:none;display:block">Book this ride →</a>
+    </div>`;
+  }catch(e){out.innerHTML='<p class="small" style="color:#f66">Could not calculate. Check your connection.</p>';}
 };
+
+// Dropper AI assistant
+const dchat=$('dropper-chat'), dmsgs=$('dropper-msgs');
+$('dropper').onclick=()=>{
+  dchat.classList.toggle('open');
+  if(dchat.classList.contains('open')&&!dmsgs.children.length){
+    botSay("Hey! I'm Dropper 🤖 — I can help you sign up as a rider, book a ride, or apply to drive. What do you need?");
+  }
+};
+function botSay(t){
+  const d=document.createElement('div');d.className='msg bot';d.textContent=t;dmsgs.appendChild(d);
+  dmsgs.scrollTop=dmsgs.scrollHeight;
+}
+function userSay(t){
+  const d=document.createElement('div');d.className='msg user';d.textContent=t;dmsgs.appendChild(d);
+  dmsgs.scrollTop=dmsgs.scrollHeight;
+}
+async function dropperReply(q){
+  const l=q.toLowerCase();
+  if(l.includes('sign')||l.includes('rider')||l.includes('account')){
+    return "To ride with Drop: tap '🧍 Ride with Drop' above, enter your name and phone, and you're set! Then use the fare calculator to book your first trip.";
+  }
+  if(l.includes('drive')||l.includes('driver')||l.includes('job')||l.includes('apply')){
+    return "To drive for Drop: tap '🚗 Drive for Drop'. You'll need a valid driver's license, proof of insurance, a photo of yourself, and a photo of your car. We review every application personally.";
+  }
+  if(l.includes('price')||l.includes('cost')||l.includes('fare')||l.includes('much')){
+    return "Fares are simple: $4.99 base + $2.00 per mile. Use the calculator above to see your exact price before you book — no surprises!";
+  }
+  if(l.includes('where')||l.includes('area')||l.includes('city')){
+    return "We serve Bismarck and Mandan, North Dakota. More cities coming soon!";
+  }
+  // fallback to server AI
+  try{
+    const r=await(await fetch('/api/dropper',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({q})})).json();
+    return r.answer||"I'm still learning! Try asking about signing up, driving, or fares.";
+  }catch(e){return "I'm still learning! Try asking about signing up, driving, or fares.";}
+}
+$('dropper-send').onclick=async()=>{
+  const t=$('dropper-text').value.trim();
+  if(!t)return;
+  userSay(t);$('dropper-text').value='';
+  botSay('…');
+  const dots=dmsgs.lastChild;
+  const ans=await dropperReply(t);
+  dots.textContent=ans;dmsgs.scrollTop=dmsgs.scrollHeight;
+};
+$('dropper-text').addEventListener('keypress',e=>{if(e.key==='Enter')$('dropper-send').click();});
 </script>
-
-<div class="section-title" style="margin-top:34px">
-  <h2>Why everyone loves Drop</h2>
-</div>
-<div class="card" style="padding:0;overflow:hidden">
-  <video src="/static/promo-commercial.mp4" controls playsinline preload="metadata"
-    style="width:100%;display:block;aspect-ratio:16/9;background:#000"></video>
-</div>
-<div class="promo-grid">
-  <img src="/static/promo-doorstep.webp" alt="Drop driver delivering to a happy customer">
-  <img src="/static/promo-family.webp" alt="Happy family enjoying Drop delivery">
-  <img src="/static/promo-kids.webp" alt="Kids excited for their Drop delivery">
-  <img src="/static/promo-driver.webp" alt="Drop driver on the way">
-</div>
-<p class="small" style="text-align:center;margin-top:10px">Real driver. Real fast. Real fresh. 🧡</p>
-
-<footer>
-  <div class="motto"><a class="secret" href="/dash">PICK UP &nbsp;•&nbsp; DELIVER &nbsp;•&nbsp; DONE</a></div>
-  <div>Drop — Bismarck, North Dakota</div>
-  <div style="margin-top:8px">📧 <a href="mailto:wearedropservicesllc@gmail.com">wearedropservicesllc@gmail.com</a><br>📞 <a href="tel:+12629777869">(262) 977-7869</a></div>
-  <div style="margin-top:8px"><a href="/courier.html">📦 Drop More</a> · <a href="/partner.html">🤝 Partner With Us</a> · <a href="/drive.html">🚗 Drive for Drop</a> · <a href="/investors.html">💰 Investors</a> · <a href="/terms">Terms & refund policy</a></div>
-</footer>
-
-<script src="/static/chat.js"></script>
-<script>
-if(!sessionStorage.getItem('dropv')){sessionStorage.setItem('dropv','1');
-fetch('/api/visit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({page:'home'})});}
-async function load(){
-  // Simple: load config + all restaurants, enable search
-  try{
-    const cfg = await (await fetch('/api/config')).json();
-    if(cfg.tagline) document.getElementById('tagline').textContent = cfg.tagline;
-    if(cfg.delivery_fee) document.getElementById('feepill').textContent = '$'+Number(cfg.delivery_fee).toFixed(2);
-  }catch(e){}
-  let allR = [];
-  try{
-    allR = await (await fetch('/api/restaurants')).json();
-  }catch(e){}
-  window._allR = allR;
-  try{
-    const cities = new Set(allR.map(x=>((x.city||'')+', '+(x.state||'')).toLowerCase()));
-    cities.delete(', ');
-    document.getElementById('zonepill').textContent = '📍 ' + cities.size + ' cities';
-  }catch(e){}
-  renderRestaurants('');
-  // Search box
-  const si = document.getElementById('search');
-  if(si){
-    si.addEventListener('input', ()=> handleSearch(si.value.trim()));
-  }
-}
-/* Never-empty search: if our DB has nothing, pull REAL live spots from
-   OpenStreetMap so there's always something to tap. */
-const STATES={AL:'Alabama',AK:'Alaska',AZ:'Arizona',AR:'Arkansas',CA:'California',CO:'Colorado',CT:'Connecticut',DE:'Delaware',DC:'District of Columbia',FL:'Florida',GA:'Georgia',HI:'Hawaii',ID:'Idaho',IL:'Illinois',IN:'Indiana',IA:'Iowa',KS:'Kansas',KY:'Kentucky',LA:'Louisiana',ME:'Maine',MD:'Maryland',MA:'Massachusetts',MI:'Michigan',MN:'Minnesota',MS:'Mississippi',MO:'Missouri',MT:'Montana',NE:'Nebraska',NV:'Nevada',NH:'New Hampshire',NJ:'New Jersey',NM:'New Mexico',NY:'New York',NC:'North Carolina',ND:'North Dakota',OH:'Ohio',OK:'Oklahoma',OR:'Oregon',PA:'Pennsylvania',RI:'Rhode Island',SC:'South Carolina',SD:'South Dakota',TN:'Tennessee',TX:'Texas',UT:'Utah',VT:'Vermont',VA:'Virginia',WA:'Washington',WV:'West Virginia',WI:'Wisconsin',WY:'Wyoming'};
-function parsePlace(q){
-  let city=null, st=null;
-  const title=s=>s.replace(/\w\S*/g,w=>w.charAt(0).toUpperCase()+w.slice(1).toLowerCase());
-  const cm = q.match(/^(.*?),\s*([a-zA-Z .]+)$/);
-  if(cm){ city=title(cm[1].trim()); st=cm[2].trim(); }
-  else{
-    const words=q.trim().split(/\s+/);
-    if(words.length<2) return null;
-    const title=s=>s.replace(/\w\S*/g,w=>w.charAt(0).toUpperCase()+w.slice(1).toLowerCase());
-    // try two-word state name first ("New York", "North Carolina"…), then one word
-    const two=words.slice(-2).join(' ').toLowerCase();
-    let found=null;
-    for(const [a,name] of Object.entries(STATES)){
-      if(name.toLowerCase()===two){ found={a, n:2}; break; }
-    }
-    if(!found){
-      const lastUp=words[words.length-1].toUpperCase();
-      const lastLo=words[words.length-1].toLowerCase();
-      if(STATES[lastUp]) found={a:lastUp, n:1};
-      else for(const [a,name] of Object.entries(STATES)){
-        if(name.toLowerCase()===lastLo){ found={a, n:1}; break; }
-      }
-    }
-    if(!found) return null;
-    st=found.a; city=title(words.slice(0,-found.n).join(' '));
-  }
-  const up=(st||'').toUpperCase();
-  if(STATES[up]) st=up;
-  else{
-    for(const [a,name] of Object.entries(STATES)){
-      if(name.toLowerCase()===(st||'').toLowerCase()){ st=a; break; }
-    }
-  }
-  if(!STATES[st]||!city) return null;
-  return {city, state:st};
-}
-const esc = s => (s||'').replace(/</g,'&lt;');
-let liveTimer=null, liveSeq=0;
-function handleSearch(q){
-  renderRestaurants(q);
-  clearTimeout(liveTimer);
-  const local = (window._allR||[]).filter(x=>matchesSearch(x,q));
-  if(local.length>0 || !q) return;  // we have results — no fallback needed
-  liveTimer=setTimeout(async ()=>{
-    const seq=++liveSeq;
-    const place=parsePlace(q);
-    const listEl=document.getElementById('list'), countEl=document.getElementById('count');
-    if(!place){
-      countEl.textContent='No exact matches';
-      listEl.innerHTML=`<div class="card" style="text-align:center;padding:28px 16px">
-        <div style="font-size:2.5rem">🔎</div>
-        <h3>Nothing in our book for "${esc(q)}"</h3>
-        <p class="small">Try a city + state, like <b>"Austin TX"</b> or <b>"Miami, FL"</b> — we'll pull live spots for anywhere in the US.<br><br>Or skip the search: <a href="/drop.html"><b>request any pickup →</b></a> and we'll go get it.</p>
-      </div>`;
-      return;
-    }
-    countEl.textContent=`🔎 Checking live spots in ${esc(place.city)}…`;
-    try{
-      const live=await (await fetch(`/api/live-restaurants?city=${encodeURIComponent(place.city)}&state=${place.state}`)).json();
-      if(seq!==liveSeq) return;  // user kept typing — drop stale result
-      if(live && live.length){
-        countEl.textContent=`${live.length} live spots in ${esc(place.city)}, ${place.state}`;
-        listEl.innerHTML=`<p class="small" style="text-align:center">🌐 Live results — tap any spot and we'll go pick it up for you.</p>`+live.map(p=>`
-          <a class="card rest" href="/drop.html?pickup=${encodeURIComponent(p.name)}&addr=${encodeURIComponent((p.address? p.address+', ':'')+place.city+', '+place.state)}">
-            <div class="rbody">
-              <div class="emoji">🍽️</div>
-              <div class="meta"><b>${esc(p.name)}</b><span>${esc(p.address||'')}${esc(p.address)?' · ':''}${esc(place.city)}, ${place.state}${p.cuisine&&p.cuisine!=='Restaurant'?' · '+esc(p.cuisine):''}</span><span class="fee">📦 Tap to request pickup →</span></div>
-            </div>
-          </a>`).join('');
-      }else{
-        countEl.textContent=`No spots found in ${esc(place.city)}`;
-        listEl.innerHTML=`<div class="card" style="text-align:center;padding:28px 16px">
-          <div style="font-size:2.5rem">📦</div>
-          <h3>We couldn't find spots in ${esc(place.city)} yet</h3>
-          <p class="small">But we can still go there. <a href="/drop.html"><b>Request any pickup →</b></a> — tell us the restaurant and address, we'll handle it.</p>
-        </div>`;
-      }
-    }catch(e){
-      if(seq!==liveSeq) return;
-      countEl.textContent='Search hiccup — try again';
-    }
-  }, 700);
-}
-/* Google-like search: every word you type must appear somewhere in
-   the name, cuisine, city or state. "nashville tn", "Nashville, TN",
-   "pizza", "tacos dallas" all work. */
-function matchesSearch(x, q){
-  const words = (q||'').toLowerCase().replace(/,/g,' ').split(/\s+/).filter(Boolean);
-  if(!words.length) return true;
-  const hay = ((x.name||'')+' '+(x.cuisine||'')+' '+(x.city||'')+' '+(x.state||'')).toLowerCase();
-  return words.every(w => hay.includes(w));
-}
-function renderRestaurants(q){
-  const allR = window._allR || [];
-  const fee = 3.99;
-  const r = allR.filter(x => matchesSearch(x, q));
-  document.getElementById('count').textContent = r.length + (q ? ` results for "${q}"` : ' restaurants');
-  document.getElementById('list').innerHTML = r.slice(0, 60).map(x=>`
-    <a class="card rest" href="/restaurant.html?id=${x.id}">
-      <div class="rbody">
-      ${(x.logo||x.photo)?`<img class="rlogo" src="${x.logo||x.photo}" alt="" loading="lazy">`:`<div class="emoji">${x.emoji||'🍽️'}</div>`}
-      <div class="meta"><b>${(x.name||'').replace(/</g,'&lt;')}</b><span>${(x.cuisine||'').replace(/</g,'&lt;')} · ${(x.city||'').replace(/</g,'&lt;')}, ${x.state||''}</span><span class="fee">🛵 Pickup from $'+fee.toFixed(2)+'</span></div>
-      <span class="badge ${x.open?'open':'closed'}">${x.open?'OPEN':'CLOSED'}</span>
-      </div>
-    </a>`).join('') || '<p>No restaurants found. Try a different search.</p>';
-}
-load();
-(function(){
-  const LAUNCH=new Date('2026-10-13T10:00:00-05:00').getTime();
-  const el=document.getElementById('rides-cd');
-  if(!el)return;
-  function t(){
-    const d=LAUNCH-Date.now();
-    if(d<=0){el.textContent='🚗 LIVE NOW — book your ride';return;}
-    const dd=Math.floor(d/86400000),hh=Math.floor(d%86400000/3600000),mm=Math.floor(d%3600000/60000);
-    el.textContent=`Launching in ${dd}d ${hh}h ${mm}m`;
-  }
-  setInterval(t,30000);t();
-})();
-</script><script src="/static/drop-live.js"></script>
 </body></html>

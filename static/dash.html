@@ -37,7 +37,6 @@
     <button data-t="money">💰 Money</button>
     <button data-t="drv">👥 Drivers <span id="drvbadge"></span></button>
     <button data-t="growth">📈 Growth <span id="growthbadge"></span></button>
-    <button data-t="menu">🍔 Menu <span id="updbadge"></span></button>
     <button data-t="sup">💬 Support <span id="tixbadge"></span></button>
     <button data-t="insights">📊 Insights</button>
     <button data-t="live">⚡ Live</button>
@@ -180,24 +179,7 @@
 
   
 
-  <div class="tab" id="t-menu">
-    <div class="subtabs">
-      <button class="on" data-s="mn-rest">Restaurants</button>
-      <button data-s="mn-upd">🤖 AI Updates</button>
-    </div>
-    <div class="subtab on" id="s-mn-rest">
-<div id="rlist"></div>
-    <div class="card"><h3>Add restaurant</h3>
-      <input id="nname" placeholder="Name"><input id="ncuisine" placeholder="Cuisine">
-      <input id="nemoji" placeholder="Emoji (e.g. 🍔)">
-      <button class="btn" id="addrest">Add</button></div>
-    </div>
-    <div class="subtab" id="s-mn-upd">
-<div class="card"><b>🤖 AI menu watchdog</b>
-      <p class="small">Once a week the AI checks every restaurant's menu online. When it spots a changed price, new item, or removed item, it lands here. Nothing changes on your menu until you tap <b>Approve</b>.</p></div>
-    <div id="updlist"><p class="small">Loading…</p></div>
-    </div>
-  </div>
+  
 
 <div class="tab" id="t-sup">
     <div id="tixlist"></div>
@@ -271,8 +253,7 @@
       <p class="small">How many active orders you juggle at once. Hit the cap and the site shows "At capacity" for real.</p>
       <h3>Delivery fee ($)</h3>
       <input id="sfee" inputmode="decimal"><h3>⛽ Gas fund %</h3>
-      <input id="sgas" inputmode="decimal" placeholder="10"><h3>Minimum food order ($)</h3>
-      <input id="smin" inputmode="decimal" placeholder="10.00"><h3>Change PIN</h3>
+      <input id="sgas" inputmode="decimal" placeholder="10"><h3>Change PIN</h3>
       <input id="spin" inputmode="numeric" placeholder="4–8 digits">
       <h3>Owner driver PIN</h3>
       <input id="sopin" inputmode="numeric" maxlength="6" placeholder="6 digits">
@@ -316,7 +297,6 @@ document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
   b.classList.add('on'); $('t-'+b.dataset.t).classList.add('on');
   if(b.dataset.t==='money'){loadMoney();loadEarn();}
   if(b.dataset.t==='growth'){loadDeals();loadOutreach();loadBiz();loadPromos();loadInv();}
-  if(b.dataset.t==='menu'){loadMenu();loadProposals();}
   if(b.dataset.t==='insights'){loadStats();loadAudit();}
   if(b.dataset.t==='set') loadSet(); if(b.dataset.t==='sup') loadTix();
   if(b.dataset.t==='drv') loadDrivers(); if(b.dataset.t==='rides') loadRides(); if(b.dataset.t==='live') loadLive();
@@ -383,7 +363,7 @@ async function loadOrders(first){
     $('schedlist').innerHTML=sch.length?`<div class="card" style="border:2px solid #a78bfa">
       <b>📅 Scheduled (${sch.length})</b>
       ${sch.map(o=>`<div class="row" style="padding:6px 0;border-top:1px solid #222">
-        <div><b>#${o.id} · ${o.restaurant_name||'Drop'}</b><br>
+        <div><b>#${o.id} · ${o.pickup_name||'Drop Ride'}</b><br>
         <span class="small">${o.customer_name} · $${o.total.toFixed(2)}</span></div>
         <div style="text-align:right"><span class="small">${o.scheduled_for.replace('T',' ').slice(0,16)}</span><br>
         <button class="btn small ghost" style="width:auto;margin-top:4px" onclick="activateSched(${o.id})">▶ Activate</button></div>
@@ -398,12 +378,12 @@ async function loadOrders(first){
   const open=orders.filter(o=>!['delivered','cancelled'].includes(o.status));
   const done=orders.filter(o=>['delivered','cancelled'].includes(o.status));
   const card=(o,i)=>{
-    const restDest=o.rest_lat?`${o.rest_lat},${o.rest_lng}`:encodeURIComponent(o.rest_address||o.restaurant_name||'');
+    const restDest=o.pickup_lat?`${o.pickup_lat},${o.pickup_lng}`:encodeURIComponent(o.pickup_address||'');
     const custDest=o.cust_lat?`${o.cust_lat},${o.cust_lng}`:encodeURIComponent(o.address||'');
     const active=!['delivered','cancelled'].includes(o.status);
     return `
     <div class="card order ${o.id>lastSeen-2&&o.status==='placed'?'new':''}">
-      <div class="row"><b>${i>=0?`#${i+1} · `:''}${o.id} · ${o.restaurant_name}</b>
+      <div class="row"><b>${i>=0?`#${i+1} · `:''}${o.id} · ${o.pickup_name||'Ride'}</b>
         <span class="badge ${o.status==='placed'?'closed':''}">${o.status_label}</span></div>
       <p><b>${o.customer_name}</b> · <a href="tel:${o.phone}">${o.phone}</a><br>
       📍 ${o.address}${o.notes?`<br>📝 ${o.notes}`:''}</p>
@@ -411,7 +391,7 @@ async function loadOrders(first){
       <div class="row"><span class="small">Food $${o.food_total.toFixed(2)} + fee $${o.delivery_fee.toFixed(2)}${o.tip?` + tip $${o.tip.toFixed(2)}`:''}${o.discount?` − disc $${o.discount.toFixed(2)}`:''}</span><b>$${o.total.toFixed(2)}</b></div>
       <div class="small">${o.paid?'💰 Paid ✓':'⚠️ NOT PAID'} · ${o.driver_name?`🚗 ${o.driver_name}`:'🚗 Ken'} · ${new Date(o.created_at).toLocaleString()}</div>
       ${active?`<div style="display:flex;gap:8px;margin-top:10px">
-        <a class="btn small" href="https://www.google.com/maps/dir/?api=1&destination=${restDest}" target="_blank" style="flex:1;text-decoration:none;text-align:center">🧭 To restaurant</a>
+        <a class="btn small" href="https://www.google.com/maps/dir/?api=1&destination=${restDest}" target="_blank" style="flex:1;text-decoration:none;text-align:center">🧭 To pickup</a>
         <a class="btn small" href="https://www.google.com/maps/dir/?api=1&destination=${custDest}" target="_blank" style="flex:1;text-decoration:none;text-align:center">🏠 To customer</a>
       </div>`:''}
       <div style="margin-top:8px">
@@ -459,57 +439,6 @@ async function loadEarn(){
     `<div class="card"><div class="row"><b>${d}</b><b>$${(v.fees+v.tips).toFixed(2)}</b></div>
      <span class="small">${v.orders} deliveries · $${v.fees.toFixed(2)} fees + $${v.tips.toFixed(2)} tips</span></div>`).join('')||'<p class="small">No earnings yet.</p>';
 }
-async function loadMenu(){
-  const r=await (await fetch('/api/restaurants')).json();
-  $('rlist').innerHTML=r.map(x=>`
-    <div class="card"><div class="row"><b>${x.emoji} ${x.name}</b>
-      <span><button class="btn small ${x.open?'ghost':''}" onclick="toggleR(${x.id},${x.open?0:1})">${x.open?'Close':'Open'}</button>
-      <button class="btn small ghost" onclick="delR(${x.id})">✕</button></span></div>
-      <span class="small">${x.cuisine}${x.sample?' · SAMPLE':''}</span>
-      <div class="row" style="margin-top:6px"><span class="small">⏱️ ETA:</span>
-        <input id="eta-${x.id}" value="${(x.eta||'').replace(/"/g,'&quot;')}" placeholder="25–35 min" style="flex:1;margin:0 6px;max-width:140px">
-        <button class="btn small ghost" onclick="saveEta(${x.id})">Save</button></div>
-      <div class="row" style="margin-top:6px"><span class="small">🖼️ Photo:</span>
-        <input id="ph-${x.id}" value="${(x.photo||'').replace(/"/g,'&quot;')}" placeholder="image URL" style="flex:1;margin:0 6px">
-        <button class="btn small ghost" onclick="savePh(${x.id})">Save</button></div>
-      <div class="row" style="margin-top:6px"><span class="small">🔰 Logo:</span>
-        <input id="lg-${x.id}" value="${(x.logo||'').replace(/"/g,'&quot;')}" placeholder="logo URL" style="flex:1;margin:0 6px">
-        <button class="btn small ghost" onclick="saveLg(${x.id})">Save</button></div>
-      ${x.menu.map(m=>`<div class="row"><span class="small">${m.available?'':'🚫 '}${m.name} — $${m.price.toFixed(2)}</span>
-        <span><button class="btn small ghost" onclick="toggleM(${m.id},${m.available?0:1})">${m.available?'Hide':'Show'}</button>
-        <button class="btn small ghost" onclick="delM(${m.id})">✕</button></span></div>`).join('')}
-      <div class="row" style="margin-top:8px"><input id="mi-n-${x.id}" placeholder="New item name" style="flex:2;margin-right:6px">
-      <input id="mi-p-${x.id}" placeholder="$" inputmode="decimal" style="flex:1;margin-right:6px">
-      <button class="btn small" onclick="addM(${x.id})">Add</button></div>
-    </div>`).join('');
-}
-async function toggleR(id,open){await fetch('/api/operator/restaurants/'+id,{method:'PUT',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({open})});loadMenu();}
-async function delR(id){if(confirm('Delete this restaurant and its menu?')){await fetch('/api/operator/restaurants/'+id,{method:'DELETE',headers:H()});loadMenu();}}
-async function addM(rid){const n=$('mi-n-'+rid).value.trim(),p=parseFloat($('mi-p-'+rid).value);
-  if(!n||!(p>0)){alert('Need a name and price');return;}
-  await fetch('/api/operator/menu-items',{method:'POST',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({restaurant_id:rid,name:n,price:p})});loadMenu();}
-async function toggleM(id,a){await fetch('/api/operator/menu-items/'+id,{method:'PUT',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({available:!!a})});loadMenu();}
-async function delM(id){await fetch('/api/operator/menu-items/'+id,{method:'DELETE',headers:H()});loadMenu();}
-async function saveEta(id){const v=$('eta-'+id).value.trim();
-  await fetch('/api/operator/restaurants/'+id,{method:'PUT',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({eta:v})});}
-async function savePh(id){const v=$('ph-'+id).value.trim();
-  await fetch('/api/operator/restaurants/'+id,{method:'PUT',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({photo:v})});}
-async function saveLg(id){const v=$('lg-'+id).value.trim();
-  await fetch('/api/operator/restaurants/'+id,{method:'PUT',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({logo:v})});}
-$('addrest').onclick=async()=>{
-  const n=$('nname').value.trim(); if(!n){alert('Name required');return;}
-  await fetch('/api/operator/restaurants',{method:'POST',headers:{...H(),'Content-Type':'application/json'},
-    body:JSON.stringify({name:n,cuisine:$('ncuisine').value,emoji:$('nemoji').value||'🍽️'})});
-  $('nname').value='';$('ncuisine').value='';$('nemoji').value='';loadMenu();
-};
-async function loadSet(){
-  const s=await (await fetch('/api/operator/settings',{headers:H()})).json();
-  $('sfee').value=s.delivery_fee;$('sgas').value=s.gas_pct;$('smin').value=s.min_order;$('smpd').value=s.mins_per_delivery;$('smaxq').value=s.max_queue||8;$('sopin').value=s.owner_pin||'';$('stopic').value=s.ntfy_topic||'';
-  $('sopen').value=s.open_hour;$('sclose').value=s.close_hour;$('szone').value=s.delivery_zone||'';
-  const pt=$('pausetoggle');
-  pt.textContent=s.accepting_orders?'Pause':'Resume';
-  pt.classList.toggle('ghost',!s.accepting_orders);
-}
 $('pausetoggle').onclick=async()=>{
   const s=await (await fetch('/api/operator/settings',{headers:H()})).json();
   await fetch('/api/operator/settings',{method:'PUT',headers:{...H(),'Content-Type':'application/json'},
@@ -517,7 +446,7 @@ $('pausetoggle').onclick=async()=>{
   loadSet();
 };
 $('saveset').onclick=async()=>{
-  const body={delivery_fee:parseFloat($('sfee').value),gas_pct:parseFloat($('sgas').value)||0,min_order:parseFloat($('smin').value)||0,
+  const body={delivery_fee:parseFloat($('sfee').value),gas_pct:parseFloat($('sgas').value)||0,
     mins_per_delivery:parseInt($('smpd').value)||18,max_queue:parseInt($('smaxq').value)||8,
     ntfy_topic:$('stopic').value.trim(),delivery_zone:$('szone').value.trim()};
   const oh=parseInt($('sopen').value),ch=parseInt($('sclose').value);
@@ -581,27 +510,6 @@ function stopLoc(){
 
 // ---- AI menu watchdog proposals ----
 const KINDLBL={price_change:'💲 Price change',new_item:'✨ New item',unavailable:'🚫 Removed item',back_available:'✅ Back on menu'};
-async function loadProposals(){
-  const p=await (await fetch('/api/operator/proposals',{headers:H()})).json();
-  $('updbadge').textContent=p.length?`(${p.length})`:'';
-  $('updlist').innerHTML=p.map(x=>{
-    let desc='';
-    if(x.kind==='price_change') desc=`<b>${x.item_name}</b>: $${x.old_price.toFixed(2)} → <b>$${x.new_price.toFixed(2)}</b>`;
-    else if(x.kind==='new_item') desc=`<b>${x.item_name}</b> — $${x.new_price.toFixed(2)}${x.detail?`<br><span class="small">${x.detail}</span>`:''}`;
-    else desc=`<b>${x.item_name}</b>`;
-    return `<div class="card"><div class="row"><b>${KINDLBL[x.kind]||x.kind}</b>
-      <span class="small">${x.restaurant_name}</span></div>
-      <p>${desc}</p>
-      ${x.source_url?`<p class="small">Source: <a href="${x.source_url}" target="_blank">menu page</a></p>`:''}
-      <div><button class="btn small" onclick="proposalAct(${x.id},'approve')">✓ Approve</button>
-      <button class="btn small ghost" onclick="proposalAct(${x.id},'reject')">✕ Reject</button></div>
-    </div>`;
-  }).join('')||'<p class="small">All clear — no pending menu changes. The watchdog checks weekly.</p>';
-}
-async function proposalAct(id,act){
-  await fetch(`/api/operator/proposals/${id}/${act}`,{method:'POST',headers:H()});
-  loadProposals();
-}
 setInterval(()=>{if(PIN) loadOrders();},5000);
 async function loadTix(){
   const t=await (await fetch('/api/operator/tickets',{headers:H()})).json();
