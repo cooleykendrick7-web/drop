@@ -5095,6 +5095,19 @@ async def biz_register(req: Request):
     return {"ok": True, "id": uid}
 
 
+@app.post("/api/biz/logout")
+async def biz_logout(req: Request):
+    token = req.cookies.get("drop_biz", "")
+    if token:
+        conn = db()
+        conn.execute("DELETE FROM business_sessions WHERE token=?", (token,))
+        conn.commit()
+        conn.close()
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie("drop_biz")
+    return resp
+
+
 @app.post("/api/biz/login")
 async def biz_login(req: Request):
     body = await req.json()

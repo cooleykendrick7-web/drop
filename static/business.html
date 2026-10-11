@@ -5,7 +5,8 @@
 <link rel="stylesheet" href="/static/styles.css">
 <style>.bform input{width:100%;margin:6px 0}.bform label{font-weight:700;margin-top:10px;display:block}</style>
 </head><body>
-<header class="topbar"><a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg" alt="Drop"><b>Drop</b><span class="tag">business</span></a></header>
+<header class="topbar"><a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg" alt="Drop"><b>Drop</b><span class="tag">business</span></a>
+<button class="btn small ghost" id="logoutbtn" style="width:auto;margin-left:auto;display:none">🚪 Log out</button></header>
 
 <div id="login" class="card bform">
   <h1>Business login</h1>
@@ -40,6 +41,10 @@ $('gobtn').onclick=async()=>{
     body:JSON.stringify({email:$('email').value,password:$('pass').value})});
   if(!r.ok){$('loginmsg').textContent='Wrong email or password.';return;}
   loadMe();
+$('logoutbtn').onclick=async()=>{
+  await fetch('/api/biz/logout',{method:'POST'});
+  location.reload();
+};
 };
 $('regbtn').onclick=async()=>{
   const r=await fetch('/api/biz/register',{method:'POST',headers:{'Content-Type':'application/json'},
@@ -53,6 +58,7 @@ async function loadMe(){
   if(!r.ok)return;
   const m=await r.json();
   $('login').style.display='none';$('app').style.display='block';
+  $('logoutbtn').style.display='block';
   $('bname').textContent=m.legal_name;
   $('bstage').textContent=m.stage_label;
   $('binfo').textContent=`${m.business_type} · ${m.locations} location(s) · ${m.est_deliveries}`;
