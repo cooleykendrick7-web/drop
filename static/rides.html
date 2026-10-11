@@ -1,7 +1,7 @@
 <!DOCTYPE html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Drop Rides — Coming Soon</title>
-<meta name="description" content="Drop Rides: your local ride, pickup to dropoff. Upfront pricing, no surge games. Launching soon.">
+<title>Drop Rides — Book Your Ride</title>
+<meta name="description" content="Drop Rides: your local ride, pickup to dropoff. Upfront pricing, no surge games. Book now.">
 <link rel="icon" href="/static/logo-mark.jpg">
 <link rel="stylesheet" href="/static/styles.css">
 <style>
@@ -42,14 +42,7 @@
 <div class="lux-hero">
   <div class="lux-badge">DROP&nbsp;RIDES</div>
   <h1>Your ride, <span class="gold">your way.</span></h1>
-  <p class="lux-sub">Pickup to dropoff. Upfront price before you book — no surge games, no surprises. Launching in:</p>
-  <div class="countdown" id="cd">
-    <div class="cd-cell"><b id="cd-d">–</b><span>DAYS</span></div>
-    <div class="cd-cell"><b id="cd-h">–</b><span>HOURS</span></div>
-    <div class="cd-cell"><b id="cd-m">–</b><span>MINUTES</span></div>
-    <div class="cd-cell"><b id="cd-s">–</b><span>SECONDS</span></div>
-  </div>
-  <p class="small" id="launch-label"></p>
+  <p class="lux-sub">Pickup to dropoff. Upfront price before you book — no surge games, no surprises. Book now.</p>
 </div>
 
 <div class="lux-card" id="calc-card">
@@ -85,6 +78,22 @@
 
   <button class="lux-btn ghost" id="c-go">Calculate my fare</button>
   <div id="c-out" style="margin-top:12px"></div>
+  <div id="pay-section" style="display:none;margin-top:16px;border-top:1px solid #333;padding-top:16px">
+    <label>Your name *</label>
+    <input class="lux-input" id="c-name" placeholder="Your name">
+    <label>Your phone *</label>
+    <input class="lux-input" id="c-phone" placeholder="For driver updates" inputmode="tel">
+    <label>Tip your driver <span class="small">(100% goes to them)</span></label>
+    <div class="row" style="gap:8px;margin:6px 0" id="c-tips">
+      <button class="lux-btn ghost tipbtn" data-t="0" style="width:auto;padding:8px 16px">$0</button>
+      <button class="lux-btn ghost tipbtn" data-t="1" style="width:auto;padding:8px 16px">$1</button>
+      <button class="lux-btn ghost tipbtn" data-t="3" style="width:auto;padding:8px 16px">$3</button>
+      <button class="lux-btn ghost tipbtn" data-t="5" style="width:auto;padding:8px 16px">$5</button>
+    </div>
+    <button class="lux-btn" id="c-pay" style="margin-top:12px">Pay &amp; Book Ride →</button>
+    <p class="small" id="c-msg" style="text-align:center"></p>
+    <p class="small" style="opacity:.6">🔒 Secure payment via Stripe. Your ride is scheduled once payment confirms.</p>
+  </div>
 </div>
 
 <div class="lux-card">
@@ -95,58 +104,6 @@
   <p class="small" style="margin-top:12px">Need the driver to wait longer? It's a small per-minute fee after the free 5 — agreed upfront, no surprises.</p>
 </div>
 
-<div class="lux-card" id="book-card" style="display:none">
-  <h2>🚗 Book your ride</h2>
-  <div id="book-form">
-    <div style="border:1px solid #333;border-radius:10px;padding:10px;margin:8px 0">
-      <b class="small">📍 PICKUP</b> <span class="small" style="opacity:.6">(type it, or tap 📍 to use your GPS)</span>
-      <label>Street address <span class="small">(optional if using GPS)</span></label>
-      <div style="display:flex;gap:8px"><input class="lux-input" id="b-from-street" placeholder="123 Main St" style="flex:1">
-      <button class="lux-btn ghost" id="b-loc" style="width:auto;padding:12px 14px;white-space:nowrap" title="Use my current location">📍</button></div>
-      <label>Apt / Unit / Suite <span class="small">(optional)</span></label>
-      <input class="lux-input" id="b-from-apt" placeholder="Apt 4B">
-      <div style="display:grid;grid-template-columns:2fr 1fr 1.2fr;gap:8px">
-        <div><label>City <span class="small">(opt.)</span></label><input class="lux-input" id="b-from-city" placeholder="City"></div>
-        <div><label>State <span class="small">(opt.)</span></label><input class="lux-input" id="b-from-state" placeholder="ST" maxlength="2" style="text-transform:uppercase"></div>
-        <div><label>ZIP</label><input class="lux-input" id="b-from-zip" placeholder="ZIP" inputmode="numeric"></div>
-      </div>
-    </div>
-    <div style="border:1px solid #333;border-radius:10px;padding:10px;margin:8px 0">
-      <b class="small">🏠 DROPOFF</b>
-      <label>Street address *</label>
-      <input class="lux-input" id="b-to-street" placeholder="456 Oak Ave">
-      <label>Apt / Unit / Suite <span class="small">(optional)</span></label>
-      <input class="lux-input" id="b-to-apt" placeholder="Suite 200">
-      <div style="display:grid;grid-template-columns:2fr 1fr 1.2fr;gap:8px">
-        <div><label>City *</label><input class="lux-input" id="b-to-city" placeholder="City"></div>
-        <div><label>State *</label><input class="lux-input" id="b-to-state" placeholder="ST" maxlength="2" style="text-transform:uppercase"></div>
-        <div><label>ZIP</label><input class="lux-input" id="b-to-zip" placeholder="ZIP" inputmode="numeric"></div>
-      </div>
-    </div>
-    <label>Your name</label>
-    <input class="lux-input" id="b-name" placeholder="Your name">
-    <label>Your phone</label>
-    <input class="lux-input" id="b-phone" placeholder="For driver updates" inputmode="tel">
-    <label>Notes <span class="small">(optional — landmarks, gate codes)</span></label>
-    <input class="lux-input" id="b-notes" placeholder="Anything your driver should know">
-    <label>Tip your driver <span class="small">(100% goes to them)</span></label>
-    <div class="row" style="gap:8px;margin:6px 0" id="tips">
-      <button class="lux-btn ghost tipbtn" data-t="0" style="width:auto;padding:8px 16px">$0</button>
-      <button class="lux-btn ghost tipbtn" data-t="1" style="width:auto;padding:8px 16px">$1</button>
-      <button class="lux-btn ghost tipbtn" data-t="3" style="width:auto;padding:8px 16px">$3</button>
-      <button class="lux-btn ghost tipbtn" data-t="5" style="width:auto;padding:8px 16px">$5</button>
-    </div>
-    <div id="b-quote" style="margin:12px 0"></div>
-    <button class="lux-btn ghost" id="b-quote-btn">Get my price</button>
-    <button class="lux-btn" id="b-go" style="display:none">Pay &amp; Request Ride →</button>
-    <p class="small" id="b-msg"></p>
-    <label style="display:flex;gap:8px;align-items:flex-start;margin-top:10px">
-      <input type="checkbox" id="b-wait-ok" style="margin-top:4px">
-      <span class="small">I understand: after 5 free minutes of wait time, a small per-minute wait fee applies if my driver has to wait on me.</span>
-    </label>
-  </div>
-</div>
-
 <div class="lux-card" style="text-align:center">
   <h2>🪪 Drive for Drop Rides</h2>
   <p class="small">Your car. Your schedule. Your money.<br>Valid license + insurance + a photo of you and your ride — that's the application.</p>
@@ -154,93 +111,71 @@
 </div>
 
 <script>
-const LAUNCH_AT = new Date('2026-10-13T10:00:00-05:00').getTime();
 const $=id=>document.getElementById(id);
-let tip=0, lastQuote=null;
+let tip=0, lastQuote=null, lastAddrs=null;
 // GPS coords when the customer taps "use my location" — most accurate distance
-let gps={cFrom:null, bFrom:null};
+let gps={cFrom:null};
 
-function locStatus(key, msg, ok){
-  let el=document.getElementById(key==='cFrom'?'c-locmsg':'b-locmsg');
+function locStatus(msg, ok){
+  let el=document.getElementById('c-locmsg');
   if(!el){
     el=document.createElement('p'); el.className='small';
-    el.id=key==='cFrom'?'c-locmsg':'b-locmsg';
-    document.getElementById(key==='cFrom'?'c-from-street':'b-from-street').after(el);
+    el.id='c-locmsg';
+    document.getElementById('c-from-street').after(el);
   }
   el.textContent=msg; el.style.color=ok?'#4ade80':'#fbbf24';
 }
-async function useMyLocation(prefix, key){
-  const btn=document.getElementById(key==='cFrom'?'c-loc':'b-loc');
-  locStatus(key,'');
+async function useMyLocation(){
+  const btn=document.getElementById('c-loc');
+  locStatus('');
   if(!navigator.geolocation){
-    locStatus(key,'❌ This browser does not share location. Type the address instead.');
+    locStatus('❌ This browser does not share location. Type the address instead.');
     return;
   }
   btn.textContent='…';
-  locStatus(key,'📡 Getting your GPS location…');
+  locStatus('📡 Getting your GPS location…');
   let done=false;
   const timer=setTimeout(()=>{
     if(done)return;
     btn.textContent='📍';
-    locStatus(key,'❌ Timed out waiting for GPS. Make sure Location Services are ON for your browser (iPhone: Settings → Privacy → Location Services), then tap 📍 again.');
+    locStatus('❌ Timed out waiting for GPS. Make sure Location Services are ON, then tap 📍 again.');
   },12000);
   navigator.geolocation.getCurrentPosition(async pos=>{
     done=true; clearTimeout(timer);
     const lat=pos.coords.latitude, lng=pos.coords.longitude;
-    gps[key]={lat,lng};
-    if(key==='cFrom') ac.cFrom=null; if(key==='bFrom') ac.bFrom=null;
+    gps.cFrom={lat,lng};
+    ac.cFrom=null;
     try{
       const r=await(await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1`,{headers:{'User-Agent':'DropApp'}})).json();
       const a=r.address||{};
-      // fill the structured fields from the reverse geocode
       const num=a.house_number||'', road=a.road||'';
-      document.getElementById(prefix+'street').value=(num+' '+road).trim()||'';
-      document.getElementById(prefix+'city').value=a.city||a.town||a.village||'';
-      document.getElementById(prefix+'state').value=(a.state_code||a.state||'').slice(0,2).toUpperCase();
-      document.getElementById(prefix+'zip').value=a.postcode||'';
+      document.getElementById('c-from-street').value=(num+' '+road).trim()||'';
+      document.getElementById('c-from-city').value=a.city||a.town||a.village||'';
+      document.getElementById('c-from-state').value=(a.state_code||a.state||'').slice(0,2).toUpperCase();
+      document.getElementById('c-from-zip').value=a.postcode||'';
     }catch(e){}
     btn.textContent='✅';
-    locStatus(key,`✅ GPS locked (±${Math.round(pos.coords.accuracy||0)}m) — most accurate fare.`,true);
+    locStatus(`✅ GPS locked (±${Math.round(pos.coords.accuracy||0)}m) — most accurate fare.`,true);
   }, err=>{
     done=true; clearTimeout(timer);
     btn.textContent='📍';
     let why='location request was denied or failed';
-    if(err&&err.code===1) why='permission DENIED — turn it on: iPhone Settings → Privacy & Security → Location Services → (your browser) → Allow';
+    if(err&&err.code===1) why='permission DENIED — turn it on in your phone Settings → Privacy → Location Services';
     else if(err&&err.code===2) why='position unavailable — are Location Services turned on?';
     else if(err&&err.code===3) why='timed out — try again outside or near a window';
-    locStatus(key,`❌ GPS ${why}. You can also just type the address.`);
+    locStatus(`❌ GPS ${why}. You can also just type the address.`);
   }, {enableHighAccuracy:true, timeout:10000, maximumAge:60000});
 }
-document.getElementById('c-loc').onclick=()=>useMyLocation('c-from-','cFrom');
-document.getElementById('b-loc').onclick=()=>useMyLocation('b-from-','bFrom');
+document.getElementById('c-loc').onclick=useMyLocation;
 document.getElementById('c-from-street').oninput=()=>{gps.cFrom=null;document.getElementById('c-loc').textContent='📍';};
-document.getElementById('b-from-street').oninput=()=>{gps.bFrom=null;document.getElementById('b-loc').textContent='📍';};
-
-// countdown
-function tick(){
-  const diff = LAUNCH_AT - Date.now();
-  if(diff<=0){
-    $('cd').style.display='none';
-    $('launch-label').innerHTML='<b class="gold">🚗 Drop Rides is LIVE — book below.</b>';
-    $('book-card').style.display='block';
-    $('calc-card').style.display='none';
-    return;
-  }
-  const d=Math.floor(diff/86400000), h=Math.floor(diff%86400000/3600000),
-        m=Math.floor(diff%3600000/60000), s=Math.floor(diff%60000/1000);
-  $('cd-d').textContent=d; $('cd-h').textContent=String(h).padStart(2,'0');
-  $('cd-m').textContent=String(m).padStart(2,'0'); $('cd-s').textContent=String(s).padStart(2,'0');
-  $('launch-label').textContent='Launching Tuesday, October 13 at 10:00 AM CT';
-}
-setInterval(tick,1000); tick();
 
 document.querySelectorAll('.tipbtn').forEach(b=>{
   b.onclick=()=>{ tip=parseFloat(b.dataset.t);
     document.querySelectorAll('.tipbtn').forEach(x=>x.style.borderColor='');
-    b.style.borderColor='#f6e27a'; renderQuote(); };
+    b.style.borderColor='#f6e27a';
+    if(lastQuote) renderPayButton(); };
 });
 
-// Build a full address string from structured fields
 function buildAddr(prefix){
   const street=$(prefix+'street').value.trim();
   const apt=$(prefix+'apt').value.trim();
@@ -263,26 +198,30 @@ async function getQuote(from,to,pCoords,dCoords){
   if(r.detail) throw new Error(r.detail);
   return r;
 }
-// autocomplete picks give exact coords — most accurate, no re-geocoding
-let ac={cFrom:null,cTo:null,bFrom:null,bTo:null};
+let ac={cFrom:null,cTo:null};
 function wireAC(id,key){
   const el=document.getElementById(id);
   if(!el) return;
   attachAutocomplete(el, pick=>{ ac[key]=pick; });
 }
-['c-from-street|-|cFrom','c-to-street|-|cTo','b-from-street|-|bFrom','b-to-street|-|bTo'].forEach(s=>{
-  const [id,,key]=s.split('|'); wireAC(id,key);
-});
+wireAC('c-from-street','cFrom');
+wireAC('c-to-street','cTo');
 
-function fareHTML(q, showTip){
+function fareHTML(q){
   return `<div class="fare-row"><span>Base fare</span><b>$${q.base_fare.toFixed(2)}</b></div>
     <div class="fare-row"><span class="small">${q.miles} mi × $${q.per_mile.toFixed(2)}/mi</span><b>$${q.mileage_charge.toFixed(2)}</b></div>
     <div class="fare-row"><span class="small">⛽ Gas fund (${q.gas_pct}%)</span><b>$${q.gas_fee.toFixed(2)}</b></div>
-    ${showTip?`<div class="fare-row"><span class="small">Driver tip</span><b>$${tip.toFixed(2)}</b></div>`:''}
-    <div class="fare-row fare-total"><span><b>You'll pay</b></span><b class="gold">$${(q.total+(showTip?tip:0)).toFixed(2)}</b></div>
+    ${tip>0?`<div class="fare-row"><span class="small">Driver tip</span><b>$${tip.toFixed(2)}</b></div>`:''}
+    <div class="fare-row fare-total"><span><b>You'll pay</b></span><b class="gold">$${(q.total+tip).toFixed(2)}</b></div>
     ${q.ai_note?`<div class="ai-note">🤖 ${q.ai_note}</div>`:''}
-    ${q.too_far?`<div class="ai-note">⚠️ This ride is ${q.miles} miles — beyond our ${q.max_miles}-mile service area. Contact us for a custom long-distance quote.</div>`:''}
-    ${(!q.too_far&&q.approximate)?`<p class="small">📍 Approximate price — one address mapped to city level. Exact fare confirmed when you book.</p>`:''}`;
+    ${q.too_far?`<div class="ai-note">⚠️ This ride is ${q.miles} miles — beyond our ${q.max_miles}-mile service area.</div>`:''}`;
+}
+
+function renderPayButton(){
+  if(!lastQuote) return;
+  const total=(lastQuote.total+tip).toFixed(2);
+  $('c-pay').innerHTML=`🔒 Pay $${total} & Book Ride →`;
+  $('pay-section').style.display='block';
 }
 
 $('c-go').onclick=async()=>{
@@ -293,64 +232,38 @@ $('c-go').onclick=async()=>{
   if(!f){$('c-out').innerHTML='<p class="small">⚠️ Enter your pickup address — or tap 📍 to use your GPS location.</p>';return;}
   if(!t){$('c-out').innerHTML='<p class="small">⚠️ Fill in dropoff street, city, and state.</p>';return;}
   $('c-out').innerHTML='<p class="small">Calculating…</p>';
+  $('pay-section').style.display='none';
   try{
-    const q=await getQuote(f,t,pGps,dGps);
-    $('c-out').innerHTML=fareHTML(q,false);
+    lastQuote=await getQuote(f,t,pGps,dGps);
+    lastAddrs={pickup:f, dropoff:t, pGps, dGps};
+    $('c-out').innerHTML=fareHTML(lastQuote);
+    if(!lastQuote.too_far) renderPayButton();
   }catch(e){$('c-out').innerHTML=`<p class="small">Error: ${e.message}</p>`;}
 };
 
-$('b-quote-btn').onclick=async()=>{
-  const pGps=ac.bFrom||gps.bFrom;
-  const dGps=ac.bTo;
-  const f=buildAddr('b-from-')||(pGps?'📍 Your current location':null);
-  const t=buildAddr('b-to-');
-  if(!f){$('b-msg').textContent='⚠️ Enter your pickup address — or tap 📍 to use your GPS location.';return;}
-  if(!t){$('b-msg').textContent='⚠️ Fill in dropoff street, city, and state.';return;}
-  $('b-quote').innerHTML='<p class="small">Calculating…</p>';
+$('c-pay').onclick=async()=>{
+  const name=$('c-name').value.trim(), phone=$('c-phone').value.trim();
+  if(!name||!phone){$('c-msg').textContent='⚠️ Name and phone are required.';return;}
+  if(!lastQuote||!lastAddrs){$('c-msg').textContent='⚠️ Calculate your fare first.';return;}
+  $('c-pay').disabled=true; $('c-pay').textContent='Processing…';
+  $('c-msg').textContent='';
   try{
-    lastQuote=await getQuote(f,t,pGps,dGps);
-    renderQuote();
-    $('b-go').style.display=lastQuote.too_far?'none':'block';
-  }catch(e){$('b-msg').textContent='Error: '+e.message;}
-};
-
-function renderQuote(){
-  if(!lastQuote)return;
-  $('b-quote').innerHTML=fareHTML(lastQuote,true);
-}
-
-$('b-go').onclick=async()=>{
-  if(!$('b-wait-ok').checked){$('b-msg').textContent='Please accept the wait-time terms first.';return;}
-  const pGps=ac.bFrom||gps.bFrom;
-  const f=buildAddr('b-from-')||(pGps?'📍 Your current location':null);
-  const t=buildAddr('b-to-');
-  const body={
-    pickup_address:f,
-    dropoff_address:t,
-    ...(pGps?{pickup_lat:pGps.lat, pickup_lng:pGps.lng}:{}),
-    ...(ac.bTo?{dropoff_lat:ac.bTo.lat, dropoff_lng:ac.bTo.lng}:{}),
-    customer_name:$('b-name').value.trim(),
-    phone:$('b-phone').value.trim(),
-    notes:$('b-notes').value.trim(),
-    tip:tip,
-  };
-  if(!body.pickup_address||!body.dropoff_address||!body.customer_name){
-    $('b-msg').textContent='Pickup (or tap 📍 for GPS), dropoff, and your name are required.';return;
-  }
-  $('b-go').disabled=true; $('b-go').textContent='Sending…';
-  try{
-    const r=await(await fetch('/api/rides/request',{method:'POST',
+    const body={
+      pickup_address:lastAddrs.pickup,
+      dropoff_address:lastAddrs.dropoff,
+      ...(lastAddrs.pGps?{pickup_lat:lastAddrs.pGps.lat, pickup_lng:lastAddrs.pGps.lng}:{}),
+      ...(lastAddrs.dGps?{dropoff_lat:lastAddrs.dGps.lat, dropoff_lng:lastAddrs.dGps.lng}:{}),
+      customer_name:name, phone:phone, tip:tip,
+    };
+    const r=await(await fetch('/api/rides/checkout',{method:'POST',
       headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
-    if(!r.ok&&r.order_id===undefined){throw new Error(r.detail||'Failed');}
-    const c=await(await fetch('/api/checkout',{method:'POST',
-      headers:{'Content-Type':'application/json'},body:JSON.stringify({order_id:r.order_id})})).json();
-    if(c.url){location.href=c.url;}
-    else if(c.dev){location.href=c.pay_url;}
-    else if(c.track_url){location.href=c.track_url;}
-    else{location.href='/track.html?id='+r.order_id;}
+    if(r.url){ location.href=r.url; return; }  // Stripe checkout
+    if(r.dev){ location.href=r.pay_url; return; }  // dev mode
+    throw new Error(r.detail||'Checkout failed');
   }catch(e){
-    $('b-msg').textContent='Error: '+(e.message||'network error');
-    $('b-go').disabled=false; $('b-go').textContent='Pay & Request Ride →';
+    $('c-msg').textContent='❌ '+(e.message||'Payment failed. Try again.');
+    $('c-pay').disabled=false;
+    renderPayButton();
   }
 };
 </script>
