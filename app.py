@@ -191,7 +191,27 @@ def init_db():
         status TEXT NOT NULL DEFAULT 'pending',
         deliveries INTEGER NOT NULL DEFAULT 0,
         on_time INTEGER NOT NULL DEFAULT 0,
+        selfie_photo TEXT DEFAULT '', car_photo TEXT DEFAULT '',
+        selfie_approved INTEGER DEFAULT 0, car_approved INTEGER DEFAULT 0,
+        rating REAL DEFAULT 5.0, rating_count INTEGER DEFAULT 0,
         created_at TEXT NOT NULL)""")
+    # Idempotent: add photo columns to existing drivers tables
+    dcols = [r[1] for r in c.execute("PRAGMA table_info(drivers)").fetchall()]
+    for _col, _ddl in (("selfie_photo", "TEXT DEFAULT ''"), ("car_photo", "TEXT DEFAULT ''"),
+                       ("selfie_approved", "INTEGER DEFAULT 0"), ("car_approved", "INTEGER DEFAULT 0"),
+                       ("rating", "REAL DEFAULT 5.0"), ("rating_count", "INTEGER DEFAULT 0")):
+        if _col not in dcols:
+            c.execute(f"ALTER TABLE drivers ADD COLUMN {_col} {_ddl}")
+    # Delivery photo proof (pickup + dropoff, DoorDash-style)
+    c.execute("""CREATE TABLE IF NOT EXISTS delivery_photos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id INTEGER NOT NULL, driver_id INTEGER NOT NULL,
+        photo_type TEXT NOT NULL, photo_path TEXT NOT NULL,
+        created_at TEXT NOT NULL)""")
+    # Customer driver selection
+    ocols2 = [r[1] for r in c.execute("PRAGMA table_info(orders)").fetchall()]
+    if "customer_driver_choice" not in ocols2:
+        c.execute("ALTER TABLE orders ADD COLUMN customer_driver_choice INTEGER DEFAULT 0")
     c.execute("""CREATE TABLE IF NOT EXISTS driver_sessions (
         token TEXT PRIMARY KEY,
         driver_id INTEGER NOT NULL REFERENCES drivers(id) ON DELETE CASCADE,
@@ -241,23 +261,47 @@ def init_db():
         title TEXT NOT NULL DEFAULT '',
         detail TEXT DEFAULT '',
         created_at TEXT NOT NULL)""")
-    # gift orders (added 2026-10-11)
-    ocols = [r[1] for r in c.execute("PRAGMA table_info(orders)").fetchall()]
-    for _col, _ddl in (("is_gift", "INTEGER DEFAULT 0"),
-                       ("gift_recipient", "TEXT DEFAULT ''"),
-                       ("gift_contact", "TEXT DEFAULT ''"),
-                       ("gift_message", "TEXT DEFAULT ''"),
-                       ("gift_sender", "TEXT DEFAULT ''")):
-        if _col not in ocols:
-            c.execute(f"ALTER TABLE orders ADD COLUMN {_col} {_ddl}")
-    c.execute("""CREATE TABLE IF NOT EXISTS gift_queue (
+    # multi-city: where each restaurant lives (added 2026-10-11)
+    _rcols = [r[1] for r in c.execute("PRAGMA table_info(restaurants)").fetchall()]
+    for _col, _ddl in (("city", "TEXT DEFAULT 'Bismarck'"), ("state", "TEXT DEFAULT 'ND'"),
+                       ("address", "TEXT DEFAULT ''"), ("lat", "REAL DEFAULT 0"),
+                       ("lng", "REAL DEFAULT 0"), ("website", "TEXT DEFAULT ''")):
+        if _col not in _rcols:
+            c.execute(f"ALTER TABLE restaurants ADD COLUMN {_col} {_ddl}")
+    # restaurant partnership applications (added 2026-10-11)
+    c.execute("""CREATE TABLE IF NOT EXISTS partner_applications (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        order_id INTEGER NOT NULL,
-        recipient TEXT NOT NULL DEFAULT '',
-        contact TEXT NOT NULL DEFAULT '',
-        message TEXT DEFAULT '',
-        sender TEXT DEFAULT '',
-        status TEXT NOT NULL DEFAULT 'pending',
+        business_name TEXT NOT NULL, contact_name TEXT DEFAULT '',
+        email TEXT DEFAULT '', phone TEXT DEFAULT '', city TEXT DEFAULT '',
+        state TEXT DEFAULT '', cuisine TEXT DEFAULT '', locations INTEGER DEFAULT 1,
+        volume TEXT DEFAULT '', proposal TEXT DEFAULT '', status TEXT DEFAULT 'new',
+        ai_score INTEGER DEFAULT 0, ai_verdict TEXT DEFAULT '',
+        created_at TEXT NOT NULL)""")
+    # outreach prospects (added 2026-10-11)
+    c.execute("""CREATE TABLE IF NOT EXISTS prospects (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL, email TEXT DEFAULT '', city TEXT DEFAULT '',
+        state TEXT DEFAULT '', cuisine TEXT DEFAULT '', status TEXT DEFAULT 'new',
+        draft_subject TEXT DEFAULT '', draft_body TEXT DEFAULT '',
+        sent_at TEXT DEFAULT '', created_at TEXT NOT NULL)""")
+    c.execute("""CREATE TABLE IF NOT EXISTS opt_outs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        email TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL)""")
+    # suggest-a-spot (added 2026-10-11)
+    c.execute("""CREATE TABLE IF NOT EXISTS spot_suggestions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL, city TEXT DEFAULT '', note TEXT DEFAULT '',
+        contact TEXT DEFAULT '', created_at TEXT NOT NULL)""")
+    # AI bot chat (added 2026-10-11)
+    c.execute("""CREATE TABLE IF NOT EXISTS bot_chats (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        role TEXT NOT NULL DEFAULT 'ken',
+        message TEXT NOT NULL, created_at TEXT NOT NULL)""")
+    # AI improvement ideas (added 2026-10-11)
+    c.execute("""CREATE TABLE IF NOT EXISTS ai_ideas (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
+        why_beats TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'pending',
         created_at TEXT NOT NULL)""")
     # DROP MORE marketplace: business partnerships (added 2026-10-11)
     c.execute("""CREATE TABLE IF NOT EXISTS business_partners (
@@ -421,8 +465,60 @@ def seed():
     conn.close()
 
 
+def seed_cities():
+    """Idempotent: add real multi-city restaurants (Fargo, Minneapolis) if missing."""
+    conn = db()
+    c = conn.cursor()
+    SPOTS = [
+    # (name, cuisine, emoji, address, city, state, website, menu[(name, price)])
+    ("ThaiKota", "Thai", "🍜", "1201 1st Ave N, Fargo, ND", "Fargo", "ND", "https://www.thaikota.com/",
+     [("Pad Thai", 14.99), ("Khao Soi Curry", 15.99), ("Tom Yum Noodle Soup", 13.99), ("Spring Rolls", 7.99)]),
+    ("JL Beers", "Burgers", "🍔", "518 1st Ave N, Fargo, ND", "Fargo", "ND", "http://www.jlbeers.com/",
+     [("Humpty Dumpty Burger", 12.99), ("Rajun Cajun Burger", 11.99), ("Garlic Parm Fries", 6.99), ("Beer Cheese Pretzel", 8.99)]),
+    ("Taco Brothers", "Mexican", "🌮", "428 Roberts St N, Fargo, ND", "Fargo", "ND", "",
+     [("Trust You Bro Platter", 11.99), ("Big Brother Burrito", 10.99), ("Butter-Fried Chicken Taco", 4.99), ("Chips & Guac", 7.99)]),
+    ("Wasabi", "Sushi", "🍣", "560 2nd Ave N, Fargo, ND", "Fargo", "ND", "https://www.wasabipokebowl.com/",
+     [("Chef's Special Roll", 14.99), ("Corona Roll", 13.99), ("Poke Bowl", 12.99), ("Seared Tuna Salad", 13.99)]),
+    ("Pounds", "Diner", "🍔", "6 Broadway N, Fargo, ND", "Fargo", "ND", "http://poundsfargo.com/",
+     [("Californication Burger", 12.99), ("Torch Wings", 11.99), ("BBQ Porker Mac", 10.99), ("Queso Fries", 7.99)]),
+    ("Old Broadway", "Bar & Grill", "🍺", "22 Broadway N, Fargo, ND", "Fargo", "ND", "http://www.theoldbroadway.com/",
+     [("Eggs Benedict", 11.99), ("Beer Cheese Soup", 8.99), ("Breakfast Pizza", 10.99), ("Bread Pudding", 6.99)]),
+    ("Hai Hai", "Southeast Asian", "🍜", "2121 University Ave NE, Minneapolis, MN", "Minneapolis", "MN", "",
+     [("Street Noodles", 15.99), ("Coconut Curry", 16.99), ("Pork Belly Buns", 9.99), ("Papaya Salad", 11.99)]),
+    ("Element Wood Fire Pizza", "Pizza", "🍕", "96 Broadway St NE, Minneapolis, MN", "Minneapolis", "MN", "",
+     [("Wood-Fired Margherita", 14.99), ("Pepperoni Char Pie", 15.99), ("White Pie", 14.99), ("Caesar Salad", 9.99)]),
+    ("Diane's Place", "Brunch", "🍳", "117 14th Ave NE, Minneapolis, MN", "Minneapolis", "MN", "",
+     [("Hmong Sausage & Eggs", 15.99), ("Thai Tea French Toast", 13.99), ("Brunch Burger", 14.99), ("Sticky Rice Plate", 12.99)]),
+    ("Chimborazo", "Ecuadorian", "🫓", "2851 Central Ave NE, Minneapolis, MN", "Minneapolis", "MN", "",
+     [("Llapingachos", 13.99), ("Encebollado", 12.99), ("Fritada Plate", 15.99), ("Empanadas (3)", 8.99)]),
+    ("Gorkha Palace", "Indian", "🍛", "23 4th St NE, Minneapolis, MN", "Minneapolis", "MN", "",
+     [("Chicken Tikka Masala", 14.99), ("Lamb Curry", 16.99), ("Garlic Naan", 3.99), ("Samosa (2)", 5.99)]),
+    ("The Anchor Fish & Chips", "Fish & Chips", "🐟", "302 13th Ave NE, Minneapolis, MN", "Minneapolis", "MN", "",
+     [("Fish & Chips", 13.99), ("Shrimp Basket", 12.99), ("Clam Chowder", 7.99), ("Coleslaw Side", 3.99)]),
+]
+    for name, cuisine, emoji, addr, city, state, site, menu in SPOTS:
+        exists = c.execute("SELECT id FROM restaurants WHERE name=? AND city=?", (name, city)).fetchone()
+        if exists:
+            continue
+        try:
+            lat, lng = geocode(addr)
+        except Exception:
+            lat, lng = 0, 0
+        cur = c.execute(
+            "INSERT INTO restaurants(name, cuisine, emoji, open, address, lat, lng, website, city, state)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?)",
+            (name, cuisine, emoji, 1, addr, lat, lng, site, city, state))
+        rid = cur.lastrowid
+        for mname, price in menu:
+            c.execute("INSERT INTO menu_items(restaurant_id, name, price, available) VALUES(?,?,?,1)",
+                      (rid, mname, price))
+    conn.commit()
+    conn.close()
+
+
 init_db()
 seed()
+seed_cities()
 
 
 # ---------------- helpers ----------------
@@ -490,6 +586,49 @@ def notify_ken(order):
         pass  # never break an order because a push failed
 
 
+# ---------------- Security hardening ----------------
+_rate_buckets: dict = {}
+_pin_fails: dict = {}
+
+
+def client_ip(req: Request) -> str:
+    return req.headers.get("x-forwarded-for", req.client.host if req.client else "?").split(",")[0].strip()
+
+
+def rate_limit(ip: str, max_hits: int = 10, window: int = 60) -> bool:
+    """True if this IP should be throttled. Sliding window."""
+    import time
+    now = time.time()
+    b = _rate_buckets.setdefault(ip, [])
+    b[:] = [t for t in b if now - t < window]
+    if len(b) >= max_hits:
+        return True
+    b.append(now)
+    return False
+
+
+def pin_throttled(ip: str) -> bool:
+    import time
+    f = _pin_fails.get(ip)
+    return bool(f and time.time() - f["at"] < 900 and f["n"] >= 5)
+
+
+def pin_failed(ip: str):
+    import time
+    f = _pin_fails.setdefault(ip, {"n": 0, "at": 0})
+    f["n"] += 1
+    f["at"] = time.time()
+
+
+@app.middleware("http")
+async def security_middleware(req: Request, call_next):
+    resp = await call_next(req)
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["X-Frame-Options"] = "DENY"
+    resp.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    return resp
+
+
 def check_pin(x_pin: str = Header(default="")):
     if x_pin != get_setting("pin"):
         raise HTTPException(status_code=401, detail="Bad PIN")
@@ -548,6 +687,103 @@ def list_restaurants():
         out.append(rd)
     conn.close()
     return out
+
+
+@app.get("/api/nearby")
+def nearby_restaurants(lat: float = 0, lng: float = 0, radius: float = 50):
+    """Restaurants within `radius` miles of the given GPS point. Sorted nearest-first."""
+    if not lat or not lng:
+        return []
+    conn = db()
+    rows = conn.execute("SELECT * FROM restaurants WHERE lat != 0 AND lng != 0").fetchall()
+    out = []
+    for r in rows:
+        d = haversine_miles(r["lat"], r["lng"], lat, lng)
+        if d <= radius:
+            rd = dict(r)
+            rd["distance_mi"] = round(d, 1)
+            items = conn.execute(
+                "SELECT * FROM menu_items WHERE restaurant_id=? AND available=1 ORDER BY id",
+                (r["id"],)).fetchall()
+            rd["menu"] = [dict(i) for i in items]
+            out.append(rd)
+    conn.close()
+    out.sort(key=lambda x: x["distance_mi"])
+    return out
+
+
+@app.get("/api/cities")
+def list_cities():
+    """Distinct cities with live restaurants, for the homepage picker."""
+    conn = db()
+    rows = conn.execute(
+        "SELECT city, state, COUNT(*) n FROM restaurants GROUP BY city, state ORDER BY n DESC").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+@app.get("/api/nearest-city")
+def nearest_city(lat: float = 0, lng: float = 0):
+    """GPS -> what city are you in, and does Drop serve it?"""
+    import math
+    city, state = "", ""
+    try:
+        q = f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lng}&format=json"
+        req = urllib.request.Request(q, headers={"User-Agent": "DropDelivery/1.0 (wearedropservicesllc@gmail.com)"})
+        data = json.load(urllib.request.urlopen(req, timeout=8))
+        addr = data.get("address", {})
+        city = addr.get("city") or addr.get("town") or addr.get("village") or addr.get("county") or ""
+        _states = {"North Dakota": "ND", "South Dakota": "SD", "Minnesota": "MN",
+                   "Nebraska": "NE", "Iowa": "IA", "Montana": "MT", "New York": "NY",
+                   "Texas": "TX", "Florida": "FL", "California": "CA"}
+        state = _states.get(addr.get("state", ""), "")
+    except Exception:
+        pass
+    conn = db()
+    cities = conn.execute(
+        "SELECT city, state, COUNT(*) n FROM restaurants GROUP BY city, state").fetchall()
+    match = None
+    for c in cities:
+        if city and c["city"].lower() == city.lower():
+            match = {"city": c["city"], "state": c["state"]}
+            break
+    if not match and lat and lng:
+        best, bestd = None, 1e9
+        rows = conn.execute(
+            "SELECT city, state, lat, lng FROM restaurants WHERE lat != 0").fetchall()
+        for r in rows:
+            d = math.hypot(r["lat"] - lat, r["lng"] - lng)
+            if d < bestd:
+                bestd, best = d, r
+        if best and bestd < 1.0:
+            match = {"city": best["city"], "state": best["state"]}
+    conn.close()
+    return {"detected_city": city, "detected_state": state, "match": match}
+
+
+@app.post("/api/spot/suggest")
+async def spot_suggest(req: Request):
+    """Customer suggests a restaurant/spot. Deduped, notifies Ken."""
+    body = await req.json()
+    name = (body.get("name") or "").strip()
+    city = (body.get("city") or "").strip()[:80]
+    if not name:
+        raise HTTPException(400, "Name required")
+    conn = db()
+    dup = conn.execute(
+        "SELECT id FROM spot_suggestions WHERE LOWER(name)=LOWER(?)", (name,)).fetchone()
+    if not dup:
+        conn.execute(
+            "INSERT INTO spot_suggestions(name, city, note, contact, created_at) VALUES(?,?,?,?,?)",
+            (name[:120], city, (body.get("note") or "")[:500],
+             (body.get("contact") or "")[:120], now_iso()))
+        conn.commit()
+    conn.close()
+    try:
+        push_ken("📍 New spot suggestion", f"{name} in {city or 'unknown city'}")
+    except Exception:
+        pass
+    return {"ok": True}
 
 
 @app.post("/api/orders")
@@ -615,32 +851,15 @@ async def create_order(req: Request):
             promo_code = pcode.strip().upper()
             conn.execute("UPDATE promo_codes SET uses=uses+1 WHERE code=?", (promo_code,))
     total = round(food_total + fee + tip - discount, 2)
-    # gift order?
-    gift = body.get("gift") or {}
-    is_gift = 1 if gift.get("recipient_name") else 0
-    gift_recipient = (gift.get("recipient_name") or "").strip()[:80]
-    gift_contact = (gift.get("recipient_contact") or "").strip()[:120]
-    gift_message = (gift.get("message") or "").strip()[:500]
     cur = conn.execute(
         """INSERT INTO orders(restaurant_id, items_json, customer_name, phone, address,
                               notes, food_total, delivery_fee, tip, discount, promo_code,
-                              user_id, total, status, stripe_status, created_at, updated_at,
-                              is_gift, gift_recipient, gift_contact, gift_message, gift_sender)
-           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'placed','pending',?,?, ?,?,?,?,?)""",
+                              user_id, total, status, stripe_status, created_at, updated_at)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'placed','pending',?,?)""",
         (rid, json.dumps(priced), name, phone, address, notes,
-         food_total, fee, tip, discount, promo_code, user_id, total, now_iso(), now_iso(),
-         is_gift, gift_recipient, gift_contact, gift_message, name if is_gift else ""))
+         food_total, fee, tip, discount, promo_code, user_id, total, now_iso(), now_iso()))
     oid = cur.lastrowid
     conn.commit()
-    # queue gift notification (sent by background job from business Gmail)
-    if is_gift and gift_contact:
-        conn.execute(
-            "INSERT INTO gift_queue(order_id, recipient, contact, message, sender, status, created_at)"
-            " VALUES(?,?,?,?,?,'pending',?)",
-            (oid, gift_recipient, gift_contact, gift_message, name, now_iso()))
-        conn.commit()
-        log_event("gift", f"🎁 Gift order #{oid} queued",
-                  f"For {gift_recipient} from {name}")
     # pin the delivery address on the map (background — never slows the order)
     def _geocode_order():
         try:
@@ -1604,6 +1823,29 @@ def list_businesses():
     return {"businesses": out, "categories": cats}
 
 
+@app.get("/api/businesses/nearby")
+def nearby_businesses(lat: float = 0, lng: float = 0, radius: float = 50):
+    """Businesses within `radius` miles of GPS point. Sorted nearest-first."""
+    if not lat or not lng:
+        return {"businesses": [], "categories": []}
+    conn = db()
+    rows = conn.execute("SELECT * FROM businesses WHERE open=1 AND lat != 0").fetchall()
+    out = []
+    for b in rows:
+        d = haversine_miles(b["lat"], b["lng"], lat, lng)
+        if d <= radius:
+            bd = dict(b)
+            bd["distance_mi"] = round(d, 1)
+            out.append(bd)
+    conn.close()
+    out.sort(key=lambda x: x["distance_mi"])
+    cats = []
+    for b in out:
+        if b["category"] not in cats:
+            cats.append(b["category"])
+    return {"businesses": out, "categories": cats}
+
+
 @app.post("/api/operator/businesses")
 async def op_add_business(req: Request, x_pin: str = Header(default="")):
     check_pin(x_pin)
@@ -1851,6 +2093,25 @@ def op_approve_driver(did: int, x_pin: str = Header(default="")):
     return {"ok": True}
 
 
+@app.post("/api/operator/drivers/{did}/photo-approve")
+async def op_approve_driver_photo(did: int, req: Request, x_pin: str = Header(default="")):
+    """Ken approves or rejects a driver's selfie/car photo."""
+    check_pin(x_pin)
+    body = await req.json()
+    photo_type = (body.get("type") or "").strip()  # 'selfie' or 'car'
+    approve = bool(body.get("approve"))
+    if photo_type not in ("selfie", "car"):
+        raise HTTPException(400, "type must be selfie or car")
+    conn = db()
+    col = "selfie_approved" if photo_type == "selfie" else "car_approved"
+    conn.execute(f"UPDATE drivers SET {col}=? WHERE id=?", (1 if approve else 0, did))
+    conn.commit()
+    conn.close()
+    action = "approved" if approve else "rejected"
+    audit("operator", f"driver_photo_{action}", "driver", did, photo_type)
+    return {"ok": True}
+
+
 @app.post("/api/operator/drivers/{did}/deny")
 def op_deny_driver(did: int, x_pin: str = Header(default="")):
     check_pin(x_pin)
@@ -1971,7 +2232,145 @@ async def driver_set_status(oid: int, req: Request):
     return {"ok": True}
 
 
-@app.post("/api/drivers/location")
+@app.post("/api/drivers/photo")
+async def driver_upload_photo(req: Request):
+    """Driver uploads selfie or car photo. Basic AI check, Ken approves."""
+    from PIL import Image
+    import io, os
+    form = await req.form()
+    driver_id = int(form.get("driver_id") or 0)
+    photo_type = (form.get("type") or "").strip()  # 'selfie' or 'car'
+    file = form.get("file")
+    if not driver_id or photo_type not in ("selfie", "car") or not file:
+        raise HTTPException(400, "driver_id, type (selfie/car), and file required")
+    data = await file.read()
+    if len(data) > 5 * 1024 * 1024:
+        raise HTTPException(400, "Photo too large (max 5MB)")
+    # AI basic check: valid image, not blank, reasonable size
+    try:
+        img = Image.open(io.BytesIO(data))
+        img.verify()
+        img = Image.open(io.BytesIO(data))  # reopen after verify
+        w, h = img.size
+        if w < 200 or h < 200:
+            raise HTTPException(400, "Photo too small — use a clearer picture")
+        # Check not blank (sample pixels)
+        small = img.resize((10, 10)).convert("RGB")
+        pixels = list(small.getdata())
+        if len(set(pixels)) < 5:
+            raise HTTPException(400, "Photo looks blank — retake it")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(400, "Invalid image file")
+    # Save
+    os.makedirs("static/driver-photos", exist_ok=True)
+    fname = f"d{driver_id}_{photo_type}_{int(__import__('time').time())}.jpg"
+    path = f"static/driver-photos/{fname}"
+    img.convert("RGB").save(path, "JPEG", quality=85)
+    # Update driver record (pending Ken's approval)
+    conn = db()
+    col = "selfie_photo" if photo_type == "selfie" else "car_photo"
+    appcol = "selfie_approved" if photo_type == "selfie" else "car_approved"
+    conn.execute(f"UPDATE drivers SET {col}=?, {appcol}=0 WHERE id=?",
+                 (f"/{path}", driver_id))
+    conn.commit()
+    conn.close()
+    log_event("driver", f"📸 Driver #{driver_id} uploaded {photo_type} photo",
+              "Awaiting Ken's approval")
+    return {"ok": True, "path": f"/{path}", "message": "Photo uploaded — Ken will review it"}
+
+
+@app.post("/api/drivers/delivery-photo")
+async def driver_delivery_photo(req: Request):
+    """Driver snaps pickup/dropoff proof photo. Customer sees it live."""
+    from PIL import Image
+    import io, os
+    form = await req.form()
+    driver_id = int(form.get("driver_id") or 0)
+    order_id = int(form.get("order_id") or 0)
+    photo_type = (form.get("type") or "").strip()  # 'pickup' or 'dropoff'
+    file = form.get("file")
+    if not driver_id or not order_id or photo_type not in ("pickup", "dropoff") or not file:
+        raise HTTPException(400, "driver_id, order_id, type (pickup/dropoff), file required")
+    data = await file.read()
+    if len(data) > 5 * 1024 * 1024:
+        raise HTTPException(400, "Photo too large (max 5MB)")
+    try:
+        img = Image.open(io.BytesIO(data))
+        img.verify()
+        img = Image.open(io.BytesIO(data))
+    except Exception:
+        raise HTTPException(400, "Invalid image file")
+    os.makedirs("static/delivery-photos", exist_ok=True)
+    fname = f"o{order_id}_{photo_type}_{int(__import__('time').time())}.jpg"
+    path = f"static/delivery-photos/{fname}"
+    img.convert("RGB").save(path, "JPEG", quality=80)
+    conn = db()
+    conn.execute(
+        "INSERT INTO delivery_photos(order_id, driver_id, photo_type, photo_path, created_at)"
+        " VALUES(?,?,?,?,?)",
+        (order_id, driver_id, photo_type, f"/{path}", now_iso()))
+    # Update order status
+    if photo_type == "pickup":
+        conn.execute("UPDATE orders SET status='picked_up', updated_at=? WHERE id=?",
+                     (now_iso(), order_id))
+    elif photo_type == "dropoff":
+        conn.execute("UPDATE orders SET status='delivered', updated_at=? WHERE id=?",
+                     (now_iso(), order_id))
+    conn.commit()
+    conn.close()
+    label = "picked up" if photo_type == "pickup" else "delivered"
+    log_event("delivery", f"📸 Order #{order_id} {label} — photo proof",
+              f"Driver #{driver_id}")
+    return {"ok": True, "path": f"/{path}"}
+
+
+@app.get("/api/orders/{oid}/photos")
+def order_photos(oid: int):
+    """Customer sees pickup/dropoff photo proof."""
+    conn = db()
+    rows = conn.execute(
+        "SELECT photo_type, photo_path, created_at FROM delivery_photos"
+        " WHERE order_id=? ORDER BY id", (oid,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+@app.post("/api/driver/nearby")
+async def driver_nearby(req: Request):
+    """Customer picks driver: approved drivers within 15 miles, sorted by rating."""
+    import math
+    body = await req.json()
+    lat = float(body.get("lat") or 0)
+    lng = float(body.get("lng") or 0)
+    if not lat or not lng:
+        raise HTTPException(400, "Location required")
+    conn = db()
+    rows = conn.execute(
+        "SELECT id, name, rating, rating_count, deliveries, selfie_photo, car_photo,"
+        " vehicle_make, vehicle_model, vehicle_color, last_lat, last_lng"
+        " FROM drivers WHERE status='approved' AND selfie_approved=1").fetchall()
+    out = []
+    for d in rows:
+        if not d["last_lat"]:
+            continue
+        dist = math.hypot(d["last_lat"] - lat, d["last_lng"] - lng) * 69
+        if dist <= 15:
+            out.append({
+                "id": d["id"], "name": d["name"].split()[0] + " " + (d["name"].split()[1][:1] + "." if len(d["name"].split()) > 1 else ""),
+                "rating": round(d["rating"] or 5.0, 1), "deliveries": d["deliveries"],
+                "distance_mi": round(dist, 1),
+                "photo": d["selfie_photo"],
+                "car": f"{d['vehicle_color']} {d['vehicle_make']} {d['vehicle_model']}".strip(),
+                "car_photo": d["car_photo"],
+            })
+    conn.close()
+    out.sort(key=lambda x: (-x["rating"], x["distance_mi"]))
+    return out
+
+
+@app.post("/api/driver/location")
 async def driver_location(req: Request):
     """A dropper's phone posts GPS — updates orders + detects speeding."""
     d = get_driver(req)
@@ -2058,11 +2457,22 @@ async def op_assign_order(oid: int, req: Request, x_pin: str = Header(default=""
     driver_id = int(body.get("driver_id") or 0)
     conn = db()
     if driver_id:
-        dr = conn.execute("SELECT id, name FROM drivers WHERE id=? AND status='approved'",
+        dr = conn.execute("SELECT id, name, last_lat, last_lng FROM drivers WHERE id=? AND status='approved'",
                           (driver_id,)).fetchone()
         if not dr:
             conn.close()
             raise HTTPException(400, "Driver not found or not approved")
+        # 15-mile radius: driver must be near the restaurant
+        o = conn.execute("SELECT restaurant_id FROM orders WHERE id=?", (oid,)).fetchone()
+        if o and o["restaurant_id"]:
+            r = conn.execute("SELECT lat, lng, name FROM restaurants WHERE id=?",
+                             (o["restaurant_id"],)).fetchone()
+            if r and r["lat"] and dr["last_lat"]:
+                d = haversine_miles(r["lat"], r["lng"], dr["last_lat"], dr["last_lng"])
+                if d > 15:
+                    conn.close()
+                    raise HTTPException(400,
+                        f"{dr['name']} is {d:.1f} miles from {r['name']} — outside the 15-mile delivery radius. Assign a closer driver.")
     conn.execute("UPDATE orders SET driver_id=?, updated_at=? WHERE id=?",
                  (driver_id, now_iso(), oid))
     conn.commit()
@@ -2276,8 +2686,8 @@ async def partner_apply(req: Request):
     return {"ok": True, "id": pid}
 
 
-@app.get("/api/operator/partners")
-def op_partners(x_pin: str = Header(default=""), status: str = ""):
+@app.get("/api/operator/restaurant-apps")
+def op_restaurant_apps(x_pin: str = Header(default=""), status: str = ""):
     """Ken's deal pipeline. Filter by stage."""
     check_pin(x_pin)
     conn = db()
@@ -2742,29 +3152,8 @@ def op_outreach_sent(eid: int, x_pin: str = Header(default="")):
     conn.commit()
     conn.close()
     audit("system", "outreach_sent", "outreach", eid, "")
-    log_event("email", f"📧 Outreach email sent", f"ID {eid}")
-    return {"ok": True}
-
-
-# Render redeploy trigger 2026-10-11 00:40 CDT — ensure gift-queue endpoints live
-@app.get("/api/operator/gift-queue")
-def op_gift_queue(x_pin: str = Header(default="")):
-    """Pending gift notifications for the background sender."""
-    check_pin(x_pin)
-    conn = db()
-    rows = conn.execute("SELECT * FROM gift_queue WHERE status='pending' ORDER BY id").fetchall()
-    out = [dict(r) for r in rows]
-    conn.close()
-    return out
-
-
-@app.post("/api/operator/gift-queue/{gid}/sent")
-def op_gift_sent(gid: int, x_pin: str = Header(default="")):
-    check_pin(x_pin)
-    conn = db()
-    conn.execute("UPDATE gift_queue SET status='sent' WHERE id=?", (gid,))
-    conn.commit()
-    conn.close()
+    log_event("email", f"📧 Outreach email sent to {e['to_email'][:40]}",
+              e["subject"][:80])
     return {"ok": True}
 
 
@@ -2901,6 +3290,210 @@ def op_suggestions(x_pin: str = Header(default="")):
     out.sort(key=lambda x: order.get(x["priority"], 3))
     log_event("suggestions", f"Generated {len(out)} AI suggestions", "")
     return out
+
+
+# ---------------- AI bot chat ----------------
+@app.get("/api/operator/bot/history")
+def op_bot_history(x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    conn = db()
+    rows = conn.execute(
+        "SELECT id, role, message, created_at FROM bot_chats ORDER BY id DESC LIMIT 50").fetchall()
+    conn.close()
+    return [dict(r) for r in reversed(rows)]
+
+
+@app.post("/api/operator/bot/send")
+async def op_bot_send(req: Request, x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    body = await req.json()
+    msg = (body.get("message") or "").strip()
+    if not msg:
+        raise HTTPException(400, "Empty message")
+    conn = db()
+    conn.execute("INSERT INTO bot_chats(role, message, created_at) VALUES('ken', ?, ?)",
+                 (msg[:2000], now_iso()))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.post("/api/operator/bot/reply")
+async def op_bot_reply(req: Request, x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    body = await req.json()
+    msg = (body.get("message") or "").strip()
+    if not msg:
+        raise HTTPException(400, "Empty message")
+    conn = db()
+    conn.execute("INSERT INTO bot_chats(role, message, created_at) VALUES('milli', ?, ?)",
+                 (msg[:2000], now_iso()))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+# ---------------- AI improvement ideas ----------------
+@app.get("/api/operator/ideas")
+def op_ideas(x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    conn = db()
+    rows = conn.execute(
+        "SELECT id, title, description, why_beats, status, created_at FROM ai_ideas ORDER BY id DESC LIMIT 30").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+@app.post("/api/operator/ideas")
+async def op_ideas_add(req: Request, x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    body = await req.json()
+    title = (body.get("title") or "").strip()
+    if not title:
+        raise HTTPException(400, "Title required")
+    conn = db()
+    dup = conn.execute("SELECT id FROM ai_ideas WHERE title=? AND status IN ('pending','approved')",
+                       (title,)).fetchone()
+    if dup:
+        conn.close()
+        return {"ok": True, "duplicate": True}
+    conn.execute("INSERT INTO ai_ideas(title, description, why_beats, created_at) VALUES(?,?,?,?)",
+                 (title[:120], (body.get("description") or "")[:1000],
+                  (body.get("why_beats") or "")[:500], now_iso()))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.post("/api/operator/ideas/{iid}/{action}")
+def op_ideas_action(iid: int, action: str, x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    if action not in ("approve", "reject"):
+        raise HTTPException(400, "Bad action")
+    conn = db()
+    conn.execute("UPDATE ai_ideas SET status=? WHERE id=?",
+                 ("approved" if action == "approve" else "rejected", iid))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+# ---------------- Command dashboard ----------------
+@app.get("/api/operator/command-stats")
+def op_command_stats(x_pin: str = Header(default="")):
+    """Everything the command dashboard needs, in one call."""
+    check_pin(x_pin)
+    conn = db()
+    today = now_iso()[:10]
+    orders_today = conn.execute(
+        "SELECT COUNT(*) FROM orders WHERE created_at LIKE ?", (today + "%",)).fetchone()[0]
+    rev_today = conn.execute(
+        "SELECT COALESCE(SUM(delivery_fee),0) FROM orders WHERE created_at LIKE ? AND stripe_status='paid'",
+        (today + "%",)).fetchone()[0]
+    active = conn.execute(
+        "SELECT COUNT(*) FROM orders WHERE status IN ('new','confirmed','preparing','on_the_way')").fetchone()[0]
+    restaurants = conn.execute("SELECT COUNT(*) FROM restaurants").fetchone()[0]
+    cities = conn.execute("SELECT COUNT(DISTINCT city) FROM restaurants").fetchone()[0]
+    pending_partners = conn.execute(
+        "SELECT COUNT(*) FROM partner_applications WHERE status='new'").fetchone()[0]
+    pending_prospects = conn.execute(
+        "SELECT COUNT(*) FROM prospects WHERE status='draft'").fetchone()[0]
+    auto = (conn.execute("SELECT value FROM settings WHERE key='auto_outreach'").fetchone() or ["0"])[0]
+    paused = (conn.execute("SELECT value FROM settings WHERE key='paused'").fetchone() or ["0"])[0]
+    conn.close()
+    return {"orders_today": orders_today, "revenue_today": round(rev_today or 0, 2),
+            "active_orders": active, "restaurants": restaurants, "cities": cities,
+            "pending_partners": pending_partners, "pending_prospects": pending_prospects,
+            "auto_outreach": auto == "1", "paused": paused == "1"}
+
+
+@app.get("/api/watch/status")
+def watch_status():
+    """Public watch portal: site health WITHOUT revenue/profit. For LOVE code holders."""
+    conn = db()
+    today = now_iso()[:10]
+    orders_today = conn.execute(
+        "SELECT COUNT(*) FROM orders WHERE created_at LIKE ?", (today + "%",)).fetchone()[0]
+    active = conn.execute(
+        "SELECT COUNT(*) FROM orders WHERE status IN ('new','confirmed','preparing','on_the_way')").fetchone()[0]
+    restaurants = conn.execute("SELECT COUNT(*) FROM restaurants").fetchone()[0]
+    cities = conn.execute("SELECT COUNT(DISTINCT city) FROM restaurants").fetchone()[0]
+    # AI upgrades (titles only, no details that could be copied)
+    upgrades = conn.execute(
+        "SELECT title, status FROM ai_ideas WHERE status IN ('pending','approved') ORDER BY id DESC LIMIT 5").fetchall()
+    # Recent maintenance events
+    maint = conn.execute(
+        "SELECT title, created_at FROM system_events WHERE kind IN ('maintenance','suggestions','warning') ORDER BY id DESC LIMIT 5").fetchall()
+    conn.close()
+    # Health assessment (no money numbers)
+    if active > 0 and orders_today > 0:
+        health, label = "good", "THRIVING 🟢"
+    elif orders_today > 0:
+        health, label = "good", "HEALTHY 🟢"
+    elif restaurants > 10:
+        health, label = "warn", "BUILDING 🟡"
+    else:
+        health, label = "warn", "STARTING UP 🟡"
+    # Trend (order count direction, no revenue)
+    trend = "Growing" if orders_today > 2 else "Steady" if orders_today > 0 else "Launching"
+    return {
+        "health": health, "health_label": label,
+        "restaurants": restaurants, "cities": cities,
+        "orders_today": orders_today, "active": active,
+        "upgrades": [{"title": u["title"], "status": u["status"]} for u in upgrades],
+        "maintenance": [{"title": m["title"], "when": m["created_at"][:16]} for m in maint],
+        "site_up": True, "orders_flowing": orders_today > 0, "trend": trend,
+    }
+
+
+# ---------------- Restaurant partner applications ----------------
+@app.post("/api/partner/apply")
+async def restaurant_partner_apply(req: Request):
+    """Public: restaurant partnership application."""
+    body = await req.json()
+    name = (body.get("business_name") or "").strip()
+    if not name:
+        raise HTTPException(400, "Business name required")
+    conn = db()
+    conn.execute(
+        """INSERT INTO partner_applications(business_name, contact_name, email, phone, city, state,
+           cuisine, locations, volume, proposal, created_at)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+        (name[:120], (body.get("contact_name") or "")[:80], (body.get("email") or "")[:120],
+         (body.get("phone") or "")[:40], (body.get("city") or "")[:80],
+         (body.get("state") or "")[:10], (body.get("cuisine") or "")[:60],
+         int(body.get("locations") or 1), (body.get("volume") or "")[:200],
+         (body.get("proposal") or "")[:2000], now_iso()))
+    conn.commit()
+    conn.close()
+    try:
+        push_ken("🤝 New partner application", name)
+    except Exception:
+        pass
+    return {"ok": True}
+
+
+@app.get("/api/operator/food-partner-apps")
+def op_restaurant_applications(x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    conn = db()
+    rows = conn.execute(
+        "SELECT * FROM partner_applications ORDER BY id DESC").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+@app.post("/api/operator/food-partner-apps/{pid}/{action}")
+def op_restaurant_application_action(pid: int, action: str, x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    if action not in ("approve", "reject"):
+        raise HTTPException(400, "Bad action")
+    conn = db()
+    conn.execute("UPDATE partner_applications SET status=? WHERE id=?",
+                 ("approved" if action == "approve" else "rejected", pid))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
 
 
 # ---------------- Drop Investors ----------------

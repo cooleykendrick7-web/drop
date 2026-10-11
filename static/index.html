@@ -126,22 +126,18 @@ async function load(){
       }catch(e){ resolve(null); }
     }, ()=>resolve(null), {timeout:8000, maximumAge:600000});
   });
+  const _updHead = ()=>{ const hc=document.getElementById('headcity'); const v=(pick.value||'').split('|')[0]; if(v){hc.textContent=v;hc.style.display='';} };
   if(gpsCity && gpsCity.match){
     cur = `${gpsCity.match.city}|${gpsCity.match.state}`;
     localStorage.setItem('dropcity', cur);
-    const hc = document.getElementById('headcity');
-    hc.textContent = gpsCity.match.city; hc.style.display = '';
     document.getElementById('gpsnote').innerHTML = `📍 You're in <b>${gpsCity.detected_city||gpsCity.match.city}</b> — showing spots near you.`;
   } else if(gpsCity && gpsCity.detected_city){
     const hc = document.getElementById('headcity');
     hc.textContent = gpsCity.detected_city; hc.style.display = '';
     document.getElementById('gpsnote').innerHTML = `📍 You're in <b>${gpsCity.detected_city}</b> — Drop isn't there <i>yet</i>. <a href="#suggest">Suggest a spot</a> and we'll come to you.`;
   }
-  // Manual city selection also updates the header
-  const _updHead = ()=>{ const hc=document.getElementById('headcity'); const v=(pick.value||'').split('|')[0]; if(v){hc.textContent=v;hc.style.display='';} };
   pick.value = cur; _updHead();
   pick.onchange = ()=>{ localStorage.setItem('dropcity', pick.value); _updHead(); load(); };
-  // Manual city entry + Use-my-location button
   document.getElementById('manualcity').onclick=()=>{
     const b=document.getElementById('manualbox');
     b.style.display=b.style.display==='none'?'block':'none';
@@ -150,7 +146,6 @@ async function load(){
     const c=document.getElementById('mancity').value.trim();
     const s=document.getElementById('manstate').value.trim().toUpperCase();
     if(!c||!s){alert('Enter both city and state (e.g. Atlanta GA)');return;}
-    // Add to picker if it's a Drop city, else just set the label
     const key=`${c}|${s}`;
     if(![...pick.options].some(o=>o.value===key)){
       const opt=document.createElement('option');opt.value=key;opt.textContent=`${c}, ${s}`;
@@ -178,7 +173,6 @@ async function load(){
     },()=>{document.getElementById('gpsnote').innerHTML='Location permission denied.';},{timeout:10000});
   };
   const [ccity, cstate] = (pick.value||'|').split('|');
-  // 50-mile radius when we have GPS, otherwise fall back to city match
   let r;
   if(window._gps && window._gps.lat){
     r = await (await fetch(`/api/nearby?lat=${window._gps.lat}&lng=${window._gps.lng}&radius=50`)).json();

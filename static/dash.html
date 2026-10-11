@@ -295,7 +295,6 @@ async function loadHome(){
       <div style="font-size:1.4rem;font-weight:800">${v}</div>
       <div class="small">${l}</div>
     </div>`).join('');
-  // Attention items
   const attn=[];
   if(s.pending_partners>0) attn.push(`🤝 <b>${s.pending_partners}</b> partner applications waiting — <a href="#" onclick="goTab('deals');return false">review them</a>`);
   if(s.active_orders>0) attn.push(`🛵 <b>${s.active_orders}</b> active orders right now — <a href="#" onclick="goTab('orders');return false">view</a>`);

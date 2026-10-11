@@ -63,6 +63,18 @@
       <p class="small" id="mstats"></p>
       <p class="small" id="mvehicle"></p>
       <button class="btn small ghost" id="logout">Log out</button></div>
+    <div class="card"><h3>📸 Profile Photos</h3>
+      <p class="small">Customers see your selfie and car. AI checks quality, Ken approves.</p>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div><p class="small"><b>Selfie</b> <span id="selfiestatus"></span></p>
+          <img id="selfieprev" style="width:100%;border-radius:8px;display:none">
+          <input type="file" id="selfiefile" accept="image/*" style="font-size:.8rem">
+          <button class="btn small" id="selfiebtn" style="margin-top:6px">Upload selfie</button></div>
+        <div><p class="small"><b>Car</b> <span id="carstatus"></span></p>
+          <img id="carprev" style="width:100%;border-radius:8px;display:none">
+          <input type="file" id="carfile" accept="image/*" style="font-size:.8rem">
+          <button class="btn small" id="carbtn" style="margin-top:6px">Upload car</button></div>
+      </div></div>
     <div class="card"><h3>Need help?</h3>
       <p class="small">Message Drop support anytime from the 💬 chat bubble — we typically reply fast.</p></div>
   </div>
@@ -89,6 +101,23 @@ $('gobtn').onclick=async()=>{
   $('dname').textContent='· '+j.name;
   loadOrders();
 };
+// Photo uploads
+async function uploadPhoto(type){
+  const inp=$(type+'file'); const f=inp.files[0];
+  if(!f){alert('Pick a photo first');return;}
+  const fd=new FormData();
+  fd.append('driver_id', ME.id); fd.append('type', type==='selfiefile'?'selfie':'car'); fd.append('file', f);
+  const btn=$(type==='selfiefile'?'selfiebtn':'carbtn');
+  btn.disabled=true; btn.textContent='Uploading…';
+  try{
+    const r=await(await fetch('/api/drivers/photo',{method:'POST',body:fd})).json();
+    if(r.ok){alert('Photo uploaded! Ken will review it.');location.reload();}
+    else alert(r.detail||'Upload failed');
+  }catch(e){alert('Upload failed');}
+  btn.disabled=false; btn.textContent='Upload';
+}
+$('selfiebtn').onclick=()=>uploadPhoto('selfiefile');
+$('carbtn').onclick=()=>uploadPhoto('carfile');
 $('logout').onclick=async()=>{
   await fetch('/api/drivers/logout',{method:'POST'});
   location.reload();
