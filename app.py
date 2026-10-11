@@ -2661,24 +2661,37 @@ def op_outreach_list(x_pin: str = Header(default=""), status: str = ""):
 
 @app.post("/api/operator/outreach/{eid}/send")
 async def op_outreach_send(eid: int, req: Request, x_pin: str = Header(default="")):
-    """Ken approved → send the email via Gmail. (Uses the connected Gmail account.)"""
+    """Ken approved → send the email via the Drop business Gmail account."""
     check_pin(x_pin)
     conn = db()
     e = conn.execute("SELECT * FROM outreach_emails WHERE id=?", (eid,)).fetchone()
     conn.close()
     if not e or e["status"] != "draft":
         raise HTTPException(400, "Email not found or already sent")
-    # Send via Gmail skill CLI
     import subprocess as sp
+    import json as _j
+    # find the Drop business Gmail account
     try:
-        result = sp.run(
-            ["hatch_gmail", "send", "--to", e["to_email"],
-             "--subject", e["subject"], "--body", e["body"]],
-            capture_output=True, text=True, timeout=60)
-        if result.returncode != 0:
-            raise HTTPException(500, f"Gmail send failed: {result.stderr[:200]}")
-    except FileNotFoundError:
-        raise HTTPException(500, "Gmail CLI not available. Connect Gmail first.")
+        accts = sp.run(["hatch_gws_cli", "gmail", "accounts"],
+                       capture_output=True, text=True, timeout=30)
+        accounts = _j.loads(accts.stdout).get("accounts", [])
+        biz = next((a for a in accounts
+                    if "wearedropservicesllc" in a.get("display_name", "").lower()), None)
+        if not biz:
+            raise HTTPException(400,
+                "Drop business Gmail (wearedropservicesllc@gmail.com) is not linked yet. "
+                "Link it under Gmail accounts, then try again.")
+        acct_id = biz["account_id"]
+    except HTTPException:
+        raise
+    except Exception as ex:
+        raise HTTPException(500, f"Could not list Gmail accounts: {str(ex)[:100]}")
+    result = sp.run(
+        ["hatch_gws_cli", "gmail", "+send", "--account", acct_id,
+         "--to", e["to_email"], "--subject", e["subject"], "--body", e["body"]],
+        capture_output=True, text=True, timeout=90)
+    if result.returncode != 0:
+        raise HTTPException(500, f"Gmail send failed: {result.stderr[:200]}")
     conn = db()
     conn.execute("UPDATE outreach_emails SET status='sent', sent_at=? WHERE id=?",
                  (now_iso(), eid))
