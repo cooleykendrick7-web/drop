@@ -1,39 +1,45 @@
 <!DOCTYPE html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Drop — Food Pickup & Delivery Anywhere | Faster Than DoorDash</title>
-<meta name="description" content="You order from the restaurant, we pick it up and drop it at your door. One pickup + delivery fee, one local driver, real-time tracking.">
-<meta property="og:title" content="Drop — Food Delivery">
-<meta property="og:description" content="You order, we pick it up, dropped at your door.">
+<title>Drop — Pick Up. Deliver. Done.</title>
+<meta name="description" content="Drop delivers your favorites to your door — food, auto parts, supplies & more. One flat fee, one local driver, real-time tracking.">
+<meta property="og:title" content="Drop — Pick Up. Deliver. Done.">
 <meta property="og:image" content="/static/logo.jpg">
 <link rel="icon" href="/static/logo-mark.jpg">
 <link rel="stylesheet" href="/static/styles.css">
+<style>
+#splash{position:fixed;inset:0;background:#0a0a0c;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:100;transition:opacity .5s}
+#splash.hide{opacity:0;pointer-events:none}
+#splash img{width:min(70vw,320px);border-radius:20px;margin-bottom:32px}
+#enterbtn{font-size:1.3rem;padding:16px 48px}
+#gpstext{color:#888;margin-top:16px;font-size:.9rem;text-align:center;padding:0 24px}
+#main{display:none}
+#main.show{display:block}
+.citytag{background:var(--acc);color:#000;font-weight:800;padding:2px 10px;border-radius:12px;font-size:.8rem}
+</style>
 </head><body>
+
+<!-- SPLASH: logo + enter button -->
+<div id="splash">
+  <img src="/static/logo.jpg" alt="Drop — Pick up. Deliver. Done.">
+  <button class="btn" id="enterbtn">Enter Drop →</button>
+  <p id="gpstext">We use your location to show what's available near you.</p>
+</div>
+
+<!-- MAIN APP (after GPS) -->
+<div id="main">
 <header class="topbar">
-  <a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg" alt="Drop"><b>Drop</b><span class="tag" id="headcity" style="display:none"></span></a>
-  <a href="/rides.html" style="color:#d4af37;text-decoration:none;font-weight:700;font-size:.9rem">🚗 Rides</a>
+  <a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg" alt="Drop"><b>Drop</b><span class="citytag" id="citytag">📍 Locating…</span></a>
   <a class="acct" href="/account.html">👤 Account</a>
 </header>
 
 <div class="hero">
-  <div class="orb o1" aria-hidden="true"></div>
-  <div class="orb o2" aria-hidden="true"></div>
-  <img class="logo-full" src="/static/logo.jpg" alt="Drop — Pick up. Deliver. Done.">
-  <h1>Your favorite food,<br><span class="hl">dropped at your door.</span></h1>
-  <p class="tagline" id="tagline">We drop it at your door.</p>
-  <div style="max-width:340px;margin:0 auto 14px">
-    <input id="search" placeholder="🔍 Search restaurants or cities…" style="width:100%;padding:12px 16px;border-radius:24px;border:2px solid var(--acc);font-size:1rem;text-align:center">
-  </div>
-  <a class="cta" href="#restaurants">🍽️ Pick a spot for pickup</a>
-  <div class="card" style="max-width:340px;margin:16px auto;text-align:center;border:2px solid var(--acc)">
-    <div style="font-size:2rem">📦</div>
-    <h3 style="margin:8px 0">Need anything picked up?</h3>
-    <p class="small">Already ordered food? Packages, anything. We pick it up and bring it to you. Works in every city.</p>
-    <a href="/drop.html" class="btn" style="margin-top:8px">Request a Drop →</a>
-  </div>
+  <h1 id="hero-title">Your favorites,<br><span class="hl">dropped at your door.</span></h1>
+  <p class="tagline" id="tagline">One local driver. One flat fee. Real-time tracking.</p>
+  <a class="cta" href="#restaurants">Order now</a>
   <div class="trust">
     <span class="pill">🔒 Secure checkout</span>
-    <span class="pill">🛵 <b id="feepill">$3.99</b> delivery</span>
-    <span class="pill">📍 <span id="zonepill">Locating you…</span></span>
+    <span class="pill">🛵 <b id="feepill">$3.99</b> flat delivery</span>
+    <span class="pill">📍 <span id="zonepill">Your area</span></span>
   </div>
   <div id="openstat" class="small" style="margin-top:10px"></div>
 </div>
@@ -45,208 +51,115 @@
   <span class="small">Auto parts · Clothing · Supplies · Documents — we pick it up, we drop it off. Tap to request a pickup →</span></div></div>
 </div></a>
 
-<a href="/rides.html" style="text-decoration:none"><div class="card" style="background:linear-gradient(135deg,#0d0d10,#1a1405);border:1px solid #d4af37;margin:18px 0;text-align:center">
-  <div style="font-size:.7rem;letter-spacing:3px;color:#d4af37">DROP&nbsp;RIDES</div>
-  <div style="font-size:1.4rem;margin:6px 0">🚗 <b>Coming soon</b></div>
-  <div class="small" id="rides-cd" style="color:#d4af37">Launching in …</div>
-  <div class="small" style="margin-top:6px">Your ride, your way — upfront pricing, no surge games. Tap to see fares →</div>
-</div></a>
-
 <div class="section-title" id="restaurants">
-  <h2>Pick a spot — we'll grab your order</h2><span id="count"></span>
+  <h2>Order near you</h2><span id="count"></span>
 </div>
 <div id="list"></div>
 
-<div class="card" id="suggest" style="text-align:center;margin-top:18px">
-  <h3>📍 Know a spot we're missing?</h3>
-  <p class="small">Tell us and we'll reach out to them.</p>
-  <div class="row"><input id="spotname" placeholder="Restaurant name" style="flex:1;margin-right:6px">
-  <input id="spotcity" placeholder="City" style="flex:1"></div>
-  <button class="btn" id="spotsend" style="margin-top:8px">Suggest it</button>
-  <p class="small" id="spotmsg"></p>
-</div>
-<script>
-document.getElementById('spotsend').onclick=async()=>{
-  const n=document.getElementById('spotname').value.trim();
-  if(!n){document.getElementById('spotmsg').textContent='Give us a name first!';return;}
-  await fetch('/api/spot/suggest',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({name:n,city:document.getElementById('spotcity').value.trim()})});
-  document.getElementById('spotmsg').textContent='Thanks! We\'ll check them out. 🧡';
-  document.getElementById('spotname').value='';
-};
-</script>
-
-<div class="section-title" style="margin-top:34px">
-  <h2>Why everyone loves Drop</h2>
-</div>
+<div class="section-title" style="margin-top:34px"><h2>Why people love Drop</h2></div>
 <div class="card" style="padding:0;overflow:hidden">
   <video src="/static/promo-commercial.mp4" controls playsinline preload="metadata"
     style="width:100%;display:block;aspect-ratio:16/9;background:#000"></video>
-</div>
-<div class="promo-grid">
-  <img src="/static/promo-doorstep.webp" alt="Drop driver delivering to a happy customer">
-  <img src="/static/promo-family.webp" alt="Happy family enjoying Drop delivery">
-  <img src="/static/promo-kids.webp" alt="Kids excited for their Drop delivery">
-  <img src="/static/promo-driver.webp" alt="Drop driver on the way">
 </div>
 <p class="small" style="text-align:center;margin-top:10px">Real driver. Real fast. Real fresh. 🧡</p>
 
 <footer>
   <div class="motto"><a class="secret" href="/dash">PICK UP &nbsp;•&nbsp; DELIVER &nbsp;•&nbsp; DONE</a></div>
-  <div>Drop — Bismarck, North Dakota</div>
+  <div>Drop — <span id="footcity">your city</span></div>
   <div style="margin-top:8px">📧 <a href="mailto:wearedropservicesllc@gmail.com">wearedropservicesllc@gmail.com</a><br>📞 <a href="tel:+12629777869">(262) 977-7869</a></div>
-  <div style="margin-top:8px"><a href="/courier.html">📦 Drop More</a> · <a href="/partner.html">🤝 Partner With Us</a> · <a href="/drive.html">🚗 Drive for Drop</a> · <a href="/investors.html">💰 Investors</a> · <a href="/terms">Terms & refund policy</a></div>
+  <div style="margin-top:8px"><a href="/courier.html">📦 Drop More</a> · <a href="/rides.html">🚗 Rides</a> · <a href="/partner.html">🤝 Partner With Us</a> · <a href="/drive.html">🚗 Drive for Drop</a> · <a href="/investors.html">💰 Investors</a> · <a href="/terms">Terms & refund policy</a></div>
+  <div style="margin-top:12px"><button class="btn ghost small" id="resetbtn" style="width:auto">🔄 Reset app data</button></div>
 </footer>
+</div>
 
 <script src="/static/chat.js"></script>
 <script>
 if(!sessionStorage.getItem('dropv')){sessionStorage.setItem('dropv','1');
 fetch('/api/visit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({page:'home'})});}
+
+// GPS → city detection
+let userCity='', userLat=0, userLng=0;
+document.getElementById('enterbtn').onclick=()=>{
+  document.getElementById('gpstext').textContent='Requesting your location…';
+  if(!navigator.geolocation){enterApp('your area');return;}
+  navigator.geolocation.getCurrentPosition(
+    async pos=>{
+      userLat=pos.coords.latitude; userLng=pos.coords.longitude;
+      try{
+        // reverse geocode via free Nominatim
+        const r=await (await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${userLat}&lon=${userLng}&format=json`,{headers:{'Accept':'application/json'}})).json();
+        const a=r.address||{};
+        userCity=a.city||a.town||a.village||a.county||'your area';
+        const state=a.state_code||a.state||'';
+        if(state) userCity+=', '+state;
+      }catch(e){ userCity='your area'; }
+      try{localStorage.setItem('dropcity',userCity);localStorage.setItem('droplat',userLat);localStorage.setItem('droplng',userLng);}catch(e){}
+      enterApp(userCity);
+    },
+    ()=>{ enterApp(localStorage.getItem('dropcity')||'your area'); }, // denied → use last or generic
+    {timeout:8000}
+  );
+};
+function enterApp(city){
+  userCity=city;
+  document.getElementById('splash').classList.add('hide');
+  document.getElementById('main').classList.add('show');
+  document.getElementById('citytag').textContent='📍 '+city;
+  document.getElementById('zonepill').textContent=city;
+  document.getElementById('footcity').textContent=city;
+  document.getElementById('hero-title').innerHTML=`Drop in ${city.replace(/</g,'&lt;')},<br><span class="hl">dropped at your door.</span>`;
+  document.title=`Drop — Delivery in ${city}`;
+  load();
+}
+// returning visitor who already entered: skip splash
+try{
+  const c=localStorage.getItem('dropcity');
+  if(c){document.getElementById('splash').style.display='none';enterApp(c);}
+}catch(e){}
+
+document.getElementById('resetbtn').onclick=()=>{
+  if(!confirm('Reset all Drop data on this device? (carts, saved city, preferences)'))return;
+  Object.keys(localStorage).filter(k=>k.startsWith('drop')).forEach(k=>localStorage.removeItem(k));
+  sessionStorage.clear();
+  location.reload();
+};
+
 async function load(){
-  // Simple: load config + all restaurants, enable search
-  try{
-    const cfg = await (await fetch('/api/config')).json();
-    if(cfg.tagline) document.getElementById('tagline').textContent = cfg.tagline;
-    if(cfg.delivery_fee) document.getElementById('feepill').textContent = '$'+Number(cfg.delivery_fee).toFixed(2);
-  }catch(e){}
-  let allR = [];
-  try{
-    allR = await (await fetch('/api/restaurants')).json();
-  }catch(e){}
-  window._allR = allR;
-  try{
-    const cities = new Set(allR.map(x=>((x.city||'')+', '+(x.state||'')).toLowerCase()));
-    cities.delete(', ');
-    document.getElementById('zonepill').textContent = '📍 ' + cities.size + ' cities';
-  }catch(e){}
-  renderRestaurants('');
-  // Search box
-  const si = document.getElementById('search');
-  if(si){
-    si.addEventListener('input', ()=> handleSearch(si.value.trim()));
+  const cfg = await (await fetch('/api/config')).json();
+  if(cfg.tagline) document.getElementById('tagline').textContent = cfg.tagline;
+  const os=document.getElementById('openstat');
+  os.innerHTML = cfg.open_now
+    ? `🟢 <b>Open now</b> · ${cfg.hours_label}`
+    : `🔴 <b>Closed</b> — back at ${cfg.hours_label.split('–')[0]}`;
+  const cta=document.querySelector('.cta');
+  if(!cfg.open_now){cta.style.opacity=.5;}
+  const fee = cfg.delivery_fee || 3.99;
+  document.getElementById('feepill').textContent='$'+fee.toFixed(2);
+  if(!cfg.stripe_live){
+    document.getElementById('dev').innerHTML =
+      '<div class="devbanner">🚧 Demo payments are on (test mode) — real cards come later.</div>';
   }
-}
-/* Never-empty search: if our DB has nothing, pull REAL live spots from
-   OpenStreetMap so there's always something to tap. */
-const STATES={AL:'Alabama',AK:'Alaska',AZ:'Arizona',AR:'Arkansas',CA:'California',CO:'Colorado',CT:'Connecticut',DE:'Delaware',DC:'District of Columbia',FL:'Florida',GA:'Georgia',HI:'Hawaii',ID:'Idaho',IL:'Illinois',IN:'Indiana',IA:'Iowa',KS:'Kansas',KY:'Kentucky',LA:'Louisiana',ME:'Maine',MD:'Maryland',MA:'Massachusetts',MI:'Michigan',MN:'Minnesota',MS:'Mississippi',MO:'Missouri',MT:'Montana',NE:'Nebraska',NV:'Nevada',NH:'New Hampshire',NJ:'New Jersey',NM:'New Mexico',NY:'New York',NC:'North Carolina',ND:'North Dakota',OH:'Ohio',OK:'Oklahoma',OR:'Oregon',PA:'Pennsylvania',RI:'Rhode Island',SC:'South Carolina',SD:'South Dakota',TN:'Tennessee',TX:'Texas',UT:'Utah',VT:'Vermont',VA:'Virginia',WA:'Washington',WV:'West Virginia',WI:'Wisconsin',WY:'Wyoming'};
-function parsePlace(q){
-  let city=null, st=null;
-  const title=s=>s.replace(/\w\S*/g,w=>w.charAt(0).toUpperCase()+w.slice(1).toLowerCase());
-  const cm = q.match(/^(.*?),\s*([a-zA-Z .]+)$/);
-  if(cm){ city=title(cm[1].trim()); st=cm[2].trim(); }
-  else{
-    const words=q.trim().split(/\s+/);
-    if(words.length<2) return null;
-    const title=s=>s.replace(/\w\S*/g,w=>w.charAt(0).toUpperCase()+w.slice(1).toLowerCase());
-    // try two-word state name first ("New York", "North Carolina"…), then one word
-    const two=words.slice(-2).join(' ').toLowerCase();
-    let found=null;
-    for(const [a,name] of Object.entries(STATES)){
-      if(name.toLowerCase()===two){ found={a, n:2}; break; }
+  const r = await (await fetch('/api/restaurants')).json();
+  document.getElementById('count').textContent = r.length + ' spots';
+  let reorder='';
+  try{
+    const last=JSON.parse(localStorage.getItem('droplast')||'null');
+    if(last && last.rid){
+      const lr=r.find(x=>x.id===last.rid);
+      if(lr) reorder=`<a class="card rest" href="/restaurant.html?id=${lr.id}&reorder=1" style="border-color:var(--acc)">
+        <div class="emoji">🔁</div>
+        <div class="meta"><b>Order again from ${lr.name}</b><span>Your last order, one tap</span></div>
+        <span class="badge open">REORDER</span></a>`;
     }
-    if(!found){
-      const lastUp=words[words.length-1].toUpperCase();
-      const lastLo=words[words.length-1].toLowerCase();
-      if(STATES[lastUp]) found={a:lastUp, n:1};
-      else for(const [a,name] of Object.entries(STATES)){
-        if(name.toLowerCase()===lastLo){ found={a, n:1}; break; }
-      }
-    }
-    if(!found) return null;
-    st=found.a; city=title(words.slice(0,-found.n).join(' '));
-  }
-  const up=(st||'').toUpperCase();
-  if(STATES[up]) st=up;
-  else{
-    for(const [a,name] of Object.entries(STATES)){
-      if(name.toLowerCase()===(st||'').toLowerCase()){ st=a; break; }
-    }
-  }
-  if(!STATES[st]||!city) return null;
-  return {city, state:st};
-}
-const esc = s => (s||'').replace(/</g,'&lt;');
-let liveTimer=null, liveSeq=0;
-function handleSearch(q){
-  renderRestaurants(q);
-  clearTimeout(liveTimer);
-  const local = (window._allR||[]).filter(x=>matchesSearch(x,q));
-  if(local.length>0 || !q) return;  // we have results — no fallback needed
-  liveTimer=setTimeout(async ()=>{
-    const seq=++liveSeq;
-    const place=parsePlace(q);
-    const listEl=document.getElementById('list'), countEl=document.getElementById('count');
-    if(!place){
-      countEl.textContent='No exact matches';
-      listEl.innerHTML=`<div class="card" style="text-align:center;padding:28px 16px">
-        <div style="font-size:2.5rem">🔎</div>
-        <h3>Nothing in our book for "${esc(q)}"</h3>
-        <p class="small">Try a city + state, like <b>"Austin TX"</b> or <b>"Miami, FL"</b> — we'll pull live spots for anywhere in the US.<br><br>Or skip the search: <a href="/drop.html"><b>request any pickup →</b></a> and we'll go get it.</p>
-      </div>`;
-      return;
-    }
-    countEl.textContent=`🔎 Checking live spots in ${esc(place.city)}…`;
-    try{
-      const live=await (await fetch(`/api/live-restaurants?city=${encodeURIComponent(place.city)}&state=${place.state}`)).json();
-      if(seq!==liveSeq) return;  // user kept typing — drop stale result
-      if(live && live.length){
-        countEl.textContent=`${live.length} live spots in ${esc(place.city)}, ${place.state}`;
-        listEl.innerHTML=`<p class="small" style="text-align:center">🌐 Live results — tap any spot and we'll go pick it up for you.</p>`+live.map(p=>`
-          <a class="card rest" href="/drop.html?pickup=${encodeURIComponent(p.name)}&addr=${encodeURIComponent((p.address? p.address+', ':'')+place.city+', '+place.state)}">
-            <div class="rbody">
-              <div class="emoji">🍽️</div>
-              <div class="meta"><b>${esc(p.name)}</b><span>${esc(p.address||'')}${esc(p.address)?' · ':''}${esc(place.city)}, ${place.state}${p.cuisine&&p.cuisine!=='Restaurant'?' · '+esc(p.cuisine):''}</span><span class="fee">📦 Tap to request pickup →</span></div>
-            </div>
-          </a>`).join('');
-      }else{
-        countEl.textContent=`No spots found in ${esc(place.city)}`;
-        listEl.innerHTML=`<div class="card" style="text-align:center;padding:28px 16px">
-          <div style="font-size:2.5rem">📦</div>
-          <h3>We couldn't find spots in ${esc(place.city)} yet</h3>
-          <p class="small">But we can still go there. <a href="/drop.html"><b>Request any pickup →</b></a> — tell us the restaurant and address, we'll handle it.</p>
-        </div>`;
-      }
-    }catch(e){
-      if(seq!==liveSeq) return;
-      countEl.textContent='Search hiccup — try again';
-    }
-  }, 700);
-}
-/* Google-like search: every word you type must appear somewhere in
-   the name, cuisine, city or state. "nashville tn", "Nashville, TN",
-   "pizza", "tacos dallas" all work. */
-function matchesSearch(x, q){
-  const words = (q||'').toLowerCase().replace(/,/g,' ').split(/\s+/).filter(Boolean);
-  if(!words.length) return true;
-  const hay = ((x.name||'')+' '+(x.cuisine||'')+' '+(x.city||'')+' '+(x.state||'')).toLowerCase();
-  return words.every(w => hay.includes(w));
-}
-function renderRestaurants(q){
-  const allR = window._allR || [];
-  const fee = 3.99;
-  const r = allR.filter(x => matchesSearch(x, q));
-  document.getElementById('count').textContent = r.length + (q ? ` results for "${q}"` : ' restaurants');
-  document.getElementById('list').innerHTML = r.slice(0, 60).map(x=>`
+  }catch(e){}
+  document.getElementById('list').innerHTML = reorder + r.map(x=>`
     <a class="card rest" href="/restaurant.html?id=${x.id}">
+      ${x.photo?`<div class="rphoto" style="background-image:url('${x.photo}')"></div>`:''}
       <div class="rbody">
-      ${(x.logo||x.photo)?`<img class="rlogo" src="${x.logo||x.photo}" alt="" loading="lazy">`:`<div class="emoji">${x.emoji||'🍽️'}</div>`}
-      <div class="meta"><b>${(x.name||'').replace(/</g,'&lt;')}</b><span>${(x.cuisine||'').replace(/</g,'&lt;')} · ${(x.city||'').replace(/</g,'&lt;')}, ${x.state||''}</span><span class="fee">🛵 Pickup from $'+fee.toFixed(2)+'</span></div>
+      ${x.logo?`<img class="rlogo" src="${x.logo}" alt="${x.name} logo" loading="lazy">`:`<div class="emoji">${x.emoji}</div>`}
+      <div class="meta"><b>${x.name}</b><span>${x.cuisine} · ${x.menu.length} items</span><span class="fee">$${fee.toFixed(2)} delivery${x.eta?` · ⏱️ ${x.eta}`:''}</span></div>
       <span class="badge ${x.open?'open':'closed'}">${x.open?'OPEN':'CLOSED'}</span>
       </div>
-    </a>`).join('') || '<p>No restaurants found. Try a different search.</p>';
+    </a>`).join('') || '<p>No restaurants yet — check back soon.</p>';
 }
-load();
-(function(){
-  const LAUNCH=new Date('2026-10-13T10:00:00-05:00').getTime();
-  const el=document.getElementById('rides-cd');
-  if(!el)return;
-  function t(){
-    const d=LAUNCH-Date.now();
-    if(d<=0){el.textContent='🚗 LIVE NOW — book your ride';return;}
-    const dd=Math.floor(d/86400000),hh=Math.floor(d%86400000/3600000),mm=Math.floor(d%3600000/60000);
-    el.textContent=`Launching in ${dd}d ${hh}h ${mm}m`;
-  }
-  setInterval(t,30000);t();
-})();
-</script><script src="/static/drop-live.js"></script>
-</body></html>
+</script></body></html>
