@@ -241,6 +241,48 @@ def init_db():
         title TEXT NOT NULL DEFAULT '',
         detail TEXT DEFAULT '',
         created_at TEXT NOT NULL)""")
+    # multi-city: where each restaurant lives (added 2026-10-11)
+    _rcols = [r[1] for r in c.execute("PRAGMA table_info(restaurants)").fetchall()]
+    for _col, _ddl in (("city", "TEXT DEFAULT 'Bismarck'"), ("state", "TEXT DEFAULT 'ND'"),
+                       ("address", "TEXT DEFAULT ''"), ("lat", "REAL DEFAULT 0"),
+                       ("lng", "REAL DEFAULT 0"), ("website", "TEXT DEFAULT ''")):
+        if _col not in _rcols:
+            c.execute(f"ALTER TABLE restaurants ADD COLUMN {_col} {_ddl}")
+    # restaurant partnership applications (added 2026-10-11)
+    c.execute("""CREATE TABLE IF NOT EXISTS partner_applications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        business_name TEXT NOT NULL, contact_name TEXT DEFAULT '',
+        email TEXT DEFAULT '', phone TEXT DEFAULT '', city TEXT DEFAULT '',
+        state TEXT DEFAULT '', cuisine TEXT DEFAULT '', locations INTEGER DEFAULT 1,
+        volume TEXT DEFAULT '', proposal TEXT DEFAULT '', status TEXT DEFAULT 'new',
+        ai_score INTEGER DEFAULT 0, ai_verdict TEXT DEFAULT '',
+        created_at TEXT NOT NULL)""")
+    # outreach prospects (added 2026-10-11)
+    c.execute("""CREATE TABLE IF NOT EXISTS prospects (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL, email TEXT DEFAULT '', city TEXT DEFAULT '',
+        state TEXT DEFAULT '', cuisine TEXT DEFAULT '', status TEXT DEFAULT 'new',
+        draft_subject TEXT DEFAULT '', draft_body TEXT DEFAULT '',
+        sent_at TEXT DEFAULT '', created_at TEXT NOT NULL)""")
+    c.execute("""CREATE TABLE IF NOT EXISTS opt_outs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        email TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL)""")
+    # suggest-a-spot (added 2026-10-11)
+    c.execute("""CREATE TABLE IF NOT EXISTS spot_suggestions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL, city TEXT DEFAULT '', note TEXT DEFAULT '',
+        contact TEXT DEFAULT '', created_at TEXT NOT NULL)""")
+    # AI bot chat (added 2026-10-11)
+    c.execute("""CREATE TABLE IF NOT EXISTS bot_chats (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        role TEXT NOT NULL DEFAULT 'ken',
+        message TEXT NOT NULL, created_at TEXT NOT NULL)""")
+    # AI improvement ideas (added 2026-10-11)
+    c.execute("""CREATE TABLE IF NOT EXISTS ai_ideas (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
+        why_beats TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'pending',
+        created_at TEXT NOT NULL)""")
     # DROP MORE marketplace: business partnerships (added 2026-10-11)
     c.execute("""CREATE TABLE IF NOT EXISTS business_partners (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -403,8 +445,60 @@ def seed():
     conn.close()
 
 
+def seed_cities():
+    """Idempotent: add real multi-city restaurants (Fargo, Minneapolis) if missing."""
+    conn = db()
+    c = conn.cursor()
+    SPOTS = [
+    # (name, cuisine, emoji, address, city, state, website, menu[(name, price)])
+    ("ThaiKota", "Thai", "🍜", "1201 1st Ave N, Fargo, ND", "Fargo", "ND", "https://www.thaikota.com/",
+     [("Pad Thai", 14.99), ("Khao Soi Curry", 15.99), ("Tom Yum Noodle Soup", 13.99), ("Spring Rolls", 7.99)]),
+    ("JL Beers", "Burgers", "🍔", "518 1st Ave N, Fargo, ND", "Fargo", "ND", "http://www.jlbeers.com/",
+     [("Humpty Dumpty Burger", 12.99), ("Rajun Cajun Burger", 11.99), ("Garlic Parm Fries", 6.99), ("Beer Cheese Pretzel", 8.99)]),
+    ("Taco Brothers", "Mexican", "🌮", "428 Roberts St N, Fargo, ND", "Fargo", "ND", "",
+     [("Trust You Bro Platter", 11.99), ("Big Brother Burrito", 10.99), ("Butter-Fried Chicken Taco", 4.99), ("Chips & Guac", 7.99)]),
+    ("Wasabi", "Sushi", "🍣", "560 2nd Ave N, Fargo, ND", "Fargo", "ND", "https://www.wasabipokebowl.com/",
+     [("Chef's Special Roll", 14.99), ("Corona Roll", 13.99), ("Poke Bowl", 12.99), ("Seared Tuna Salad", 13.99)]),
+    ("Pounds", "Diner", "🍔", "6 Broadway N, Fargo, ND", "Fargo", "ND", "http://poundsfargo.com/",
+     [("Californication Burger", 12.99), ("Torch Wings", 11.99), ("BBQ Porker Mac", 10.99), ("Queso Fries", 7.99)]),
+    ("Old Broadway", "Bar & Grill", "🍺", "22 Broadway N, Fargo, ND", "Fargo", "ND", "http://www.theoldbroadway.com/",
+     [("Eggs Benedict", 11.99), ("Beer Cheese Soup", 8.99), ("Breakfast Pizza", 10.99), ("Bread Pudding", 6.99)]),
+    ("Hai Hai", "Southeast Asian", "🍜", "2121 University Ave NE, Minneapolis, MN", "Minneapolis", "MN", "",
+     [("Street Noodles", 15.99), ("Coconut Curry", 16.99), ("Pork Belly Buns", 9.99), ("Papaya Salad", 11.99)]),
+    ("Element Wood Fire Pizza", "Pizza", "🍕", "96 Broadway St NE, Minneapolis, MN", "Minneapolis", "MN", "",
+     [("Wood-Fired Margherita", 14.99), ("Pepperoni Char Pie", 15.99), ("White Pie", 14.99), ("Caesar Salad", 9.99)]),
+    ("Diane's Place", "Brunch", "🍳", "117 14th Ave NE, Minneapolis, MN", "Minneapolis", "MN", "",
+     [("Hmong Sausage & Eggs", 15.99), ("Thai Tea French Toast", 13.99), ("Brunch Burger", 14.99), ("Sticky Rice Plate", 12.99)]),
+    ("Chimborazo", "Ecuadorian", "🫓", "2851 Central Ave NE, Minneapolis, MN", "Minneapolis", "MN", "",
+     [("Llapingachos", 13.99), ("Encebollado", 12.99), ("Fritada Plate", 15.99), ("Empanadas (3)", 8.99)]),
+    ("Gorkha Palace", "Indian", "🍛", "23 4th St NE, Minneapolis, MN", "Minneapolis", "MN", "",
+     [("Chicken Tikka Masala", 14.99), ("Lamb Curry", 16.99), ("Garlic Naan", 3.99), ("Samosa (2)", 5.99)]),
+    ("The Anchor Fish & Chips", "Fish & Chips", "🐟", "302 13th Ave NE, Minneapolis, MN", "Minneapolis", "MN", "",
+     [("Fish & Chips", 13.99), ("Shrimp Basket", 12.99), ("Clam Chowder", 7.99), ("Coleslaw Side", 3.99)]),
+]
+    for name, cuisine, emoji, addr, city, state, site, menu in SPOTS:
+        exists = c.execute("SELECT id FROM restaurants WHERE name=? AND city=?", (name, city)).fetchone()
+        if exists:
+            continue
+        try:
+            lat, lng = geocode(addr)
+        except Exception:
+            lat, lng = 0, 0
+        cur = c.execute(
+            "INSERT INTO restaurants(name, cuisine, emoji, open, address, lat, lng, website, city, state)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?)",
+            (name, cuisine, emoji, 1, addr, lat, lng, site, city, state))
+        rid = cur.lastrowid
+        for mname, price in menu:
+            c.execute("INSERT INTO menu_items(restaurant_id, name, price, available) VALUES(?,?,?,1)",
+                      (rid, mname, price))
+    conn.commit()
+    conn.close()
+
+
 init_db()
 seed()
+seed_cities()
 
 
 # ---------------- helpers ----------------
@@ -472,6 +566,49 @@ def notify_ken(order):
         pass  # never break an order because a push failed
 
 
+# ---------------- Security hardening ----------------
+_rate_buckets: dict = {}
+_pin_fails: dict = {}
+
+
+def client_ip(req: Request) -> str:
+    return req.headers.get("x-forwarded-for", req.client.host if req.client else "?").split(",")[0].strip()
+
+
+def rate_limit(ip: str, max_hits: int = 10, window: int = 60) -> bool:
+    """True if this IP should be throttled. Sliding window."""
+    import time
+    now = time.time()
+    b = _rate_buckets.setdefault(ip, [])
+    b[:] = [t for t in b if now - t < window]
+    if len(b) >= max_hits:
+        return True
+    b.append(now)
+    return False
+
+
+def pin_throttled(ip: str) -> bool:
+    import time
+    f = _pin_fails.get(ip)
+    return bool(f and time.time() - f["at"] < 900 and f["n"] >= 5)
+
+
+def pin_failed(ip: str):
+    import time
+    f = _pin_fails.setdefault(ip, {"n": 0, "at": 0})
+    f["n"] += 1
+    f["at"] = time.time()
+
+
+@app.middleware("http")
+async def security_middleware(req: Request, call_next):
+    resp = await call_next(req)
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["X-Frame-Options"] = "DENY"
+    resp.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    return resp
+
+
 def check_pin(x_pin: str = Header(default="")):
     if x_pin != get_setting("pin"):
         raise HTTPException(status_code=401, detail="Bad PIN")
@@ -530,6 +667,80 @@ def list_restaurants():
         out.append(rd)
     conn.close()
     return out
+
+
+@app.get("/api/cities")
+def list_cities():
+    """Distinct cities with live restaurants, for the homepage picker."""
+    conn = db()
+    rows = conn.execute(
+        "SELECT city, state, COUNT(*) n FROM restaurants GROUP BY city, state ORDER BY n DESC").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+@app.get("/api/nearest-city")
+def nearest_city(lat: float = 0, lng: float = 0):
+    """GPS -> what city are you in, and does Drop serve it?"""
+    import math
+    city, state = "", ""
+    try:
+        q = f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lng}&format=json"
+        req = urllib.request.Request(q, headers={"User-Agent": "DropDelivery/1.0 (wearedropservicesllc@gmail.com)"})
+        data = json.load(urllib.request.urlopen(req, timeout=8))
+        addr = data.get("address", {})
+        city = addr.get("city") or addr.get("town") or addr.get("village") or addr.get("county") or ""
+        _states = {"North Dakota": "ND", "South Dakota": "SD", "Minnesota": "MN",
+                   "Nebraska": "NE", "Iowa": "IA", "Montana": "MT", "New York": "NY",
+                   "Texas": "TX", "Florida": "FL", "California": "CA"}
+        state = _states.get(addr.get("state", ""), "")
+    except Exception:
+        pass
+    conn = db()
+    cities = conn.execute(
+        "SELECT city, state, COUNT(*) n FROM restaurants GROUP BY city, state").fetchall()
+    match = None
+    for c in cities:
+        if city and c["city"].lower() == city.lower():
+            match = {"city": c["city"], "state": c["state"]}
+            break
+    if not match and lat and lng:
+        best, bestd = None, 1e9
+        rows = conn.execute(
+            "SELECT city, state, lat, lng FROM restaurants WHERE lat != 0").fetchall()
+        for r in rows:
+            d = math.hypot(r["lat"] - lat, r["lng"] - lng)
+            if d < bestd:
+                bestd, best = d, r
+        if best and bestd < 1.0:
+            match = {"city": best["city"], "state": best["state"]}
+    conn.close()
+    return {"detected_city": city, "detected_state": state, "match": match}
+
+
+@app.post("/api/spot/suggest")
+async def spot_suggest(req: Request):
+    """Customer suggests a restaurant/spot. Deduped, notifies Ken."""
+    body = await req.json()
+    name = (body.get("name") or "").strip()
+    city = (body.get("city") or "").strip()[:80]
+    if not name:
+        raise HTTPException(400, "Name required")
+    conn = db()
+    dup = conn.execute(
+        "SELECT id FROM spot_suggestions WHERE LOWER(name)=LOWER(?)", (name,)).fetchone()
+    if not dup:
+        conn.execute(
+            "INSERT INTO spot_suggestions(name, city, note, contact, created_at) VALUES(?,?,?,?,?)",
+            (name[:120], city, (body.get("note") or "")[:500],
+             (body.get("contact") or "")[:120], now_iso()))
+        conn.commit()
+    conn.close()
+    try:
+        push_ken("📍 New spot suggestion", f"{name} in {city or 'unknown city'}")
+    except Exception:
+        pass
+    return {"ok": True}
 
 
 @app.post("/api/orders")
@@ -2241,8 +2452,8 @@ async def partner_apply(req: Request):
     return {"ok": True, "id": pid}
 
 
-@app.get("/api/operator/partners")
-def op_partners(x_pin: str = Header(default=""), status: str = ""):
+@app.get("/api/operator/restaurant-apps")
+def op_restaurant_apps(x_pin: str = Header(default=""), status: str = ""):
     """Ken's deal pipeline. Filter by stage."""
     check_pin(x_pin)
     conn = db()
@@ -2845,6 +3056,171 @@ def op_suggestions(x_pin: str = Header(default="")):
     out.sort(key=lambda x: order.get(x["priority"], 3))
     log_event("suggestions", f"Generated {len(out)} AI suggestions", "")
     return out
+
+
+# ---------------- AI bot chat ----------------
+@app.get("/api/operator/bot/history")
+def op_bot_history(x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    conn = db()
+    rows = conn.execute(
+        "SELECT id, role, message, created_at FROM bot_chats ORDER BY id DESC LIMIT 50").fetchall()
+    conn.close()
+    return [dict(r) for r in reversed(rows)]
+
+
+@app.post("/api/operator/bot/send")
+async def op_bot_send(req: Request, x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    body = await req.json()
+    msg = (body.get("message") or "").strip()
+    if not msg:
+        raise HTTPException(400, "Empty message")
+    conn = db()
+    conn.execute("INSERT INTO bot_chats(role, message, created_at) VALUES('ken', ?, ?)",
+                 (msg[:2000], now_iso()))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.post("/api/operator/bot/reply")
+async def op_bot_reply(req: Request, x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    body = await req.json()
+    msg = (body.get("message") or "").strip()
+    if not msg:
+        raise HTTPException(400, "Empty message")
+    conn = db()
+    conn.execute("INSERT INTO bot_chats(role, message, created_at) VALUES('milli', ?, ?)",
+                 (msg[:2000], now_iso()))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+# ---------------- AI improvement ideas ----------------
+@app.get("/api/operator/ideas")
+def op_ideas(x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    conn = db()
+    rows = conn.execute(
+        "SELECT id, title, description, why_beats, status, created_at FROM ai_ideas ORDER BY id DESC LIMIT 30").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+@app.post("/api/operator/ideas")
+async def op_ideas_add(req: Request, x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    body = await req.json()
+    title = (body.get("title") or "").strip()
+    if not title:
+        raise HTTPException(400, "Title required")
+    conn = db()
+    dup = conn.execute("SELECT id FROM ai_ideas WHERE title=? AND status IN ('pending','approved')",
+                       (title,)).fetchone()
+    if dup:
+        conn.close()
+        return {"ok": True, "duplicate": True}
+    conn.execute("INSERT INTO ai_ideas(title, description, why_beats, created_at) VALUES(?,?,?,?)",
+                 (title[:120], (body.get("description") or "")[:1000],
+                  (body.get("why_beats") or "")[:500], now_iso()))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.post("/api/operator/ideas/{iid}/{action}")
+def op_ideas_action(iid: int, action: str, x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    if action not in ("approve", "reject"):
+        raise HTTPException(400, "Bad action")
+    conn = db()
+    conn.execute("UPDATE ai_ideas SET status=? WHERE id=?",
+                 ("approved" if action == "approve" else "rejected", iid))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+# ---------------- Command dashboard ----------------
+@app.get("/api/operator/command-stats")
+def op_command_stats(x_pin: str = Header(default="")):
+    """Everything the command dashboard needs, in one call."""
+    check_pin(x_pin)
+    conn = db()
+    today = now_iso()[:10]
+    orders_today = conn.execute(
+        "SELECT COUNT(*) FROM orders WHERE created_at LIKE ?", (today + "%",)).fetchone()[0]
+    rev_today = conn.execute(
+        "SELECT COALESCE(SUM(delivery_fee),0) FROM orders WHERE created_at LIKE ? AND stripe_status='paid'",
+        (today + "%",)).fetchone()[0]
+    active = conn.execute(
+        "SELECT COUNT(*) FROM orders WHERE status IN ('new','confirmed','preparing','on_the_way')").fetchone()[0]
+    restaurants = conn.execute("SELECT COUNT(*) FROM restaurants").fetchone()[0]
+    cities = conn.execute("SELECT COUNT(DISTINCT city) FROM restaurants").fetchone()[0]
+    pending_partners = conn.execute(
+        "SELECT COUNT(*) FROM partner_applications WHERE status='new'").fetchone()[0]
+    pending_prospects = conn.execute(
+        "SELECT COUNT(*) FROM prospects WHERE status='draft'").fetchone()[0]
+    auto = (conn.execute("SELECT value FROM settings WHERE key='auto_outreach'").fetchone() or ["0"])[0]
+    paused = (conn.execute("SELECT value FROM settings WHERE key='paused'").fetchone() or ["0"])[0]
+    conn.close()
+    return {"orders_today": orders_today, "revenue_today": round(rev_today or 0, 2),
+            "active_orders": active, "restaurants": restaurants, "cities": cities,
+            "pending_partners": pending_partners, "pending_prospects": pending_prospects,
+            "auto_outreach": auto == "1", "paused": paused == "1"}
+
+
+# ---------------- Restaurant partner applications ----------------
+@app.post("/api/partner/apply")
+async def restaurant_partner_apply(req: Request):
+    """Public: restaurant partnership application."""
+    body = await req.json()
+    name = (body.get("business_name") or "").strip()
+    if not name:
+        raise HTTPException(400, "Business name required")
+    conn = db()
+    conn.execute(
+        """INSERT INTO partner_applications(business_name, contact_name, email, phone, city, state,
+           cuisine, locations, volume, proposal, created_at)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+        (name[:120], (body.get("contact_name") or "")[:80], (body.get("email") or "")[:120],
+         (body.get("phone") or "")[:40], (body.get("city") or "")[:80],
+         (body.get("state") or "")[:10], (body.get("cuisine") or "")[:60],
+         int(body.get("locations") or 1), (body.get("volume") or "")[:200],
+         (body.get("proposal") or "")[:2000], now_iso()))
+    conn.commit()
+    conn.close()
+    try:
+        push_ken("🤝 New partner application", name)
+    except Exception:
+        pass
+    return {"ok": True}
+
+
+@app.get("/api/operator/food-partner-apps")
+def op_restaurant_applications(x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    conn = db()
+    rows = conn.execute(
+        "SELECT * FROM partner_applications ORDER BY id DESC").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+@app.post("/api/operator/food-partner-apps/{pid}/{action}")
+def op_restaurant_application_action(pid: int, action: str, x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    if action not in ("approve", "reject"):
+        raise HTTPException(400, "Bad action")
+    conn = db()
+    conn.execute("UPDATE partner_applications SET status=? WHERE id=?",
+                 ("approved" if action == "approve" else "rejected", pid))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
 
 
 # ---------------- Drop Investors ----------------

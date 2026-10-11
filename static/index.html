@@ -1,8 +1,8 @@
 <!DOCTYPE html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Drop — Food Delivery in Bismarck, ND | Faster Than DoorDash</title>
-<meta name="description" content="Drop delivers your favorite Bismarck restaurants to your door — McDonald's, Taco Bell, Pizza Hut, local spots & more. One flat $3.99 fee, one local driver, real-time tracking.">
-<meta property="og:title" content="Drop — Bismarck Food Delivery">
+<title>Drop — Food Delivery Anywhere | Faster Than DoorDash</title>
+<meta name="description" content="Drop delivers your favorite local restaurants to your door — McDonald's, Taco Bell, Pizza Hut, local spots & more. One flat $3.99 fee, one local driver, real-time tracking.">
+<meta property="og:title" content="Drop — Food Delivery">
 <meta property="og:description" content="Bismarck's favorite food, dropped at your door. $3.99 flat delivery.">
 <meta property="og:image" content="/static/logo.jpg">
 <link rel="icon" href="/static/logo-mark.jpg">
@@ -15,8 +15,10 @@
 
 <div class="hero">
   <img class="logo-full" src="/static/logo.jpg" alt="Drop — Pick up. Deliver. Done.">
-  <h1>Bismarck's favorite food,<br><span class="hl">dropped at your door.</span></h1>
-  <p class="tagline" id="tagline">One local driver. One flat $3.99 fee. Real-time tracking.</p>
+  <h1>Your favorite food,<br><span class="hl">dropped at your door.</span></h1>
+  <p class="tagline" id="tagline">One flat $3.99 fee. Real-time tracking.</p>
+  <div style="margin:0 0 14px"><select id="citypick" style="max-width:280px;margin:0 auto;font-weight:700"></select></div>
+  <p class="small" id="gpsnote" style="margin:-6px 0 12px"></p>
   <a class="cta" href="#restaurants">Order now</a>
   <div class="trust">
     <span class="pill">🔒 Secure checkout</span>
@@ -37,6 +39,25 @@
   <h2>Order from local spots</h2><span id="count"></span>
 </div>
 <div id="list"></div>
+
+<div class="card" id="suggest" style="text-align:center;margin-top:18px">
+  <h3>📍 Know a spot we're missing?</h3>
+  <p class="small">Tell us and we'll reach out to them.</p>
+  <div class="row"><input id="spotname" placeholder="Restaurant name" style="flex:1;margin-right:6px">
+  <input id="spotcity" placeholder="City" style="flex:1"></div>
+  <button class="btn" id="spotsend" style="margin-top:8px">Suggest it</button>
+  <p class="small" id="spotmsg"></p>
+</div>
+<script>
+document.getElementById('spotsend').onclick=async()=>{
+  const n=document.getElementById('spotname').value.trim();
+  if(!n){document.getElementById('spotmsg').textContent='Give us a name first!';return;}
+  await fetch('/api/spot/suggest',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({name:n,city:document.getElementById('spotcity').value.trim()})});
+  document.getElementById('spotmsg').textContent='Thanks! We\'ll check them out. 🧡';
+  document.getElementById('spotname').value='';
+};
+</script>
 
 <div class="section-title" style="margin-top:34px">
   <h2>Why Bismarck loves Drop</h2>
@@ -79,8 +100,32 @@ async function load(){
     document.getElementById('dev').innerHTML =
       '<div class="devbanner">🚧 Demo payments are on (test mode) — real cards come later.</div>';
   }
-  const r = await (await fetch('/api/restaurants')).json();
-  document.getElementById('count').textContent = r.length + ' spots';
+  const cities = await (await fetch('/api/cities')).json();
+  const saved = localStorage.getItem('dropcity');
+  const pick = document.getElementById('citypick');
+  pick.innerHTML = cities.map(c=>`<option value="${c.city}|${c.state}">${c.city}, ${c.state} (${c.n})</option>`).join('');
+  let cur = saved && cities.some(c=>`${c.city}|${c.state}`===saved) ? saved : (cities[0]?`${cities[0].city}|${cities[0].state}`:'');
+  const gpsCity = await new Promise(resolve=>{
+    if(!navigator.geolocation) return resolve(null);
+    navigator.geolocation.getCurrentPosition(async pos=>{
+      try{
+        const nc = await (await fetch(`/api/nearest-city?lat=${pos.coords.latitude}&lng=${pos.coords.longitude}`)).json();
+        resolve(nc);
+      }catch(e){ resolve(null); }
+    }, ()=>resolve(null), {timeout:8000, maximumAge:600000});
+  });
+  if(gpsCity && gpsCity.match){
+    cur = `${gpsCity.match.city}|${gpsCity.match.state}`;
+    localStorage.setItem('dropcity', cur);
+    document.getElementById('gpsnote').innerHTML = `📍 You're in <b>${gpsCity.detected_city||gpsCity.match.city}</b> — showing spots near you.`;
+  } else if(gpsCity && gpsCity.detected_city){
+    document.getElementById('gpsnote').innerHTML = `📍 You're in <b>${gpsCity.detected_city}</b> — Drop isn't there <i>yet</i>. <a href="#suggest">Suggest a spot</a> and we'll come to you.`;
+  }
+  pick.value = cur;
+  pick.onchange = ()=>{ localStorage.setItem('dropcity', pick.value); load(); };
+  const [ccity, cstate] = (pick.value||'|').split('|');
+  const r = (await (await fetch('/api/restaurants')).json()).filter(x=>(x.city||'Bismarck')===ccity && (x.state||'ND')===cstate);
+  document.getElementById('count').textContent = r.length + ' spots in ' + ccity;
   // one-tap reorder
   let reorder='';
   try{

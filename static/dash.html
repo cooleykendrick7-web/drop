@@ -31,6 +31,7 @@
     <button data-t="inv">Investors <span id="invbadge"></span></button>
     <button data-t="out">📧 Outreach <span id="outbadge"></span></button>
     <button data-t="live">⚡ Live</button>
+    <button data-t="bot">🤖 AI Bot</button>
     <button data-t="audit">Audit</button>
     <button data-t="set">Settings</button>
   </div>
@@ -75,6 +76,9 @@
       <p class="small">Every deal moves: Submitted → Under Review → Financial Evaluation → Negotiation → Contract Review → Approved → Active. <b>You</b> approve every stage.</p></div>
     <div class="row" id="dealstages" style="flex-wrap:wrap;gap:6px;margin-bottom:10px"></div>
     <div id="deallist"></div>
+    <div class="card" style="margin-top:12px"><b>🍽️ Restaurant applications</b>
+      <p class="small">Restaurants that applied to join Drop for food delivery.</p>
+      <div id="partlist"><p class="small">Loading…</p></div></div>
   </div>
 
   <div class="tab" id="t-drv">
@@ -155,6 +159,21 @@
       <div id="actlist"><p class="small">Loading…</p></div></div>
   </div>
 
+  <div class="tab" id="t-bot">
+    <div class="card">
+      <h3 style="margin-top:0">🤖 Talk to your AI helper</h3>
+      <p class="small">Ask about Drop, get reports, queue outreach, or request changes. It knows your business live. Replies usually land within ~10 minutes.</p>
+      <div id="botlog" style="max-height:320px;overflow-y:auto;margin:10px 0"></div>
+      <div class="row"><input id="botmsg" placeholder="Ask anything…" style="flex:1;margin-right:6px">
+      <button class="btn small" id="botsend" style="width:auto;padding:10px 20px">Send</button></div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">💡 AI improvement ideas</h3>
+      <p class="small">Every week the AI studies Drop and proposes ways to beat DoorDash. Approve the ones you want built.</p>
+      <div id="ideaslist"></div>
+    </div>
+  </div>
+
   <div class="tab" id="t-audit">
     <div class="card"><b>📋 Audit trail</b>
       <p class="small">Every admin decision, recorded. Nothing happens in the dark.</p></div>
@@ -222,7 +241,7 @@ document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
   b.classList.add('on'); $('t-'+b.dataset.t).classList.add('on');
-  if(b.dataset.t==='earn') loadEarn(); if(b.dataset.t==='menu') loadMenu(); if(b.dataset.t==='set') loadSet(); if(b.dataset.t==='sup') loadTix(); if(b.dataset.t==='promo') loadPromos(); if(b.dataset.t==='stats') loadStats(); if(b.dataset.t==='upd') loadProposals(); if(b.dataset.t==='drv') loadDrivers(); if(b.dataset.t==='biz') loadBiz(); if(b.dataset.t==='inv') loadInv(); if(b.dataset.t==='money') loadMoney(); if(b.dataset.t==='deals') loadDeals(); if(b.dataset.t==='audit') loadAudit(); if(b.dataset.t==='out') loadOutreach(); if(b.dataset.t==='live') loadLive();
+  if(b.dataset.t==='earn') loadEarn(); if(b.dataset.t==='menu') loadMenu(); if(b.dataset.t==='set') loadSet(); if(b.dataset.t==='sup') loadTix(); if(b.dataset.t==='promo') loadPromos(); if(b.dataset.t==='stats') loadStats(); if(b.dataset.t==='upd') loadProposals(); if(b.dataset.t==='drv') loadDrivers(); if(b.dataset.t==='biz') loadBiz(); if(b.dataset.t==='inv') loadInv(); if(b.dataset.t==='money') loadMoney(); if(b.dataset.t==='deals') loadDeals(); if(b.dataset.t==='audit') loadAudit(); if(b.dataset.t==='out') loadOutreach(); if(b.dataset.t==='live') loadLive(); if(b.dataset.t==='bot'){ loadBot(); loadIdeas(); }
 });
 
 async function loadStats(){
@@ -686,6 +705,25 @@ async function loadDeals(stage){
       </div>
       <div id="deal-${p.id}" style="margin-top:8px"></div>
     </div>`).join('')||'<p class="small">No partnership applications yet.</p>';
+  loadRestaurantApps();
+}
+async function loadRestaurantApps(){
+  const apps=await (await fetch('/api/operator/food-partner-apps',{headers:H()})).json();
+  const esc=s=>(s||'').replace(/</g,'&lt;');
+  $('partlist').innerHTML=apps.map(a=>`
+    <div class="card" style="margin:8px 0">
+      <div class="row"><b>${esc(a.business_name)}</b><span class="badge">${a.status}</span></div>
+      <p class="small">${esc(a.cuisine)} · ${esc(a.city)}, ${esc(a.state)} · ${esc(a.contact_name)}<br>
+      ✉️ <a href="mailto:${esc(a.email)}">${esc(a.email)}</a>${a.phone?` · 📞 ${esc(a.phone)}`:''}</p>
+      ${a.proposal?`<p class="small"><b>Their proposal:</b> ${esc(a.proposal)}</p>`:''}
+      ${a.status==='new'?`<button class="btn small" onclick="restAppAct(${a.id},'approve')">✅ Approve</button>
+      <button class="btn small ghost" onclick="restAppAct(${a.id},'reject')">Reject</button>`:''}
+    </div>`).join('')||'<p class="small">No restaurant applications yet.</p>';
+}
+async function restAppAct(id,act){
+  if(!confirm(`${act==='approve'?'Approve':'Reject'} this restaurant?`))return;
+  await fetch(`/api/operator/food-partner-apps/${id}/${act}`,{method:'POST',headers:H()});
+  loadRestaurantApps();
 }
 async function dealStage(id,stage){
   const stages={under_review:'Under Review',negotiation:'Negotiation',approved:'Approved',rejected:'Rejected'};
@@ -804,5 +842,40 @@ async function loadAudit(){
     <div class="card"><div class="row"><b>${x.action}</b><span class="small">${x.created_at.slice(0,16).replace('T',' ')}</span></div>
       <p class="small">${x.actor} · ${x.entity_type} #${x.entity_id}${x.details?` · ${x.details.replace(/</g,'&lt;')}`:''}</p></div>`).join('')
     ||'<p class="small">No admin actions recorded yet.</p>';
+}
+/* ---- AI Bot ---- */
+async function loadBot(){
+  const h=await (await fetch('/api/operator/bot/history',{headers:H()})).json();
+  $('botlog').innerHTML=h.map(m=>`
+    <div style="margin:6px 0;text-align:${m.role==='ken'?'right':'left'}">
+      <span style="display:inline-block;max-width:85%;padding:8px 12px;border-radius:14px;font-size:.9rem;
+        background:${m.role==='ken'?'linear-gradient(135deg,#ff5a00,#ffaa00)':'#1c1c23'};color:#fff;
+        border-bottom-${m.role==='ken'?'right':'left'}-radius:4px">${m.message.replace(/</g,'&lt;')}</span>
+    </div>`).join('')||'<p class="small">No messages yet — say hi.</p>';
+  $('botlog').scrollTop=$('botlog').scrollHeight;
+}
+$('botsend').onclick=async()=>{
+  const v=$('botmsg').value.trim(); if(!v) return;
+  $('botmsg').value='';
+  await fetch('/api/operator/bot/send',{method:'POST',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({message:v})});
+  loadBot();
+};
+$('botmsg').addEventListener('keydown',e=>{if(e.key==='Enter')$('botsend').click();});
+/* ---- AI ideas ---- */
+async function loadIdeas(){
+  const ideas=await (await fetch('/api/operator/ideas',{headers:H()})).json();
+  $('ideaslist').innerHTML=ideas.map(i=>`
+    <div class="card" style="margin:8px 0;border-left:4px solid ${i.status==='approved'?'#2ecc71':i.status==='rejected'?'#555':'#ffaa00'}">
+      <b>${i.title.replace(/</g,'&lt;')}</b>
+      <span class="small" style="margin-left:8px">${i.status}</span>
+      <p class="small">${i.description.replace(/</g,'&lt;')}</p>
+      <p class="small" style="color:#ffaa00">🥊 ${i.why_beats.replace(/</g,'&lt;')}</p>
+      ${i.status==='pending'?`<button class="btn small" onclick="ideaAct(${i.id},'approve')">✅ Build it</button>
+      <button class="btn small ghost" onclick="ideaAct(${i.id},'reject')">Reject</button>`:''}
+    </div>`).join('')||'<p class="small">No ideas yet — the AI proposes 3 every Sunday.</p>';
+}
+async function ideaAct(id,act){
+  await fetch(`/api/operator/ideas/${id}/${act}`,{method:'POST',headers:H()});
+  loadIdeas();
 }
 </script></body></html>

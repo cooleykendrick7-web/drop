@@ -1,0 +1,101 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Drop — Command</title>
+<link rel="icon" href="/static/logo-mark.jpg">
+<style>
+:root{--acc:#ff6a00;--acc2:#ffaa00;--red:#ff2d2d;--grn:#22ff88;--blu:#38bdf8}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:#050507;color:#f7f7f8;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;max-width:720px;margin:0 auto;padding:0 14px 60px;min-height:100vh}
+h1{font-size:1.1rem;letter-spacing:3px;color:var(--acc2);text-transform:uppercase;margin:16px 0 4px;text-align:center}
+.sub{text-align:center;color:#71717a;font-size:.8rem;margin:0 0 14px;letter-spacing:1px}
+.cluster{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.gauge{background:radial-gradient(ellipse at 50% 120%,#1a0f05 0%,#0c0c0f 70%);border:1px solid #26262e;border-radius:18px;padding:16px 12px;text-align:center;position:relative;overflow:hidden}
+.gauge::before{content:"";position:absolute;top:0;left:10%;right:10%;height:2px;background:linear-gradient(90deg,transparent,var(--acc),transparent);opacity:.7}
+.gauge .lbl{font-size:.68rem;letter-spacing:2px;color:#a1a1aa;text-transform:uppercase}
+.gauge .val{font-size:2.6rem;font-weight:800;margin:6px 0 2px;font-variant-numeric:tabular-nums;text-shadow:0 0 24px rgba(255,106,0,.45)}
+.gauge .unit{font-size:.75rem;color:#71717a}
+.gauge.warn .val{color:var(--red);text-shadow:0 0 24px rgba(255,45,45,.5)}
+.gauge.good .val{color:var(--grn);text-shadow:0 0 24px rgba(34,255,136,.4)}
+.gauge.info .val{color:var(--blu);text-shadow:0 0 24px rgba(56,189,248,.4)}
+.bar{height:8px;background:#1c1c23;border-radius:99px;margin-top:10px;overflow:hidden}
+.bar i{display:block;height:100%;background:linear-gradient(90deg,var(--acc),var(--acc2));border-radius:99px;transition:width .6s}
+.lights{display:flex;gap:8px;justify-content:center;margin:14px 0;flex-wrap:wrap}
+.light{font-size:.72rem;font-weight:800;letter-spacing:1px;padding:8px 14px;border-radius:99px;border:1px solid #2a2a33;color:#52525b}
+.light.on-red{background:rgba(255,45,45,.15);border-color:var(--red);color:var(--red);box-shadow:0 0 18px rgba(255,45,45,.35);animation:blink 1.2s infinite}
+.light.on-grn{background:rgba(34,255,136,.12);border-color:var(--grn);color:var(--grn)}
+.light.on-org{background:rgba(255,106,0,.12);border-color:var(--acc);color:var(--acc2)}
+@keyframes blink{50%{opacity:.55}}
+.row2{display:flex;gap:10px;margin-top:10px}
+.btn{flex:1;background:linear-gradient(135deg,#ff5a00,#ffaa00);color:#fff;font-weight:800;border:0;border-radius:12px;padding:13px;text-decoration:none;text-align:center;display:block}
+.btn.ghost{background:#1c1c23;color:#fff}
+#login{max-width:340px;margin:60px auto;text-align:center}
+#login input{width:100%;background:#1e1e26;border:1px solid #2a2a33;color:#fff;border-radius:12px;padding:14px;font-size:1.2rem;text-align:center;margin:10px 0}
+.live{display:inline-block;width:8px;height:8px;border-radius:99px;background:var(--grn);box-shadow:0 0 10px var(--grn);animation:blink 1.6s infinite;margin-right:6px}
+.tick{font-size:.7rem;color:#52525b;text-align:center;margin-top:12px;letter-spacing:1px}
+</style>
+</head><body>
+<div id="login">
+  <h1>🏁 Drop Command</h1>
+  <p class="sub">OPERATOR DASH CLUSTER</p>
+  <input id="pin" inputmode="numeric" type="password" placeholder="PIN">
+  <button class="btn" id="go">Ignition</button>
+  <p class="sub" id="msg"></p>
+</div>
+<div id="dash" style="display:none">
+  <h1><span class="live"></span>Drop Command</h1>
+  <p class="sub" id="clock">—</p>
+  <div class="lights" id="lights"></div>
+  <div class="cluster">
+    <div class="gauge" id="g-orders"><div class="lbl">Orders today</div><div class="val">–</div><div class="unit">deliveries</div></div>
+    <div class="gauge good" id="g-rev"><div class="lbl">Revenue today</div><div class="val">–</div><div class="unit">delivery fees</div></div>
+    <div class="gauge info" id="g-active"><div class="lbl">Active orders</div><div class="val">–</div><div class="unit">right now</div></div>
+    <div class="gauge" id="g-mail"><div class="lbl">Outreach sent</div><div class="val">–</div><div class="unit">emails today</div><div class="bar"><i id="mailbar" style="width:0%"></i></div></div>
+    <div class="gauge" id="g-rest"><div class="lbl">Restaurants</div><div class="val">–</div><div class="unit">live spots</div></div>
+    <div class="gauge" id="g-city"><div class="lbl">Cities</div><div class="val">–</div><div class="unit">and counting</div></div>
+    <div class="gauge" id="g-drv"><div class="lbl">Drivers</div><div class="val">–</div><div class="unit">active</div></div>
+    <div class="gauge good" id="g-all"><div class="lbl">All-time revenue</div><div class="val">–</div><div class="unit">delivery fees</div></div>
+  </div>
+  <div class="row2">
+    <a class="btn" href="/dash">Full dashboard</a>
+    <a class="btn ghost" href="/">Customer site</a>
+  </div>
+  <p class="tick" id="tick">—</p>
+</div>
+<script>
+let PIN=sessionStorage.getItem('droppin')||'';
+const H=()=>({'X-PIN':PIN});
+const $=id=>document.getElementById(id);
+function set(id,v){$(id).querySelector('.val').textContent=v;}
+async function tick(){
+  try{
+    const s=await (await fetch('/api/operator/command-stats',{headers:H()})).json();
+    if(s.detail){ $('msg').textContent='Wrong PIN.'; $('login').style.display='block'; $('dash').style.display='none'; return; }
+    set('g-orders',s.orders_today); set('g-rev','$'+s.revenue_today.toFixed(0));
+    set('g-active',s.active_orders); set('g-mail',s.emails_today);
+    set('g-rest',s.restaurants); set('g-city',s.cities);
+    set('g-drv',s.drivers); set('g-all','$'+s.total_revenue.toFixed(0));
+    $('mailbar').style.width=Math.min(100,s.emails_today/20*100)+'%';
+    $('g-active').classList.toggle('warn',s.active_orders>0);
+    const L=[];
+    L.push(`<span class="light ${s.accepting?'on-grn':''}">${s.accepting?'● OPEN':'○ PAUSED'}</span>`);
+    L.push(`<span class="light ${s.auto_outreach?'on-org':''}">${s.auto_outreach?'● AUTO-EMAIL':'○ EMAIL OFF'}</span>`);
+    if(s.pending_partners) L.push(`<span class="light on-red">● ${s.pending_partners} PARTNERS</span>`);
+    if(s.pending_drivers) L.push(`<span class="light on-red">● ${s.pending_drivers} DRIVERS</span>`);
+    if(s.open_tickets) L.push(`<span class="light on-red">● ${s.open_tickets} SUPPORT</span>`);
+    if(!s.pending_partners&&!s.pending_drivers&&!s.open_tickets) L.push(`<span class="light on-grn">● ALL CLEAR</span>`);
+    $('lights').innerHTML=L.join('');
+    $('clock').textContent=new Date().toLocaleTimeString();
+    $('tick').textContent='LIVE · updated '+new Date().toLocaleTimeString();
+  }catch(e){}
+}
+$('go').onclick=async()=>{
+  PIN=$('pin').value.trim();
+  const r=await fetch('/api/operator/command-stats',{headers:H()});
+  if(r.status===401){$('msg').textContent='Wrong PIN.';return;}
+  sessionStorage.setItem('droppin',PIN);
+  $('login').style.display='none';$('dash').style.display='block';
+  tick(); setInterval(tick,8000);
+};
+if(PIN){ $('login').style.display='none'; $('dash').style.display='block'; tick(); setInterval(tick,8000); }
+</script>
+</body></html>
