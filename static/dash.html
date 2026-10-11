@@ -747,10 +747,11 @@ $('o-draft').onclick=async()=>{
   loadOutreach();
 };
 async function outSend(id){
-  if(!confirm('Send this email? It will go out from the Drop Gmail account.'))return;
+  if(!confirm('Approve this email? It will send from wearedropservicesllc@gmail.com within ~15 minutes.'))return;
   const r=await fetch(`/api/operator/outreach/${id}/send`,{method:'POST',headers:H()});
   const j=await r.json();
   if(!r.ok)alert('Error: '+(j.detail||'failed'));
+  else alert('✅ '+(j.note||'Approved.'));
   loadOutreach();
 }
 async function outDiscard(id){
