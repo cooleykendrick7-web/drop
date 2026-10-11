@@ -205,12 +205,14 @@ function fareHTML(q, showTip){
     ${showTip?`<div class="fare-row"><span class="small">Driver tip</span><b>$${tip.toFixed(2)}</b></div>`:''}
     <div class="fare-row fare-total"><span><b>You'll pay</b></span><b class="gold">$${(q.total+(showTip?tip:0)).toFixed(2)}</b></div>
     ${q.ai_note?`<div class="ai-note">🤖 ${q.ai_note}</div>`:''}
-    ${q.too_far?`<div class="ai-note">⚠️ This ride is ${q.miles} miles — beyond our ${q.max_miles}-mile service area. Contact us for a custom long-distance quote.</div>`:''}`;
+    ${q.too_far?`<div class="ai-note">⚠️ This ride is ${q.miles} miles — beyond our ${q.max_miles}-mile service area. Contact us for a custom long-distance quote.</div>`:''}
+    ${(!q.too_far&&q.approximate)?`<p class="small">📍 Approximate price — one address mapped to city level. Exact fare confirmed when you book.</p>`:''}`;
 }
 
 $('c-go').onclick=async()=>{
   const f=$('c-from').value.trim(), t=$('c-to').value.trim();
-  if(!f||!t){$('c-out').innerHTML='<p class="small">Enter both addresses.</p>';return;}
+  if(!f){$('c-out').innerHTML='<p class="small">⚠️ Enter your pickup address — or tap 📍 to use your GPS location.</p>';return;}
+  if(!t){$('c-out').innerHTML='<p class="small">Enter the dropoff address.</p>';return;}
   $('c-out').innerHTML='<p class="small">Calculating…</p>';
   try{
     const q=await getQuote(f,t,gps.cFrom);
@@ -220,7 +222,8 @@ $('c-go').onclick=async()=>{
 
 $('b-quote-btn').onclick=async()=>{
   const f=$('b-from').value.trim(), t=$('b-to').value.trim();
-  if(!f||!t){$('b-msg').textContent='Enter pickup and dropoff first.';return;}
+  if(!f){$('b-msg').textContent='⚠️ Enter your pickup address — or tap 📍 to use your GPS location.';return;}
+  if(!t){$('b-msg').textContent='Enter the dropoff address.';return;}
   $('b-quote').innerHTML='<p class="small">Calculating…</p>';
   try{
     lastQuote=await getQuote(f,t,gps.bFrom);

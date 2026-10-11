@@ -6982,21 +6982,9 @@ async def drop_request(req: Request):
     quoted = float(body.get("quoted_price") or 0)
     if not what or not pickup_addr or not delivery_addr or not name:
         raise HTTPException(400, "What, both addresses, and your name are required")
-    # Geocode both for distance + driver matching
-    plat, plng, dlat, dlng = 0.0, 0.0, 0.0, 0.0
-    try:
-        import urllib.request, urllib.parse, json
-        for addr, which in ((pickup_addr, "p"), (delivery_addr, "d")):
-            url = f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(addr)}&format=json&limit=1"
-            rq = urllib.request.Request(url, headers={"User-Agent": "DropApp/1.0"})
-            geo = json.loads(urllib.request.urlopen(rq, timeout=10).read())
-            if geo:
-                if which == "p":
-                    plat, plng = float(geo[0]["lat"]), float(geo[0]["lon"])
-                else:
-                    dlat, dlng = float(geo[0]["lat"]), float(geo[0]["lon"])
-    except Exception:
-        pass
+    # Geocode both for distance + driver matching (hardened with fallbacks)
+    plat, plng, _ = _geocode(pickup_addr)
+    dlat, dlng, _ = _geocode(delivery_addr)
     # Price: $1.50/mile, min $3.99
     miles = driving_miles(plat, plng, dlat, dlng)
     fee = round(max(3.99, miles * 1.50), 2) if miles > 0 else (quoted if quoted > 0 else 3.99)
@@ -7080,37 +7068,46 @@ def _photon(addr):
     return None
 
 def _geocode(addr):
-    """Return (lat, lng) or (0.0, 0.0). Tries hard before giving up:
-    Nominatim -> Photon fallback -> simplified address retry.
-    Cached 1hr (success) / 5min (failure) so throttling never silently
-    becomes a fake base-fare quote."""
+    """Return (lat, lng, precision) or (0.0, 0.0, 'none').
+    Tries hard before giving up: full address -> simplified -> Hwy expansion ->
+    city-level fallback (precision='approximate'). Each variant tried on
+    Nominatim then Photon. Rural highway addresses often only resolve at
+    city level — an approximate quote beats a dead end."""
     import time, re
     key = addr.strip().lower()
     now = time.time()
     hit = _geocode_cache.get(key)
     if hit:
-        (lat, lng, ts, ok) = hit
+        (lat, lng, ts, ok, prec) = hit
         if ok and now - ts < 3600:
-            return lat, lng
+            return lat, lng, prec
         if not ok and now - ts < 300:
-            return 0.0, 0.0
-    # address variants: full, then without unit/apt/suite (those confuse geocoders)
-    variants = [addr.strip()]
-    simple = re.sub(r"[,\s]+(apt|apartment|unit|suite|ste|#)\.?\s*[\w-]+", "", addr, flags=re.I).strip(" ,")
-    if simple and simple.lower() != key:
-        variants.append(simple)
-    for v in variants:
+            return 0.0, 0.0, "none"
+    words = addr.strip().split()
+    variants = [(addr.strip(), "exact")]
+    no_unit = re.sub(r"[\s,]+(apt|apartment|unit|suite|ste|#)\.?\s*[\w-]+", "", addr, flags=re.I).strip(" ,")
+    if no_unit and no_unit.lower() != key:
+        variants.append((no_unit, "exact"))
+    hwy_exp = re.sub(r"\bHwy\b", "Highway", addr, flags=re.I).strip()
+    if hwy_exp.lower() != key and hwy_exp != addr.strip():
+        variants.append((hwy_exp, "exact"))
+    # city-level fallbacks: last 3 words, then last 2 ("Heidelberg ms")
+    if len(words) > 3:
+        variants.append((" ".join(words[-3:]), "approximate"))
+    if len(words) > 2:
+        variants.append((" ".join(words[-2:]), "approximate"))
+    for v, prec in variants:
         for fn in (_nominatim, _photon):
             try:
                 r = fn(v)
                 if r:
-                    _geocode_cache[key] = (r[0], r[1], now, True)
-                    return r
+                    _geocode_cache[key] = (r[0], r[1], now, True, prec)
+                    return r[0], r[1], prec
             except Exception:
                 pass
             time.sleep(0.3)
-    _geocode_cache[key] = (0.0, 0.0, now, False)
-    return 0.0, 0.0
+    _geocode_cache[key] = (0.0, 0.0, now, False, "none")
+    return 0.0, 0.0, "none"
 
 
 _driving_cache = {}
@@ -7160,10 +7157,13 @@ def ride_fare_quote(pickup_addr, dropoff_addr, plat=None, plng=None, dlat=None, 
     Raises ValueError if an address can't be mapped — a ride must NEVER be
     quoted a base fare on a failed lookup."""
     import math
+    approx = False
     if plat is None:
-        plat, plng = _geocode(pickup_addr)
+        plat, plng, p_prec = _geocode(pickup_addr)
+        approx = approx or p_prec == "approximate"
     if dlat is None:
-        dlat, dlng = _geocode(dropoff_addr)
+        dlat, dlng, d_prec = _geocode(dropoff_addr)
+        approx = approx or d_prec == "approximate"
     if not all([plat, plng, dlat, dlng]):
         raise ValueError("Couldn't map one of those addresses — check the spelling and try again.")
     miles = driving_miles(plat, plng, dlat, dlng)
@@ -7196,6 +7196,7 @@ def ride_fare_quote(pickup_addr, dropoff_addr, plat=None, plng=None, dlat=None, 
             "driver_pay_est": driver_pay, "company_profit_est": profit,
             "ai_note": ai_note, "geocoded": True,
             "too_far": too_far, "max_miles": max_miles,
+            "approximate": approx,
             "plat": plat, "plng": plng, "dlat": dlat, "dlng": dlng}
 
 
@@ -7470,15 +7471,18 @@ def pickup_quote(pickup_address: str = "", delivery_address: str = ""):
     calls this so the displayed price always matches what the server charges."""
     if not pickup_address.strip() or not delivery_address.strip():
         raise HTTPException(400, "Both addresses are required")
-    plat, plng = _geocode(pickup_address.strip()[:200])
-    dlat, dlng = _geocode(delivery_address.strip()[:200])
+    plat, plng, p_prec = _geocode(pickup_address.strip()[:200])
+    dlat, dlng, d_prec = _geocode(delivery_address.strip()[:200])
+    approx = p_prec == "approximate" or d_prec == "approximate"
+    if not all([plat, plng, dlat, dlng]):
+        raise HTTPException(400, "Couldn't map one of those addresses — check the spelling and try again.")
     miles = driving_miles(plat, plng, dlat, dlng)
     base_fee = float(get_setting("delivery_fee") or 3.99)
     fee = round(max(base_fee, miles * 1.50), 2) if miles > 0 else base_fee
     gas_pct = float(get_setting("gas_pct") or 10)
     gas_fee = round(fee * gas_pct / 100, 2)
     return {"miles": miles, "fee": fee, "gas_pct": gas_pct, "gas_fee": gas_fee,
-            "total": round(fee + gas_fee, 2), "geocoded": bool(miles)}
+            "total": round(fee + gas_fee, 2), "geocoded": True, "approximate": approx}
 
 
 @app.post("/api/pickup/request")
@@ -7499,21 +7503,9 @@ async def pickup_request(req: Request):
         tip = 0.0
     if not restaurant or not pickup_addr or not delivery_addr or not name:
         raise HTTPException(400, "Restaurant, both addresses, and your name are required")
-    # Geocode both addresses for distance-based fee
-    plat, plng, dlat, dlng = 0.0, 0.0, 0.0, 0.0
-    try:
-        import urllib.request, urllib.parse, json
-        for addr, which in ((pickup_addr, "p"), (delivery_addr, "d")):
-            geo_url = f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(addr)}&format=json&limit=1"
-            geo_req = urllib.request.Request(geo_url, headers={"User-Agent": "DropApp/1.0"})
-            geo = json.loads(urllib.request.urlopen(geo_req, timeout=10).read())
-            if geo:
-                if which == "p":
-                    plat, plng = float(geo[0]["lat"]), float(geo[0]["lon"])
-                else:
-                    dlat, dlng = float(geo[0]["lat"]), float(geo[0]["lon"])
-    except Exception:
-        pass
+    # Geocode both addresses (hardened: fallbacks + city-level) for distance-based fee
+    plat, plng, _ = _geocode(pickup_addr)
+    dlat, dlng, _ = _geocode(delivery_addr)
     # Fee: base + $1.50/mile (same smart pricing as courier)
     base_fee = float(get_setting("delivery_fee") or 3.99)
     miles = driving_miles(plat, plng, dlat, dlng)
