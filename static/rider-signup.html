@@ -1,0 +1,49 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Drop — Sign Up to Ride</title>
+<link rel="icon" href="/static/logo-mark.jpg">
+<link rel="stylesheet" href="/static/styles.css">
+<style>
+.hero{text-align:center;padding:32px 20px}
+.hero h1{font-size:2rem;margin:0 0 8px}
+.hero .hl{color:var(--acc)}
+.formcard{background:#141416;border:1px solid var(--line);border-radius:16px;padding:24px;max-width:480px;margin:0 auto}
+.formcard label{display:block;font-size:.9rem;font-weight:700;margin:14px 0 4px}
+.formcard input{width:100%;padding:12px;border-radius:10px;border:1px solid var(--line);background:#0a0a0c;color:#fff;font-size:1rem;box-sizing:border-box}
+</style>
+</head><body>
+<header class="topbar"><a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg" alt="Drop"><b>Drop</b></a>
+<a href="/" style="font-size:.85rem">← Home</a></header>
+
+<div class="hero">
+  <h1>Sign up to <span class="hl">ride</span>.</h1>
+  <p class="tagline">Bismarck & Mandan's rideshare. Upfront prices, live tracking, local drivers.</p>
+</div>
+
+<div class="formcard">
+  <label>Your name *</label>
+  <input id="r-name" placeholder="Jane Doe">
+  <label>Phone number *</label>
+  <input id="r-phone" inputmode="tel" placeholder="(701) 555-1234">
+  <label>Password (6+ characters) *</label>
+  <input id="r-pw" type="password" placeholder="Pick a password">
+  <button class="btn" id="r-go" style="width:100%;margin-top:18px">Create rider account →</button>
+  <p class="small" id="r-msg" style="text-align:center"></p>
+  <p class="small" style="text-align:center;margin-top:16px">Want to drive instead? <a href="/drive.html">Apply as a driver →</a></p>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+$('r-go').onclick=async()=>{
+  const name=$('r-name').value.trim(), phone=$('r-phone').value.trim(), pw=$('r-pw').value;
+  if(!name||!phone||pw.length<6){$('r-msg').textContent='Fill in all fields (password 6+ characters).';return;}
+  $('r-go').disabled=true;$('r-go').textContent='Creating…';
+  try{
+    const r=await(await fetch('/api/auth/signup',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({name,phone,password:pw,role:'rider'})})).json();
+    if(r.ok){location.href='/';}
+    else{$('r-msg').textContent=r.detail||'Failed';$('r-go').disabled=false;$('r-go').textContent='Create rider account →';}
+  }catch(e){$('r-msg').textContent='Connection error.';$('r-go').disabled=false;$('r-go').textContent='Create rider account →';}
+};
+</script>
+</body></html>
