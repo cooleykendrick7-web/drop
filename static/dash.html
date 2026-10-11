@@ -269,6 +269,9 @@
       <h3>Minutes per delivery</h3>
       <input id="smpd" inputmode="numeric" placeholder="18">
       <p class="small">Used to estimate customer wait times. Your average door-to-door minutes.</p>
+      <h3>Max live orders (capacity)</h3>
+      <input id="smaxq" inputmode="numeric" placeholder="8">
+      <p class="small">How many active orders you juggle at once. Hit the cap and the site shows "At capacity" for real.</p>
       <h3>Delivery fee ($)</h3>
       <input id="sfee" inputmode="decimal"><h3>Minimum food order ($)</h3>
       <input id="smin" inputmode="decimal" placeholder="10.00"><h3>Change PIN</h3>
@@ -597,7 +600,7 @@ $('addrest').onclick=async()=>{
 };
 async function loadSet(){
   const s=await (await fetch('/api/operator/settings',{headers:H()})).json();
-  $('sfee').value=s.delivery_fee;$('smin').value=s.min_order;$('smpd').value=s.mins_per_delivery;$('stopic').value=s.ntfy_topic||'';
+  $('sfee').value=s.delivery_fee;$('smin').value=s.min_order;$('smpd').value=s.mins_per_delivery;$('smaxq').value=s.max_queue||8;$('stopic').value=s.ntfy_topic||'';
   $('sopen').value=s.open_hour;$('sclose').value=s.close_hour;$('szone').value=s.delivery_zone||'';
   const pt=$('pausetoggle');
   pt.textContent=s.accepting_orders?'Pause':'Resume';
@@ -611,8 +614,8 @@ $('pausetoggle').onclick=async()=>{
 };
 $('saveset').onclick=async()=>{
   const body={delivery_fee:parseFloat($('sfee').value),min_order:parseFloat($('smin').value)||0,
-    mins_per_delivery:parseInt($('smpd').value)||18,ntfy_topic:$('stopic').value.trim(),
-    delivery_zone:$('szone').value.trim()};
+    mins_per_delivery:parseInt($('smpd').value)||18,max_queue:parseInt($('smaxq').value)||8,
+    ntfy_topic:$('stopic').value.trim(),delivery_zone:$('szone').value.trim()};
   const oh=parseInt($('sopen').value),ch=parseInt($('sclose').value);
   if(!isNaN(oh))body.open_hour=oh; if(!isNaN(ch))body.close_hour=ch;
   if($('spin').value.trim()) body.pin=$('spin').value.trim();

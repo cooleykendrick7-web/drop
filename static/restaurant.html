@@ -40,15 +40,25 @@ async function load(){
   document.getElementById('head').innerHTML =
     `${rest.photo?`<div class="hero-photo" style="background-image:url('${rest.photo}')"></div>`:''}
      <h1>${rest.logo?`<img class="rlogo-lg" src="${rest.logo}" alt="">`:rest.emoji} ${rest.name}</h1><p class="sub">${rest.cuisine} · Delivery $${fee.toFixed(2)} · ${rest.open?'Open now':'Closed'}</p>`;
-  document.getElementById('menu').innerHTML = menu.map(m=>`
-    <div class="card menu-item">
-      <div class="info"><b>${m.name}</b><span>${m.description||''}</span><span class="price">$${m.price.toFixed(2)}</span></div>
-      <div class="qty">
-        <button onclick="ch(${m.id},-1)">−</button>
-        <b id="q${m.id}">${cart[m.id]||0}</b>
-        <button onclick="ch(${m.id},1)">+</button>
-      </div>
-    </div>`).join('');
+  if(menu.length===0){
+    document.getElementById('menu').innerHTML =
+      `<div class="card" style="text-align:center;padding:28px 16px">
+        <div style="font-size:2rem">📋</div>
+        <b>Menu coming soon</b>
+        <p class="sub">We're still setting up this spot's menu.<br>Try one of our other ${rest.city} spots for now!</p>
+        <a class="btn ghost" href="/" style="display:inline-block;margin-top:8px">← Browse restaurants</a>
+      </div>`;
+  } else {
+    document.getElementById('menu').innerHTML = menu.map(m=>`
+      <div class="card menu-item">
+        <div class="info"><b>${m.name}</b><span>${m.description||''}</span><span class="price">$${m.price.toFixed(2)}</span></div>
+        <div class="qty">
+          <button onclick="ch(${m.id},-1)">−</button>
+          <b id="q${m.id}">${cart[m.id]||0}</b>
+          <button onclick="ch(${m.id},1)">+</button>
+        </div>
+      </div>`).join('');
+  }
   draw();
 }
 function ch(id,d){

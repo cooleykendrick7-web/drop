@@ -234,7 +234,7 @@ function renderRestaurants(q){
     <a class="card rest" href="/restaurant.html?id=${x.id}">
       <div class="rbody">
       ${(x.logo||x.photo)?`<img class="rlogo" src="${x.logo||x.photo}" alt="" loading="lazy">`:`<div class="emoji">${x.emoji||'🍽️'}</div>`}
-      <div class="meta"><b>${(x.name||'').replace(/</g,'&lt;')}</b><span>${(x.cuisine||'').replace(/</g,'&lt;')} · ${(x.city||'').replace(/</g,'&lt;')}, ${x.state||''}</span><span class="fee">$${fee.toFixed(2)} delivery</span></div>
+      <div class="meta"><b>${(x.name||'').replace(/</g,'&lt;')}</b><span>${(x.cuisine||'').replace(/</g,'&lt;')} · ${(x.city||'').replace(/</g,'&lt;')}, ${x.state||''}</span><span class="fee">${(!x.menu||x.menu.length===0)?'📋 Menu coming soon':'$'+fee.toFixed(2)+' delivery'}</span></div>
       <span class="badge ${x.open?'open':'closed'}">${x.open?'OPEN':'CLOSED'}</span>
       </div>
     </a>`).join('') || '<p>No restaurants found. Try a different search.</p>';

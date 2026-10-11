@@ -13,7 +13,7 @@
 <p class="sub" id="rname"></p>
 <div id="queuepos"></div>
 <div class="card" id="items"></div>
-<h2>Where's my food?</h2>
+<h2 id="wherehead">Where's my food?</h2>
 <div id="map"></div>
 <div id="driverbanner"></div>
 <div class="steps" id="steps"></div>
@@ -65,6 +65,7 @@ async function poll(){
   const o = await (await fetch('/api/orders/'+oid+'/public')).json();
   FLOW = o.kind==='courier' ? FLOW_COURIER : FLOW_FOOD;
   if(o.id===undefined){document.body.innerHTML='<p>Order not found.</p>';return;}
+  if(o.kind==='courier') document.getElementById('wherehead').textContent="Where are my items?";
   document.getElementById('oid').textContent='#'+o.id;
   document.getElementById('rname').textContent=o.restaurant+' · '+(o.paid?'Paid ✓':'Payment pending');
   document.getElementById('items').innerHTML =

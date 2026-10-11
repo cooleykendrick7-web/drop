@@ -115,6 +115,7 @@ def init_db():
     c.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('min_order', '10.00')")
     c.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('accepting_orders', '1')")
     c.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('mins_per_delivery', '18')")
+    c.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('max_queue', '8')")
     # customer accounts + rewards (added 2026-10-09)
     c.execute("""CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -930,11 +931,185 @@ def seed_expansion_cities2():
     conn.close()
 
 
+def seed_ga_fl_menus():
+    """Starter menus for the Atlanta GA + Florida expansion spots (added 2026-10-11).
+    Idempotent: only fills restaurants that currently have ZERO menu items.
+    Prices are best-estimates — Ken must verify before real orders."""
+    MENUS = {
+    # ---------------- ATLANTA GA ----------------
+    "The Varsity": [("Famous Chili Dog", 5.49), ("Double Cheeseburger", 6.99),
+        ("Pimento Cheeseburger", 5.99), ("Chili Cheese Fries", 4.99),
+        ("Onion Rings", 3.99), ("Frosted Orange Shake", 4.49),
+        ("Chicken Sandwich", 5.49), ("Varsity Peach Pie", 3.49)],
+    "Mary Mac's Tea Room": [("Fried Chicken Plate", 16.99), ("Country Fried Steak", 15.99),
+        ("Meatloaf", 13.99), ("Fried Green Tomatoes", 8.99),
+        ("Collard Greens", 4.99), ("Mac & Cheese", 5.99),
+        ("Cornbread", 2.99), ("Peach Cobbler", 6.99)],
+    "The Vortex Bar & Grill": [("Double Bypass Burger", 13.99), ("Coronary Bypass Burger", 16.99),
+        ("Tater Tot Nachos", 10.99), ("Fried Pickles", 7.99),
+        ("Blue Cheese Chips", 6.99), ("Turkey Burger", 11.99),
+        ("Patty Melt", 12.99), ("Deep Fried Moon Pie", 5.99)],
+    "Fox Bros Bar-B-Q": [("Brisket Plate", 17.99), ("Pulled Pork Plate", 14.99),
+        ("Half Rack Ribs", 18.99), ("Frito Pie", 11.99),
+        ("Brunswick Stew", 6.99), ("Collard Greens", 4.49),
+        ("Mac & Cheese", 4.99), ("Banana Pudding", 5.49)],
+    "Antico Pizza Napoletana": [("Margherita D.O.P.", 16.99), ("Diavola", 18.99),
+        ("San Daniele", 19.99), ("Lasagna", 17.99),
+        ("Meatball Sandwich", 13.99), ("Caprese Salad", 11.99),
+        ("Tiramisu", 7.99), ("Cannoli", 6.99)],
+    "The Busy Bee Cafe": [("Fried Chicken", 15.99), ("Smothered Pork Chops", 14.99),
+        ("Oxtails", 18.99), ("Mac & Cheese", 5.49),
+        ("Collard Greens", 4.99), ("Black Eyed Peas", 4.49),
+        ("Cornbread", 2.49), ("Sweet Potato Pie", 5.99)],
+    "Slutty Vegan": [("One Night Stand Burger", 12.99), ("Fussy Hussy Burger", 13.99),
+        ("Menage a Trois", 15.99), ("Hollywood Hooker Chicken Sandwich", 12.99),
+        ("Slutty Fries", 8.99), ("Banana Pudding Shake", 7.99),
+        ("Side Salad", 6.99), ("Sweet Potato Fries", 5.99)],
+    "Canoe": [("Seared Scallops", 38.00), ("Filet Mignon", 46.00),
+        ("Lobster Risotto", 42.00), ("Duck Breast", 36.00),
+        ("Crab Cake", 24.00), ("Burrata Salad", 18.00),
+        ("Chocolate Torte", 14.00), ("Creme Brulee", 12.00)],
+    "Bacchanalia": [("Tasting Menu", 125.00), ("Lobster Fritters", 28.00),
+        ("Wagyu Carpaccio", 32.00), ("Organic Chicken", 44.00),
+        ("Dry-Aged Ribeye", 68.00), ("Truffle Pasta", 42.00),
+        ("Cheese Course", 24.00), ("Valrhona Souffle", 18.00)],
+    # ---------------- MIAMI FL ----------------
+    "Versailles Restaurant": [("Cuban Sandwich", 10.99), ("Ropa Vieja", 16.99),
+        ("Lechon Asado", 15.99), ("Medianoche", 9.99),
+        ("Croquetas (6)", 5.99), ("Yuca con Mojo", 6.99),
+        ("Flan", 5.99), ("Cafe Cubano", 2.99)],
+    "Coyo Taco": [("Baja Shrimp Taco", 5.99), ("Al Pastor Taco", 4.99),
+        ("Carne Asada Taco", 5.49), ("Pollo Asado Taco", 4.99),
+        ("Queso Fundido", 8.99), ("Elote", 4.99),
+        ("Churros", 4.99), ("Jarritos", 3.49)],
+    "Enriqueta's Sandwich Shop": [("Pan con Bistec", 9.99), ("Cuban Sandwich", 8.99),
+        ("Croqueta Preparada", 7.99), ("Batido de Mamey", 5.99),
+        ("Papas Rellenas", 4.99), ("Medianoche", 8.49),
+        ("Flan", 4.99), ("Materva", 2.99)],
+    "Garcia's Seafood Grille": [("Fried Snapper", 22.99), ("Shrimp Creole", 19.99),
+        ("Stone Crab Claws", 32.99), ("Conch Fritters", 11.99),
+        ("Blackened Mahi", 21.99), ("Seafood Paella", 26.99),
+        ("Key Lime Pie", 7.99), ("Garlic Crab", 24.99)],
+    "El Palacio De Los Jugos": [("Cuban Sandwich", 9.49), ("Churrasco Steak", 17.99),
+        ("Fresh Mango Juice", 5.49), ("Batido de Trigo", 5.99),
+        ("Tostones Rellenos", 8.99), ("Masitas de Puerco", 13.99),
+        ("Flan", 4.49), ("Cortadito", 2.49)],
+    "Sanguich De Miami": [("Cubano", 11.99), ("Croqueta Melt", 9.99),
+        ("Pan con Lechon", 10.99), ("Yuca Fries", 5.99),
+        ("Batido de Guayaba", 5.49), ("Tres Leches", 6.49),
+        ("Croquetas (4)", 4.99), ("Cafe con Leche", 3.49)],
+    # ---------------- MIAMI BEACH FL ----------------
+    "Joe's Stone Crab": [("Stone Crab Claws (Large)", 89.99), ("Jumbo Lump Crab Cake", 32.99),
+        ("Joe's Key Lime Pie", 10.99), ("Grilled Swordfish", 42.99),
+        ("Lobster Tail", 54.99), ("Creamed Spinach", 12.99),
+        ("Lyonnaise Potatoes", 11.99), ("Shrimp Cocktail", 19.99)],
+    "La Sandwicherie": [("French Cuban Sandwich", 9.99), ("Tuna Melt", 8.99),
+        ("Turkey Avocado", 9.49), ("Veggie Supreme", 8.49),
+        ("Lentil Soup", 6.99), ("Fresh Squeezed OJ", 5.99),
+        ("Croissant", 3.49), ("Quiche of the Day", 7.99)],
+    "Puerto Sagua": [("Ropa Vieja", 14.99), ("Picadillo", 12.99),
+        ("Camarones al Ajillo", 17.99), ("Cuban Sandwich", 8.99),
+        ("Bistec de Palomilla", 15.99), ("Tostones", 5.49),
+        ("Arroz con Pollo", 13.99), ("Flan", 4.99)],
+    # ---------------- ORLANDO FL ----------------
+    "4 Rivers Smokehouse": [("Brisket Plate", 16.99), ("Pulled Pork Sandwich", 10.99),
+        ("Smoked Turkey", 12.99), ("Burnt Ends", 15.99),
+        ("Mac & Cheese", 4.99), ("Collard Greens", 4.49),
+        ("Cornbread", 2.99), ("Bread Pudding", 5.99)],
+    "Prato": [("Cacio e Pepe", 19.99), ("Margherita Pizza", 16.99),
+        ("Short Rib Ravioli", 24.99), ("Burrata & Prosciutto", 14.99),
+        ("Chicken Milanese", 22.99), ("Wood-Fired Meatballs", 13.99),
+        ("Tiramisu", 8.99), ("Panna Cotta", 7.99)],
+    "Se7en Bites": [("Fried Chicken Biscuit", 9.99), ("Pimento Cheese Biscuit", 7.99),
+        ("Meatloaf Melt", 11.99), ("Mac & Cheese Bites", 8.99),
+        ("Banana Pudding", 6.99), ("Chocolate Chess Pie", 5.99),
+        ("Biscuit Flight", 8.99), ("Sweet Tea", 2.99)],
+    "Black Rooster Taqueria": [("Carnitas Taco", 4.49), ("Baja Fish Taco", 5.49),
+        ("Al Pastor Taco", 4.49), ("Elote", 4.99),
+        ("Queso & Chips", 8.49), ("Churro Bites", 5.49),
+        ("Agua Fresca", 3.99), ("Quesadilla", 9.99)],
+    "The Coop": [("Nashville Hot Chicken", 13.99), ("Chicken & Waffles", 14.99),
+        ("Coop Tenders", 11.99), ("Fried Chicken Sandwich", 12.49),
+        ("Mac & Cheese", 5.49), ("Honey Butter Biscuit", 3.99),
+        ("Banana Pudding", 6.49), ("Sweet Tea", 2.99)],
+    "Gideon's Bakehouse": [("Chocolate Chip Cookie", 6.49), ("Peanut Butter Crunch", 6.49),
+        ("Cookies & Cream", 6.49), ("Pistachio Toffee", 6.99),
+        ("Cold Brew", 5.49), ("Cookie Cake Slice", 8.99),
+        ("Hot Chocolate", 5.99), ("Nitro Cold Brew", 6.49)],
+    # ---------------- TAMPA FL ----------------
+    "Columbia Restaurant": [("1905 Salad", 14.99), ("Cuban Sandwich", 12.99),
+        ("Ropa Vieja", 21.99), ("Paella a la Valenciana", 32.99),
+        ("Snapper Alicante", 28.99), ("Boliche", 22.99),
+        ("Flan", 7.99), ("Sangria", 9.99)],
+    "Bern's Steak House": [("Filet Mignon", 68.00), ("Delmonico", 62.00),
+        ("Chateaubriand for Two", 145.00), ("Lobster Tail", 58.00),
+        ("French Onion Soup", 12.00), ("Creamed Spinach", 11.00),
+        ("Baked Potato", 9.00), ("Macadamia Nut Ice Cream", 12.00)],
+    "La Segunda Central Bakery": [("Cuban Bread Loaf", 4.99), ("Guava Pastry", 3.49),
+        ("Cheese Pastry", 3.29), ("Ham Croissant", 4.99),
+        ("Cafe con Leche", 3.29), ("Cuban Sandwich", 8.99),
+        ("Media Noche", 8.49), ("Flan", 4.99)],
+    "Taco Bus": [("Al Pastor Taco", 3.99), ("Carnitas Taco", 3.99),
+        ("Fish Taco", 4.99), ("Quesadilla", 8.99),
+        ("Burrito", 9.99), ("Elote", 3.99),
+        ("Churros", 3.99), ("Horchata", 3.49)],
+    "Goody Goody Burgers": [("POX Burger", 9.99), ("Double POX", 12.99),
+        ("Butterscotch Milkshake", 6.99), ("Onion Rings", 4.99),
+        ("Secret Sauce Fries", 5.99), ("Chicken Tenders", 9.49),
+        ("Hyde Park Burger", 11.99), ("Banana Pudding", 5.49)],
+    "Ulele": [("Alligator Hush Puppies", 13.99), ("Okra Fries", 9.99),
+        ("Native Chili", 22.99), ("Cedar Plank Salmon", 29.99),
+        ("Duck Tacos", 16.99), ("Fire-Roasted Corn", 7.99),
+        ("Key Lime Pie", 8.99), ("Guava Bread Pudding", 9.99)],
+    # ---------------- JACKSONVILLE FL ----------------
+    "Maple Street Biscuit Company": [("Squawking Goat Biscuit", 8.99), ("Sticky Maple Biscuit", 7.99),
+        ("Fried Chicken Biscuit", 9.49), ("Mac & Cheese", 4.99),
+        ("Fried Green Tomatoes", 7.99), ("Sweet Potato Fries", 4.99),
+        ("Cinnamon Biscuit", 4.99), ("Sweet Tea", 2.99)],
+    "Safe Harbor Seafood": [("Minorcan Chowder", 8.99), ("Fried Shrimp Basket", 16.99),
+        ("Blackened Mahi Sandwich", 14.99), ("Datil Crab Cakes", 18.99),
+        ("Fish Tacos", 13.99), ("Hush Puppies", 5.99),
+        ("Key Lime Pie", 6.99), ("Grouper Sandwich", 17.99)],
+    "Metro Diner": [("Fried Chicken & Waffles", 15.99), ("Meatloaf Plate", 14.99),
+        ("Shrimp & Grits", 16.99), ("Chicken Pot Pie", 13.99),
+        ("Cinnamon Roll Pancakes", 11.99), ("Biscuits & Gravy", 9.99),
+        ("Yo Hala Burger", 12.99), ("Bread Pudding", 6.99)],
+    "V Pizza": [("Marinara Pizza", 13.99), ("Margherita", 15.99),
+        ("Diavola", 17.99), ("Quattro Formaggi", 17.99),
+        ("Meatballs", 11.99), ("Arancini", 9.99),
+        ("Tiramisu", 7.99), ("Nutella Calzone", 9.99)],
+    "Black Sheep Restaurant": [("Rooftop Burger", 14.99), ("Shrimp & Grits", 19.99),
+        ("Fried Green Tomato BLT", 12.99), ("Short Rib", 26.99),
+        ("Kale Caesar", 11.99), ("Pimento Cheese Dip", 9.99),
+        ("Chocolate Pot de Creme", 8.99), ("Sweet Tea", 2.99)],
+    "Angie's Subs": [("Turkey Sub", 9.99), ("Italian Sub", 10.49),
+        ("Tuna Melt", 9.49), ("Veggie Sub", 8.99),
+        ("Meatball Sub", 10.99), ("Cuban Sub", 10.49),
+        ("Chips", 2.99), ("Sweet Tea", 2.49)],
+    }
+    conn = db()
+    c = conn.cursor()
+    filled = 0
+    for name, items in MENUS.items():
+        for r in c.execute("SELECT id FROM restaurants WHERE name=?", (name,)).fetchall():
+            n = c.execute("SELECT COUNT(*) n FROM menu_items WHERE restaurant_id=?",
+                          (r["id"],)).fetchone()["n"]
+            if n == 0:
+                for iname, price in items:
+                    c.execute("INSERT INTO menu_items(restaurant_id, name, price, available)"
+                              " VALUES(?,?,?,1)", (r["id"], iname, price))
+                filled += 1
+    conn.commit()
+    conn.close()
+    return filled
+
+
 init_db()
 seed()
 seed_cities()
 seed_expansion_cities()
 seed_expansion_cities2()
+seed_ga_fl_menus()
 
 
 # ---------------- helpers ----------------
@@ -969,6 +1144,34 @@ def fmt_hour(h):
     h = int(h) % 24
     ap = "am" if h < 12 else "pm"
     return f"{h % 12 or 12}{ap}"
+
+
+def max_queue_size():
+    """Ken's cap on how many live orders he juggles at once (dashboard setting)."""
+    try:
+        return max(1, min(50, int(get_setting("max_queue") or 8)))
+    except (TypeError, ValueError):
+        return 8
+
+
+def active_order_count():
+    conn = db()
+    n = conn.execute(
+        "SELECT COUNT(*) c FROM orders WHERE status NOT IN ('delivered','cancelled')"
+    ).fetchone()["c"]
+    conn.close()
+    return n
+
+
+def queue_reason():
+    """Why we are/aren't taking orders: open | closed | paused | full."""
+    if not is_open_now():
+        return "closed"
+    if get_setting("accepting_orders") == "0":
+        return "paused"
+    if active_order_count() >= max_queue_size():
+        return "full"
+    return "open"
 
 
 def order_dict(row):
@@ -1671,6 +1874,8 @@ async def create_order(req: Request):
         oh, _ = get_hours()
         raise HTTPException(400, f"We're closed right now — back at {fmt_hour(oh)}")
     if get_setting("accepting_orders") == "0":
+        raise HTTPException(400, "We've paused orders for a moment — please check back soon")
+    if queue_reason() == "full":
         raise HTTPException(400, "We're at capacity right now — please check back soon")
     rid = body.get("restaurant_id")
     # logged-in customer?
@@ -1692,6 +1897,11 @@ async def create_order(req: Request):
     if not rest["open"]:
         conn.close()
         raise HTTPException(400, "Restaurant is closed right now")
+    nmenu = conn.execute("SELECT COUNT(*) c FROM menu_items WHERE restaurant_id=? AND available=1",
+                         (rid,)).fetchone()["c"]
+    if not nmenu:
+        conn.close()
+        raise HTTPException(400, "This spot's menu isn't live yet — check back soon")
     food_total = 0.0
     priced = []
     for it in items:
@@ -2096,6 +2306,7 @@ def op_get_settings(x_pin: str = Header(default="")):
             "min_order": float(get_setting("min_order") or 10),
             "accepting_orders": get_setting("accepting_orders") != "0",
             "mins_per_delivery": int(get_setting("mins_per_delivery") or 18),
+            "max_queue": max_queue_size(),
             "open_hour": oh, "close_hour": ch,
             "delivery_zone": get_setting("delivery_zone") or "Bismarck, ND",
             "pin": get_setting("pin"),
@@ -2128,6 +2339,10 @@ async def op_put_settings(req: Request, x_pin: str = Header(default="")):
         mpd = max(5, min(120, int(body["mins_per_delivery"])))
         set_setting("mins_per_delivery", str(mpd))
         out["mins_per_delivery"] = mpd
+    if "max_queue" in body:
+        mq = max(1, min(50, int(body["max_queue"])))
+        set_setting("max_queue", str(mq))
+        out["max_queue"] = mq
     if "pin" in body:
         pin = str(body["pin"]).strip()
         if not (pin.isdigit() and 4 <= len(pin) <= 8):
@@ -2417,21 +2632,20 @@ def refund_order(o):
 
 @app.get("/api/queue")
 def queue_status():
-    conn = db()
-    n = conn.execute(
-        "SELECT COUNT(*) c FROM orders WHERE status NOT IN ('delivered','cancelled')"
-    ).fetchone()["c"]
-    conn.close()
-    accepting = get_setting("accepting_orders") != "0"
+    n = active_order_count()
+    reason = queue_reason()
+    accepting = reason == "open"
     open_now = is_open_now()
     oh, ch = get_hours()
     try:
         mins = max(5, min(120, int(get_setting("mins_per_delivery") or 18)))
     except (TypeError, ValueError):
         mins = 18
-    return {"active": n, "accepting": accepting and open_now,
-            "open_now": open_now, "hours_label": f"{fmt_hour(oh)}–{fmt_hour(ch)}",
-            "estimated_mins": (n * mins + 25) if (accepting and open_now) else 0}
+    return {"active": n, "accepting": accepting, "reason": reason,
+            "open_now": open_now, "paused": get_setting("accepting_orders") == "0",
+            "max_queue": max_queue_size(),
+            "hours_label": f"{fmt_hour(oh)}–{fmt_hour(ch)}",
+            "estimated_mins": (n * mins + 25) if accepting else 0}
 
 
 @app.post("/api/orders/{oid}/cancel")
@@ -2797,6 +3011,8 @@ async def create_courier_order(req: Request):
         oh, _ = get_hours()
         raise HTTPException(400, f"We're closed right now — back at {fmt_hour(oh)}")
     if get_setting("accepting_orders") == "0":
+        raise HTTPException(400, "We've paused orders for a moment — please check back soon")
+    if queue_reason() == "full":
         raise HTTPException(400, "We're at capacity right now — please check back soon")
     me = get_session_user(req)
     user_id = me["id"] if me else 0

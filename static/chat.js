@@ -55,16 +55,24 @@
       : "Good question — I don't have that one yet. Tap <b>Message us</b> and we'll get back to you personally.";
   }
 
-  /* queue status bar — shows live wait info on every customer page */
+  /* queue status bar — shows live wait info on every customer page.
+     The reason matters: closed ≠ paused ≠ truly at capacity. */
   async function mountQueueBar(){
     if(document.getElementById('queuebar') || location.pathname.startsWith('/dash')) return;
     try{
       const q = await (await fetch('/api/queue')).json();
       window.DROP_QUEUE = q;
-      const bar = el(q.accepting
-        ? `<div id="queuebar" style="text-align:center;padding:8px 12px;font-size:.82rem;font-weight:600;background:rgba(0,200,100,.12);color:#4ade80;border-bottom:1px solid var(--line)">🟢 Taking orders · about ${q.estimated_mins} min right now${q.active>0?` (${q.active} ahead of you)`:''}</div>`
-        : `<div id="queuebar" style="text-align:center;padding:10px 12px;font-size:.85rem;font-weight:700;background:rgba(255,80,80,.14);color:#ff8080;border-bottom:1px solid var(--line)">🔴 At capacity right now — check back soon!</div>`);
-      document.body.prepend(bar);
+      let html;
+      if(q.reason === 'open' || q.accepting){
+        html = `<div id="queuebar" style="text-align:center;padding:8px 12px;font-size:.82rem;font-weight:600;background:rgba(0,200,100,.12);color:#4ade80;border-bottom:1px solid var(--line)">🟢 Taking orders · about ${q.estimated_mins} min right now${q.active>0?` (${q.active} ahead of you)`:''}</div>`;
+      }else if(q.reason === 'closed'){
+        html = `<div id="queuebar" style="text-align:center;padding:10px 12px;font-size:.85rem;font-weight:700;background:rgba(90,110,180,.14);color:#93a4ff;border-bottom:1px solid var(--line)">🌙 Closed right now — back open ${q.hours_label||'soon'}!</div>`;
+      }else if(q.reason === 'paused'){
+        html = `<div id="queuebar" style="text-align:center;padding:10px 12px;font-size:.85rem;font-weight:700;background:rgba(255,180,60,.14);color:#ffb43c;border-bottom:1px solid var(--line)">⏸️ Orders paused for a bit — check back soon!</div>`;
+      }else{
+        html = `<div id="queuebar" style="text-align:center;padding:10px 12px;font-size:.85rem;font-weight:700;background:rgba(255,80,80,.14);color:#ff8080;border-bottom:1px solid var(--line)">🔴 At capacity right now — check back soon!</div>`;
+      }
+      document.body.prepend(el(html));
     }catch(e){}
   }
 

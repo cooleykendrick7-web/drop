@@ -2,10 +2,24 @@
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Drop Driver Hub</title>
 <link rel="icon" href="/static/logo-mark.jpg">
+<link rel="manifest" href="/static/manifest-hub.webmanifest">
+<meta name="theme-color" content="#ff6a00">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Drop Hub">
+<link rel="apple-touch-icon" href="/static/hub-icon-180.png">
 <link rel="stylesheet" href="/static/styles.css">
 <style>.tabs{display:flex;gap:6px;margin:10px 0}.tabs button{flex:1;background:#2a2a33;color:#fff;border:0;border-radius:10px;padding:11px 4px;font-weight:700}.tabs button.on{background:var(--acc)}.tab{display:none}.tab.on{display:block}</style>
 </head><body>
 <header class="topbar"><a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg" alt="Drop"><b>Drop</b><span class="tag">dropper</span></a><span class="small" id="dname"></span></header>
+<div id="a2hs" style="display:none;position:sticky;top:0;z-index:50;background:#1c1508;border-bottom:2px solid #ff6a00;padding:10px 12px">
+  <div class="row" style="max-width:560px;margin:0 auto">
+    <span style="font-size:1.4rem">📲</span>
+    <span style="flex:1"><b>Install Drop Hub</b><br><span class="small" id="a2hstext">Add it to your home screen for one-tap access.</span></span>
+    <button class="btn small" id="a2hsbtn" style="width:auto">Install</button>
+    <button class="btn small ghost" id="a2hsx" style="width:auto" aria-label="Dismiss">✕</button>
+  </div>
+</div>
 
 <div id="login" class="card" style="max-width:400px;margin:40px auto;text-align:center">
   <div style="font-size:3rem">🚗</div>
@@ -33,7 +47,7 @@
     <button data-t="me">Profile</button>
   </div>
 
-  <div class="tab on" id="t-del"><div id="olist"><p class="small">Loading…</p></div></div>
+  <div class="tab on" id="t-del"><div id="onboard"></div><div id="olist"><p class="small">Loading…</p></div></div>
 
   <div class="tab" id="t-msg">
     <div class="card"><h3>📬 Messages</h3><div id="msglist"><p class="small">Loading…</p></div></div>
@@ -272,7 +286,32 @@ async function loadMe(){
   $('mstats').innerHTML=`⭐ On-time rate: <b>${m.on_time_rate}%</b> · ${m.deliveries} deliveries`;
   $('mvehicle').textContent=`${m.vehicle_year} ${m.vehicle_make} ${m.vehicle_model} ${m.vehicle_color}`.trim();
   if(m.ntfy_topic) $('ntfy').value=m.ntfy_topic;
+  renderOnboarding(m);
 }
+/* Driver onboarding checklist — hidden once everything is done */
+function renderOnboarding(m){
+  const docsOk=['gov_id_status','insurance_status','vehicle_reg_status'].every(k=>m[k]==='verified');
+  const steps=[
+    {label:'Application submitted', done:true},
+    {label: docsOk?'ID, insurance & vehicle docs verified':'Docs under review — we\u2019ll notify you', done:docsOk},
+    {label:'Hub PIN issued', done:!!m.login_pin},
+    {label: m.ntfy_topic?'Push notifications on':'Set up push notifications', done:!!m.ntfy_topic, go:'me'},
+    {label: (m.deliveries||0)>0?`First delivery done (${m.deliveries} total)`:'Complete your first delivery', done:(m.deliveries||0)>0},
+  ];
+  const doneN=steps.filter(s=>s.done).length;
+  const ob=$('onboard');
+  if(doneN===steps.length){ ob.innerHTML=''; return; }
+  const pct=Math.round(doneN/steps.length*100);
+  ob.innerHTML=`<div class="card" style="border-left:4px solid #f5a623">
+    <b>🚀 Getting started — ${doneN} of ${steps.length} done</b>
+    <div style="background:#222;border-radius:10px;height:10px;margin:8px 0"><div style="background:#f5a623;height:100%;border-radius:10px;width:${pct}%"></div></div>
+    ${steps.map(s=>`<div class="row" style="padding:4px 0">
+      <span>${s.done?'✅':'⬜'} ${s.label}</span>
+      ${(!s.done&&s.go)?`<button class="btn small ghost" style="width:auto" onclick="goTab('${s.go}')">Set up →</button>`:''}
+    </div>`).join('')}
+  </div>`;
+}
+function goTab(t){document.querySelector(`.tabs button[data-t="${t}"]`).click();}
 async function loadMsgs(){
   const msgs=await (await fetch('/api/drivers/messages')).json();
   $('msgbadge').textContent='';
@@ -377,5 +416,32 @@ document.querySelectorAll('.tabs button').forEach(b=>{
     if(b.dataset.t==='help'){ loadGoals(); loadComplaints(); }
   });
 });
+</script>
+<script>
+/* Add-to-Home-Screen: register SW, then show install prompt */
+if('serviceWorker' in navigator){ navigator.serviceWorker.register('/static/sw-hub.js').catch(()=>{}); }
+(function(){
+  if(localStorage.getItem('dropa2hs')==='1') return;
+  if(window.matchMedia('(display-mode: standalone)').matches || navigator.standalone) return;
+  const bar=document.getElementById('a2hs'), txt=document.getElementById('a2hstext'),
+        btn=document.getElementById('a2hsbtn');
+  const dismiss=()=>{ bar.style.display='none'; localStorage.setItem('dropa2hs','1'); };
+  document.getElementById('a2hsx').onclick=dismiss;
+  let deferred=null;
+  window.addEventListener('beforeinstallprompt', e=>{
+    e.preventDefault(); deferred=e;
+    bar.style.display='block';
+    btn.onclick=async()=>{ dismiss(); try{ await deferred.prompt(); }catch(_){} };
+  });
+  // iOS Safari: no beforeinstallprompt — show manual steps instead
+  const isIOS=/iphone|ipad|ipod/i.test(navigator.userAgent);
+  if(isIOS && !('BeforeInstallPromptEvent' in window)){
+    setTimeout(()=>{
+      txt.innerHTML='On iPhone: tap <b>Share ⬆️</b> → <b>Add to Home Screen</b>.';
+      btn.textContent='Got it'; btn.onclick=dismiss;
+      bar.style.display='block';
+    }, 4000);
+  }
+})();
 </script>
 <script src="/static/chat.js"></script></body></html>
