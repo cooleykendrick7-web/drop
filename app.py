@@ -234,6 +234,13 @@ def init_db():
                    ("min_profit_per_order", "1.00")):
         if c.execute("SELECT value FROM settings WHERE key=?", (_k,)).fetchone() is None:
             c.execute("INSERT INTO settings(key, value) VALUES(?, ?)", (_k, _v))
+    # system activity feed: everything the platform does on its own
+    c.execute("""CREATE TABLE IF NOT EXISTS system_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        kind TEXT NOT NULL DEFAULT 'info',
+        title TEXT NOT NULL DEFAULT '',
+        detail TEXT DEFAULT '',
+        created_at TEXT NOT NULL)""")
     # DROP MORE marketplace: business partnerships (added 2026-10-11)
     c.execute("""CREATE TABLE IF NOT EXISTS business_partners (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1971,6 +1978,8 @@ async def driver_location(req: Request):
             f"Our system clocked you at {speed_mph} mph. Please slow down — "
             f"safety first. Arriving safely matters more than arriving fast.")
         audit("system", "speed_warning", "driver", d["id"], f"{speed_mph} mph")
+        log_event("warning", f"⚠️ Speed warning sent to driver #{d['id']}",
+                  f"Clocked at {speed_mph} mph")
     # delay detection: on_the_way for too long?
     conn = db()
     slow = conn.execute(
@@ -2698,7 +2707,136 @@ def op_outreach_sent(eid: int, x_pin: str = Header(default="")):
     conn.commit()
     conn.close()
     audit("system", "outreach_sent", "outreach", eid, "")
+    log_event("email", f"📧 Outreach email sent to {e['to_email'][:40]}",
+              e["subject"][:80])
     return {"ok": True}
+
+
+# ---------------- Live activity feed + AI suggestions ----------------
+def log_event(kind, title, detail=""):
+    """Record something the platform did on its own. Ken sees it live."""
+    try:
+        conn = db()
+        conn.execute("INSERT INTO system_events(kind, title, detail, created_at)"
+                     " VALUES(?,?,?,?)", (kind, title, detail[:500], now_iso()))
+        # keep the feed lean — last 200 events
+        conn.execute("DELETE FROM system_events WHERE id NOT IN "
+                     "(SELECT id FROM system_events ORDER BY id DESC LIMIT 200)")
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+@app.get("/api/operator/activity")
+def op_activity(x_pin: str = Header(default=""), limit: int = 50):
+    """Live feed: system events + recent admin actions, newest first."""
+    check_pin(x_pin)
+    conn = db()
+    events = conn.execute("SELECT kind, title, detail, created_at, 'system' as src"
+                          " FROM system_events ORDER BY id DESC LIMIT ?",
+                          (min(limit, 100),)).fetchall()
+    actions = conn.execute("SELECT action as title, details as detail, created_at,"
+                           " 'you' as src, 'action' as kind FROM audit_log"
+                           " ORDER BY id DESC LIMIT ?",
+                           (min(limit, 100),)).fetchall()
+    conn.close()
+    feed = [dict(e) for e in events] + [dict(a) for a in actions]
+    feed.sort(key=lambda x: x["created_at"], reverse=True)
+    return feed[:limit]
+
+
+@app.get("/api/operator/suggestions")
+def op_suggestions(x_pin: str = Header(default="")):
+    """AI suggestions: what should Ken do right now? Based on live data."""
+    check_pin(x_pin)
+    conn = db()
+    out = []
+
+    # 1. Unreviewed partnership applications
+    new_deals = conn.execute(
+        "SELECT COUNT(*) as n FROM business_partners WHERE status='submitted'").fetchone()["n"]
+    if new_deals:
+        out.append({"icon": "🤝", "priority": "high",
+                    "text": f"{new_deals} partnership application(s) waiting for review.",
+                    "action": "Open the Deals tab and evaluate them."})
+
+    # 2. Pending driver applications
+    pend_drv = conn.execute(
+        "SELECT COUNT(*) as n FROM drivers WHERE status='pending'").fetchone()["n"]
+    if pend_drv:
+        out.append({"icon": "🚗", "priority": "high",
+                    "text": f"{pend_drv} driver application(s) need your approval.",
+                    "action": "Check the Drivers tab — nobody drives without your OK."})
+
+    # 3. Drivers missing documents
+    bad_docs = conn.execute(
+        """SELECT COUNT(*) as n FROM drivers WHERE status='approved'
+           AND (gov_id_status != 'verified' OR insurance_status != 'verified'
+                OR vehicle_reg_status != 'verified')""").fetchone()["n"]
+    if bad_docs:
+        out.append({"icon": "📄", "priority": "medium",
+                    "text": f"{bad_docs} active driver(s) have unverified documents.",
+                    "action": "Review their profiles and request missing paperwork."})
+
+    # 4. Speed warnings
+    speeders = conn.execute(
+        "SELECT name, speed_warnings FROM drivers WHERE speed_warnings > 0"
+        " AND status='approved' ORDER BY speed_warnings DESC LIMIT 3").fetchall()
+    for s in speeders:
+        out.append({"icon": "⚠️", "priority": "medium",
+                    "text": f"{s['name']} has {s['speed_warnings']} speeding warning(s).",
+                    "action": "Consider a conversation before it becomes a problem."})
+
+    # 5. Unprofitable recent orders
+    try:
+        rows = conn.execute(
+            "SELECT id, total, tip FROM orders WHERE status='delivered'"
+            " ORDER BY id DESC LIMIT 20").fetchall()
+        if rows:
+            base = fin_setting("price_base_fee", 3.99)
+            dbase = fin_setting("driver_base_pay", 3.00)
+            bad = [r for r in rows
+                   if (r["total"] or 0) - dbase - (r["total"] or 0) * 0.029 - 0.30
+                   < fin_setting("min_profit_per_order", 1.00)]
+            if bad:
+                out.append({"icon": "💸", "priority": "high",
+                            "text": f"{len(bad)} of your last 20 orders were below your profit target.",
+                            "action": "Check the Money tab — consider raising the delivery fee."})
+    except Exception:
+        pass
+
+    # 6. Draft outreach emails waiting
+    drafts = conn.execute(
+        "SELECT COUNT(*) as n FROM outreach_emails WHERE status='draft'").fetchone()["n"]
+    if drafts:
+        out.append({"icon": "📧", "priority": "low",
+                    "text": f"{drafts} outreach email draft(s) waiting for your approval.",
+                    "action": "Review them in the Outreach tab."})
+
+    # 7. Open support tickets
+    open_tix = conn.execute(
+        "SELECT COUNT(*) as n FROM tickets WHERE status='open'").fetchone()["n"]
+    if open_tix:
+        out.append({"icon": "💬", "priority": "medium",
+                    "text": f"{open_tix} customer message(s) need a reply.",
+                    "action": "Open the Support tab."})
+
+    # 8. Idle drivers who deserve a boost
+    idle = conn.execute(
+        "SELECT id, name FROM drivers WHERE status='approved' AND deliveries >= 5"
+        " ORDER BY RANDOM() LIMIT 1").fetchone()
+    if idle and len(out) < 6:
+        out.append({"icon": "💪", "priority": "low",
+                    "text": f"{idle['name']} has been delivering consistently.",
+                    "action": "Send them a boost — a little recognition goes a long way."})
+
+    conn.close()
+    # high priority first
+    order = {"high": 0, "medium": 1, "low": 2}
+    out.sort(key=lambda x: order.get(x["priority"], 3))
+    log_event("suggestions", f"Generated {len(out)} AI suggestions", "")
+    return out
 
 
 # ---------------- Drop Investors ----------------
