@@ -302,7 +302,14 @@ async function activateSched(oid){
 }
 async function loadOrders(first){
   const r=await fetch('/api/operator/orders',{headers:H()});
-  if(r.status===401){location.reload();return;}
+  if(r.status===401){
+    // saved PIN is wrong — clear it and show login form
+    sessionStorage.removeItem('droppin');
+    PIN='';
+    $('login').style.display='block';$('app').style.display='none';
+    $('loginmsg').textContent='Session expired. Enter your PIN.';
+    return;
+  }
   const orders=await r.json();
   // scheduled orders
   try{
