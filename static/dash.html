@@ -198,8 +198,8 @@ input,textarea,select{padding:9px!important;font-size:.9rem}
         <button class="btn small" id="blastgo" style="width:auto">📢 Send blast</button>
         <span class="small" id="blaststatus"></span></div>
       <div id="blasthist" style="margin-top:8px"></div></div>
-    <div class="card"><b>👀 Watcher chat <span id="watchbadge"></span></b>
-      <p class="small">Messages from people with the watch code (5683). They can see but not touch.</p>
+    <div class="card" id="watchercard" style="border:2px solid #fbbf24"><b>👀 VIP Watcher chat <span id="watchbadge"></span></b>
+      <p class="small">Messages from your VIPs & investors (code 5683).</p>
       <div id="watchchat" style="max-height:250px;overflow-y:auto;margin:8px 0"></div>
       <div class="row">
         <input id="watchreply" placeholder="Reply to watchers…" style="flex:1;margin-right:8px">
@@ -986,7 +986,15 @@ async function loadLive(){
 }
 async function loadWatchChat(){
   const j=await (await fetch('/api/operator/watcher-messages',{headers:H()})).json();
-  $('watchbadge').textContent=j.unseen?`(${j.unseen} new)`:'';
+  const unseen=j.unseen||0;
+  $('watchbadge').textContent=unseen?`🔴 ${unseen} NEW`:'';
+  // flash the card border + banner when VIPs are waiting
+  const card=$('watchercard');
+  if(card)card.style.border=unseen?'2px solid #f66':'2px solid #fbbf24';
+  if(unseen&&!isWatcher){
+    banner(`👀 ${unseen} new VIP message${unseen>1?'s':''} — check Watcher chat!`);
+    try{beep();}catch(e){}
+  }
   const box=$('watchchat');
   box.innerHTML=j.messages.map(m=>`
     <div style="padding:6px 10px;border-radius:10px;margin:4px 0;max-width:90%;
