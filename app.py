@@ -331,7 +331,8 @@ def init_db():
     _rcols = [r[1] for r in c.execute("PRAGMA table_info(restaurants)").fetchall()]
     for _col, _ddl in (("city", "TEXT DEFAULT 'Bismarck'"), ("state", "TEXT DEFAULT 'ND'"),
                        ("address", "TEXT DEFAULT ''"), ("lat", "REAL DEFAULT 0"),
-                       ("lng", "REAL DEFAULT 0"), ("website", "TEXT DEFAULT ''")):
+                       ("lng", "REAL DEFAULT 0"), ("website", "TEXT DEFAULT ''"),
+                       ("phone", "TEXT DEFAULT ''")):
         if _col not in _rcols:
             c.execute(f"ALTER TABLE restaurants ADD COLUMN {_col} {_ddl}")
     # restaurant partnership applications (added 2026-10-11)
