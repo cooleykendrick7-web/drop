@@ -19,6 +19,35 @@
   <p class="sub">Auto parts, clothing, supplies, documents — we pick it up, we drop it off.<br>Bismarck's courier for local business.</p>
 </div>
 
+<div class="card" id="farecard">
+  <h2>💰 Fare calculator</h2>
+  <p class="small">Enter pickup and delivery — see your exact price before you order.</p>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+    <div style="border:1px solid var(--line);border-radius:10px;padding:10px">
+      <b class="small">📍 FROM (pickup)</b>
+      <input id="f-from-street" placeholder="Street address *" style="width:100%;margin:4px 0">
+      <input id="f-from-apt" placeholder="Apt / Suite (optional)" style="width:100%;margin:4px 0">
+      <div class="row" style="gap:6px">
+        <input id="f-from-city" placeholder="City *" style="flex:2">
+        <input id="f-from-state" placeholder="ST *" maxlength="2" style="flex:1;text-transform:uppercase">
+        <input id="f-from-zip" placeholder="ZIP" style="flex:1.2" inputmode="numeric">
+      </div>
+    </div>
+    <div style="border:1px solid var(--line);border-radius:10px;padding:10px">
+      <b class="small">🏠 TO (delivery)</b>
+      <input id="f-to-street" placeholder="Street address *" style="width:100%;margin:4px 0">
+      <input id="f-to-apt" placeholder="Apt / Suite (optional)" style="width:100%;margin:4px 0">
+      <div class="row" style="gap:6px">
+        <input id="f-to-city" placeholder="City *" style="flex:2">
+        <input id="f-to-state" placeholder="ST *" maxlength="2" style="flex:1;text-transform:uppercase">
+        <input id="f-to-zip" placeholder="ZIP" style="flex:1.2" inputmode="numeric">
+      </div>
+    </div>
+  </div>
+  <button class="btn" id="farego" style="margin-top:10px">Calculate fare →</button>
+  <div id="fareresult" style="margin-top:10px"></div>
+</div>
+
 <div class="catbar" id="cats"></div>
 <div id="blist"></div>
 
@@ -75,6 +104,61 @@
 <script>
 let BIZ=[], CATS=[], curCat='All', curBiz=null, tip=2;
 const $=id=>document.getElementById(id);
+
+// fare calculator
+function fareAddr(prefix){
+  return {
+    street:$(prefix+'street').value.trim(),
+    apt:$(prefix+'apt').value.trim(),
+    city:$(prefix+'city').value.trim(),
+    state:$(prefix+'state').value.trim().toUpperCase(),
+    zip:$(prefix+'zip').value.trim(),
+  };
+}
+$('farego').onclick=async()=>{
+  const frm=fareAddr('f-from-');
+  const to=fareAddr('f-to-');
+  const box=$('fareresult');
+  if(!frm.street||!frm.city||!frm.state||!to.street||!to.city||!to.state){
+    box.innerHTML='<p class="small" style="color:#f66">Fill in street, city, and state for both FROM and TO.</p>';
+    return;
+  }
+  box.innerHTML='<p class="small">Calculating real driving distance…</p>';
+  try{
+    const r=await fetch('/api/fare-quote',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({from:frm,to:to,kind:'courier'})});
+    const j=await r.json();
+    if(!r.ok){box.innerHTML=`<p class="small" style="color:#f66">${j.detail||'Could not calculate'}</p>`;return;}
+    box.innerHTML=`
+      <div class="card" style="border:2px solid var(--acc);text-align:center">
+        <div style="font-size:2rem;font-weight:900">$${j.delivery_fee.toFixed(2)}</div>
+        <div class="small">Delivery fee · ${j.distance_miles} miles driving</div>
+        <div class="small" style="opacity:.7;margin-top:6px">📍 ${j.from}<br>🏠 ${j.to}</div>
+        ${j.warnings.map(w=>`<div class="small" style="color:#fbbf24">⚠️ ${w}</div>`).join('')}
+        <button class="btn small" id="fareuse" style="margin-top:8px">Use these addresses →</button>
+      </div>`;
+    $('fareuse').onclick=()=>{
+      // copy into the custom pickup form
+      $('p-custom').click();
+      setTimeout(()=>{
+        $('p-name').value='';
+        $('p-street').value=frm.street;
+        $('p-apt').value=frm.apt;
+        $('p-city').value=frm.city;
+        $('p-state').value=frm.state;
+        $('p-zip').value=frm.zip;
+        $('p-dstreet').value=to.street;
+        $('p-dapt').value=to.apt;
+        $('p-dcity').value=to.city;
+        $('p-dstate').value=to.state;
+        $('p-dzip').value=to.zip;
+        document.getElementById('reqcard').scrollIntoView({behavior:'smooth'});
+      },100);
+    };
+  }catch(e){
+    box.innerHTML='<p class="small" style="color:#f66">Connection error. Try again.</p>';
+  }
+};
 const ICONS={'Auto Parts':'🔧','Clothing':'👕','Office Supplies':'📎','Hardware':'🔨','Electronics':'🔌','General':'🏬'};
 
 async function load(){
