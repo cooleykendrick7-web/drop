@@ -30,6 +30,7 @@
     <button data-t="stats">Stats</button>
     <button data-t="inv">Investors <span id="invbadge"></span></button>
     <button data-t="out">📧 Outreach <span id="outbadge"></span></button>
+    <button data-t="live">⚡ Live</button>
     <button data-t="audit">Audit</button>
     <button data-t="set">Settings</button>
   </div>
@@ -145,6 +146,15 @@
     <div id="invlist"></div>
   </div>
 
+  <div class="tab" id="t-live">
+    <div class="card"><b>🤖 AI suggestions</b>
+      <p class="small">What needs your attention right now, based on live data.</p>
+      <div id="sugglist"><p class="small">Loading…</p></div></div>
+    <div class="card"><b>⚡ Live activity</b>
+      <p class="small">Everything the platform does on its own + your actions. Auto-refreshes.</p>
+      <div id="actlist"><p class="small">Loading…</p></div></div>
+  </div>
+
   <div class="tab" id="t-audit">
     <div class="card"><b>📋 Audit trail</b>
       <p class="small">Every admin decision, recorded. Nothing happens in the dark.</p></div>
@@ -212,7 +222,7 @@ document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
   b.classList.add('on'); $('t-'+b.dataset.t).classList.add('on');
-  if(b.dataset.t==='earn') loadEarn(); if(b.dataset.t==='menu') loadMenu(); if(b.dataset.t==='set') loadSet(); if(b.dataset.t==='sup') loadTix(); if(b.dataset.t==='promo') loadPromos(); if(b.dataset.t==='stats') loadStats(); if(b.dataset.t==='upd') loadProposals(); if(b.dataset.t==='drv') loadDrivers(); if(b.dataset.t==='biz') loadBiz(); if(b.dataset.t==='inv') loadInv(); if(b.dataset.t==='money') loadMoney(); if(b.dataset.t==='deals') loadDeals(); if(b.dataset.t==='audit') loadAudit(); if(b.dataset.t==='out') loadOutreach();
+  if(b.dataset.t==='earn') loadEarn(); if(b.dataset.t==='menu') loadMenu(); if(b.dataset.t==='set') loadSet(); if(b.dataset.t==='sup') loadTix(); if(b.dataset.t==='promo') loadPromos(); if(b.dataset.t==='stats') loadStats(); if(b.dataset.t==='upd') loadProposals(); if(b.dataset.t==='drv') loadDrivers(); if(b.dataset.t==='biz') loadBiz(); if(b.dataset.t==='inv') loadInv(); if(b.dataset.t==='money') loadMoney(); if(b.dataset.t==='deals') loadDeals(); if(b.dataset.t==='audit') loadAudit(); if(b.dataset.t==='out') loadOutreach(); if(b.dataset.t==='live') loadLive();
 });
 
 async function loadStats(){
@@ -757,6 +767,34 @@ async function outSend(id){
 async function outDiscard(id){
   await fetch(`/api/operator/outreach/${id}/discard`,{method:'POST',headers:H()});
   loadOutreach();
+}
+
+/* --- Live activity + AI suggestions --- */
+let liveTimer=null;
+async function loadLive(){
+  // suggestions
+  const s=await (await fetch('/api/operator/suggestions',{headers:H()})).json();
+  const pcol={high:'#ff6b6b',medium:'#ffa94d',low:'#69db7c'};
+  $('sugglist').innerHTML=s.map(x=>`
+    <div class="card" style="border-left:4px solid ${pcol[x.priority]||'#888'}">
+      <b>${x.icon} ${x.text.replace(/</g,'&lt;')}</b>
+      <p class="small">→ ${x.action.replace(/</g,'&lt;')}</p></div>`).join('')
+    ||'<p class="small">✅ All clear — nothing needs your attention right now.</p>';
+  // activity feed
+  await loadActivity();
+  if(liveTimer)clearInterval(liveTimer);
+  liveTimer=setInterval(loadActivity,15000);
+}
+async function loadActivity(){
+  const a=await (await fetch('/api/operator/activity?limit=30',{headers:H()})).json();
+  const kicon={warning:'⚠️',email:'📧',suggestions:'🤖',info:'ℹ️',action:'👤'};
+  $('actlist').innerHTML=a.map(x=>`
+    <div class="row" style="padding:6px 0;border-bottom:1px solid #222">
+      <span>${kicon[x.kind]||'•'}</span>
+      <div style="flex:1"><b class="small">${(x.title||'').replace(/</g,'&lt;')}</b>
+      ${x.detail?`<br><span class="small" style="opacity:.7">${x.detail.replace(/</g,'&lt;')}</span>`:''}</div>
+      <span class="small" style="opacity:.5">${x.src==='you'?'you':'auto'} · ${(x.created_at||'').slice(5,16).replace('T',' ')}</span>
+    </div>`).join('')||'<p class="small">No activity yet.</p>';
 }
 
 /* --- Audit trail --- */

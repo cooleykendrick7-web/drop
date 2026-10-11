@@ -9,7 +9,10 @@
 <div id="head"></div>
 <div id="menu"></div>
 <div class="cartbar" id="cartbar" style="display:none">
-  <button class="btn" id="gocheck">View cart · $<span id="ctotal">0.00</span></button>
+  <div class="row">
+    <button class="btn" id="gocheck" style="flex:1">View cart · $<span id="ctotal">0.00</span></button>
+    <button class="btn ghost" id="clearcart" style="width:auto;margin-left:8px">🗑️ Clear</button>
+  </div>
 </div>
 <script>
 if(!sessionStorage.getItem('dropv')){sessionStorage.setItem('dropv','1');
@@ -64,6 +67,13 @@ function draw(){
   document.getElementById('cartbar').style.display = n? 'block':'none';
 }
 document.getElementById('gocheck').onclick=()=>location.href='/checkout.html?rid='+rid;
+document.getElementById('clearcart').onclick=()=>{
+  if(!confirm('Remove everything from your cart?'))return;
+  cart={};
+  localStorage.setItem('dropcart_'+rid, JSON.stringify(cart));
+  menu.forEach(m=>{const q=document.getElementById('q'+m.id); if(q)q.textContent='0';});
+  draw();
+};
 load();
 </script>
 <script src="/static/chat.js"></script></body></html>
