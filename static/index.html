@@ -174,8 +174,18 @@ async function load(){
   };
   document.getElementById('usegps').onclick=()=>{
     localStorage.setItem('dropcity_manual','0');
-    if(!navigator.geolocation){alert('GPS not available on this device');return;}
-    document.getElementById('gpsnote').innerHTML='📍 Locating you…';
+    localStorage.removeItem('dropcity');
+    const note=document.getElementById('gpsnote');
+    if(!navigator.geolocation){
+      // Fallback: IP-based location
+      note.innerHTML='📍 Trying to detect your location…';
+      fetch('/api/ip-location').then(r=>r.json()).then(d=>{
+        if(d.city){ useDetectedCity(d.city, d.state, d.lat, d.lng); }
+        else note.innerHTML='Could not detect location. Please enter your city manually.';
+      }).catch(()=>{note.innerHTML='Could not detect location. Please enter your city manually.';});
+      return;
+    }
+    note.innerHTML='📍 Locating you… (allow location access if asked)';
     navigator.geolocation.getCurrentPosition(async pos=>{
       window._gps={lat:pos.coords.latitude,lng:pos.coords.longitude};
       try{
@@ -183,14 +193,38 @@ async function load(){
         if(nc.match){
           const key=`${nc.match.city}|${nc.match.state}`;
           pick.value=key; localStorage.setItem('dropcity',key); _updHead();
-          document.getElementById('gpsnote').innerHTML=`📍 You're in <b>${nc.detected_city||nc.match.city}</b> — showing spots near you.`;
+          note.innerHTML=`📍 You're in <b>${nc.detected_city||nc.match.city}</b> — showing spots near you.`;
         }else if(nc.detected_city){
-          document.getElementById('gpsnote').innerHTML=`📍 You're in <b>${nc.detected_city}</b> — showing spots within 50 miles.`;
+          note.innerHTML=`📍 You're in <b>${nc.detected_city}</b> — showing spots within 50 miles.`;
         }
         load();
-      }catch(e){document.getElementById('gpsnote').innerHTML='Could not detect location.';}
-    },()=>{document.getElementById('gpsnote').innerHTML='Location permission denied.';},{timeout:10000});
+      }catch(e){note.innerHTML='Could not detect location. Try entering your city manually.';}
+    },(err)=>{
+      // GPS failed — try IP-based fallback
+      let msg='Location unavailable.';
+      if(err.code===1) msg='📍 Location blocked. Tap the 🔒/ⓘ icon in your browser bar → allow Location, then try again.';
+      else if(err.code===2) msg='📍 GPS unavailable. Trying network location…';
+      else if(err.code===3) msg='📍 Location timed out. Trying network location…';
+      note.innerHTML=msg;
+      fetch('/api/ip-location').then(r=>r.json()).then(d=>{
+        if(d.city){ useDetectedCity(d.city, d.state, d.lat, d.lng); }
+        else if(err.code===1) note.innerHTML=msg; // Keep the permission instructions
+        else note.innerHTML='Could not detect location. Please enter your city manually.';
+      }).catch(()=>{ if(err.code!==1) note.innerHTML='Could not detect location. Please enter your city manually.'; });
+    },{timeout:10000, maximumAge:60000});
   };
+  function useDetectedCity(city, state, lat, lng){
+    const note=document.getElementById('gpsnote');
+    window._gps={lat:lat,lng:lng};
+    const key=`${city}|${state}`;
+    if(![...pick.options].some(o=>o.value===key)){
+      const opt=document.createElement('option');opt.value=key;opt.textContent=`${city}, ${state}`;
+      pick.appendChild(opt);
+    }
+    pick.value=key; localStorage.setItem('dropcity',key); _updHead();
+    note.innerHTML=`📍 You're in <b>${city}</b> — showing spots near you.`;
+    load();
+  }
   const [ccity, cstate] = (pick.value||'|').split('|');
   const manualMode = localStorage.getItem('dropcity_manual')==='1';
   let r;

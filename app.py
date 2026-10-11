@@ -920,6 +920,29 @@ def list_cities():
     return [dict(r) for r in rows]
 
 
+@app.get("/api/ip-location")
+def ip_location(req: Request):
+    """Fallback location from IP address (free, no key needed)."""
+    # Get client IP (handle proxies)
+    ip = req.headers.get("x-forwarded-for", "").split(",")[0].strip()
+    if not ip:
+        ip = req.client.host if req.client else ""
+    if not ip or ip.startswith("127.") or ip == "localhost":
+        return {"city": "", "state": "", "lat": 0, "lng": 0}
+    try:
+        import urllib.request, json
+        # Free IP geolocation (no key)
+        url = f"http://ip-api.com/json/{ip}?fields=city,region,regionName,lat,lon,status"
+        rq = urllib.request.Request(url, headers={"User-Agent": "DropApp/1.0"})
+        d = json.loads(urllib.request.urlopen(rq, timeout=5).read())
+        if d.get("status") == "success":
+            return {"city": d.get("city", ""), "state": d.get("region", ""),
+                    "lat": d.get("lat", 0), "lng": d.get("lon", 0)}
+    except Exception:
+        pass
+    return {"city": "", "state": "", "lat": 0, "lng": 0}
+
+
 @app.get("/api/nearest-city")
 def nearest_city(lat: float = 0, lng: float = 0):
     """GPS -> what city are you in, and does Drop serve it?"""
