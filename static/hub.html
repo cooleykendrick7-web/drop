@@ -229,8 +229,67 @@ async function loadOrders(){
         <button class="btn small ghost" onclick="denyOrder(${o.id})" style="flex:1">❌ Decline</button>
         <button class="btn small ghost" onclick="passOrder(${o.id})" style="flex:1">🔄 Pass to another driver</button>
       </div>
+      ${['placed','confirmed'].includes(o.status)?`
+      <div style="margin-top:8px">
+        <label class="btn small" style="display:block;text-align:center;cursor:pointer">📸 Snap pickup photo
+          <input type="file" accept="image/*" capture="environment" style="display:none"
+            onchange="snapPhoto(${o.id},'pickup',this)">
+        </label>
+        <p class="small" style="margin:4px 0 0">Photo proves you got the order — the customer sees it live.</p>
+      </div>`:''}
+      ${['picked_up','on_the_way'].includes(o.status)?`
+      <div style="margin-top:8px">
+        <label class="btn small" style="display:block;text-align:center;cursor:pointer">📸 Snap door-drop photo
+          <input type="file" accept="image/*" capture="environment" style="display:none"
+            onchange="snapPhoto(${o.id},'dropoff',this)">
+        </label>
+        <p class="small" style="margin:4px 0 0">Photo of the order at their door — proof of delivery.</p>
+      </div>`:''}
+      <div style="margin-top:8px">
+        <button class="btn small ghost" style="width:100%" onclick="toggleChat(${o.id})">💬 Chat with customer</button>
+        <div id="chat-${o.id}" style="display:none;margin-top:8px">
+          <div id="chatlog-${o.id}" style="max-height:180px;overflow-y:auto;background:#141419;border-radius:10px;padding:8px;margin-bottom:6px"><p class="small">Loading…</p></div>
+          <div class="row"><input id="chatin-${o.id}" placeholder="Message customer…" style="flex:1;margin-right:6px">
+          <button class="btn small" style="width:auto" onclick="sendChat(${o.id})">➤</button></div>
+        </div>
+      </div>
     </div>`;
   }).join('')||'<p class="small">No deliveries assigned right now. New orders will appear here.</p>');
+}
+async function snapPhoto(oid,type,inp){
+  const f=inp.files[0]; if(!f) return;
+  if(!confirm(type==='pickup'?'Upload this as PICKUP proof? (marks order picked up)':'Upload this as DELIVERY proof? (marks order delivered)')){inp.value='';return;}
+  const fd=new FormData();
+  fd.append('driver_id',DID); fd.append('order_id',oid); fd.append('type',type); fd.append('file',f);
+  try{
+    const r=await(await fetch('/api/drivers/delivery-photo',{method:'POST',body:fd})).json();
+    if(r.ok){ alert(type==='pickup'?'✅ Pickup confirmed — customer notified!':'✅ Delivered! Great job.'); loadOrders(); }
+    else alert(r.detail||'Upload failed');
+  }catch(e){ alert('Upload failed — check your connection'); }
+  inp.value='';
+}
+async function toggleChat(oid){
+  const box=$('chat-'+oid);
+  const open=box.style.display!=='none';
+  box.style.display=open?'none':'block';
+  if(open) openChats.delete(oid); else { openChats.add(oid); loadChat(oid); }
+}
+async function loadChat(oid){
+  try{
+    const ms=await(await fetch('/api/orders/'+oid+'/messages')).json();
+    $('chatlog-'+oid).innerHTML=ms.map(m=>`
+      <div style="margin:4px 0;text-align:${m.sender==='driver'?'right':'left'}">
+        <span style="display:inline-block;background:${m.sender==='driver'?'#ff6a00':'#2a2a33'};color:#fff;border-radius:10px;padding:6px 10px;max-width:85%;font-size:.85rem">${m.body.replace(/</g,'&lt;')}</span>
+      </div>`).join('')||'<p class="small">No messages yet. Say hi! 👋</p>';
+    const log=$('chatlog-'+oid); log.scrollTop=log.scrollHeight;
+  }catch(e){}
+}
+async function sendChat(oid){
+  const inp=$('chatin-'+oid); const v=inp.value.trim(); if(!v) return;
+  inp.value='';
+  const r=await(await fetch('/api/orders/'+oid+'/messages',{method:'POST',
+    headers:{'Content-Type':'application/json'},body:JSON.stringify({body:v})})).json();
+  if(r.ok) loadChat(oid); else alert(r.detail||'Could not send');
 }
 async function denyOrder(oid){
   const reason = prompt('Why are you declining this order? (optional)');
@@ -357,7 +416,12 @@ $('locToggle').onclick=()=>{
   {enableHighAccuracy:true,maximumAge:10000,timeout:20000});
 };
 
-setInterval(()=>{ if($('app').style.display!=='none') loadOrders(); },10000);
+const openChats=new Set();
+setInterval(()=>{
+  if($('app').style.display==='none') return;
+  if(openChats.size){ openChats.forEach(oid=>loadChat(oid)); }
+  else loadOrders();
+},10000);
 
 // Broadcasts
 async function loadNews(){

@@ -212,6 +212,11 @@ def init_db():
         order_id INTEGER NOT NULL, driver_id INTEGER NOT NULL,
         photo_type TEXT NOT NULL, photo_path TEXT NOT NULL,
         created_at TEXT NOT NULL)""")
+    # Driver <-> customer chat per order
+    c.execute("""CREATE TABLE IF NOT EXISTS order_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        order_id INTEGER NOT NULL, sender TEXT NOT NULL,
+        body TEXT NOT NULL, created_at TEXT NOT NULL)""")
     # Driver food purchase receipts (pay at restaurant, get reimbursed)
     c.execute("""CREATE TABLE IF NOT EXISTS food_receipts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -3462,6 +3467,9 @@ async def driver_delivery_photo(req: Request):
     file = form.get("file")
     if not driver_id or not order_id or photo_type not in ("pickup", "dropoff") or not file:
         raise HTTPException(400, "driver_id, order_id, type (pickup/dropoff), file required")
+    d = get_driver(req)
+    if not d or d["id"] != driver_id:
+        raise HTTPException(403, "Driver login required")
     data = await file.read()
     if len(data) > 5 * 1024 * 1024:
         raise HTTPException(400, "Photo too large (max 5MB)")
@@ -3504,6 +3512,87 @@ def order_photos(oid: int):
         " WHERE order_id=? ORDER BY id", (oid,)).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def _order_customer_phone(oid):
+    conn = db()
+    o = conn.execute("SELECT phone FROM orders WHERE id=?", (oid,)).fetchone()
+    conn.close()
+    return (o["phone"] if o else "") or ""
+
+
+def _digits(s):
+    return "".join(ch for ch in str(s or "") if ch.isdigit())
+
+
+@app.get("/api/orders/{oid}/messages")
+def order_messages_list(oid: int):
+    """Driver <-> customer chat thread for one order."""
+    conn = db()
+    rows = conn.execute(
+        "SELECT sender, body, created_at FROM order_messages"
+        " WHERE order_id=? ORDER BY id", (oid,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+@app.post("/api/orders/{oid}/messages")
+async def order_message_send(oid: int, req: Request):
+    """Send a chat message on an order. Driver: logged-in session.
+    Customer: body.phone must match the order's phone."""
+    body = await req.json()
+    text = (body.get("body") or "").strip()[:1000]
+    if not text:
+        raise HTTPException(400, "Empty message")
+    conn = db()
+    o = conn.execute("SELECT * FROM orders WHERE id=?", (oid,)).fetchone()
+    if not o:
+        conn.close()
+        raise HTTPException(404, "Order not found")
+    sender = None
+    d = get_driver(req)
+    if d and (o["driver_id"] == d["id"] or not o["driver_id"]):
+        sender = "driver"
+    elif _digits(body.get("phone")) and _digits(body.get("phone")) == _digits(o["phone"]):
+        sender = "customer"
+    if not sender:
+        conn.close()
+        raise HTTPException(403, "Not your order")
+    conn.execute(
+        "INSERT INTO order_messages(order_id, sender, body, created_at)"
+        " VALUES(?,?,?,?)", (oid, sender, text, now_iso()))
+    conn.commit()
+    # Notify the other side: customer message -> driver's push; driver message -> Ken
+    try:
+        if sender == "customer" and o["driver_id"]:
+            drv = conn.execute("SELECT ntfy_topic FROM drivers WHERE id=?",
+                               (o["driver_id"],)).fetchone()
+            topic = (drv["ntfy_topic"] if drv else "") or ""
+            if topic:
+                import urllib.request, urllib.parse, threading
+                msg = f"💬 Order #{oid}: {text[:120]}"
+                r2 = urllib.request.Request(
+                    f"https://ntfy.sh/{urllib.parse.quote(topic)}",
+                    data=msg.encode(), headers={"Title": "Drop: customer message"},
+                    method="POST")
+                threading.Thread(
+                    target=lambda r=r2: urllib.request.urlopen(r, timeout=5).read(),
+                    daemon=True).start()
+        elif sender == "driver":
+            ktopic = get_setting("ntfy_topic").strip()
+            if ktopic:
+                import urllib.request, urllib.parse, threading
+                kr = urllib.request.Request(
+                    f"https://ntfy.sh/{urllib.parse.quote(ktopic)}",
+                    data=f"💬 Driver replied on order #{oid}: {text[:120]}".encode(),
+                    headers={"Title": "Drop: driver message"}, method="POST")
+                threading.Thread(
+                    target=lambda r=kr: urllib.request.urlopen(r, timeout=5).read(),
+                    daemon=True).start()
+    except Exception:
+        pass
+    conn.close()
+    return {"ok": True, "sender": sender}
 
 
 # ---------------- Business accounts (Drop More B2B) ----------------
