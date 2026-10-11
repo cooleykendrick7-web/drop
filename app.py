@@ -7765,6 +7765,218 @@ async def fare_quote(req: Request):
 WATCHER_PIN = "5683"
 
 
+# ---- transplanted: live city search ----
+@app.get("/api/search-city")
+def search_city(city: str = "", state: str = ""):
+    city = city.strip()
+    state = state.strip()
+    if not city:
+        raise HTTPException(400, "City required")
+    q = f"{city}, {state}" if state else city
+
+    # 1. check our DB first
+    conn = db()
+    like = f"%{city}%"
+    rows = conn.execute(
+        "SELECT * FROM restaurants WHERE city LIKE ? OR state LIKE ? ORDER BY id LIMIT 50",
+        (like, like)).fetchall()
+    db_hits = []
+    for r in rows:
+        rd = dict(r)
+        items = conn.execute(
+            "SELECT * FROM menu_items WHERE restaurant_id=? AND available=1 ORDER BY id LIMIT 5",
+            (r["id"],)).fetchall()
+        rd["menu"] = [dict(i) for i in items]
+        rd["source"] = "drop"
+        db_hits.append(rd)
+    conn.close()
+    if db_hits:
+        return {"city": city, "state": state, "source": "drop", "restaurants": db_hits}
+
+    # 2. nothing in DB — go live via OpenStreetMap (Nominatim)
+    # Fast and reliable; returns real restaurants in that city.
+    try:
+        queries = [
+            f"restaurant {city} {state}",
+            f"restaurants in {city}, {state}",
+        ]
+        seen = set()
+        out = []
+        for q in queries:
+            qs = urllib.parse.urlencode({"q": q, "format": "json",
+                                         "limit": 25, "addressdetails": 1})
+            req = urllib.request.Request(
+                f"https://nominatim.openstreetmap.org/search?{qs}",
+                headers={"User-Agent": "DropDelivery/1.0"})
+            try:
+                data = json.load(urllib.request.urlopen(req, timeout=10))
+            except Exception:
+                continue
+            for d in data:
+                name = (d.get("display_name", "").split(",")[0] or "").strip()
+                if not name or name.lower() in seen:
+                    continue
+                # skip non-restaurant results
+                cat = (d.get("category", "") or "").lower()
+                typ = (d.get("type", "") or "").lower()
+                if cat not in ("amenity", "shop", "tourism") and "restaurant" not in typ and "food" not in typ and "cafe" not in typ:
+                    # still accept if the name looks like a place
+                    pass
+                seen.add(name.lower())
+                addr = d.get("address", {})
+                out.append({
+                    "id": f"osm-{d.get('place_id')}",
+                    "name": name,
+                    "cuisine": "Restaurant",
+                    "city": city, "state": state,
+                    "address": f"{addr.get('road','')} {addr.get('house_number','')}".strip(),
+                    "phone": "", "website": "",
+                    "lat": d.get("lat"), "lng": d.get("lon"),
+                    "emoji": "🍽️", "photo": "", "logo": "",
+                    "menu": [], "source": "live", "rating": "",
+                })
+                if len(out) >= 25:
+                    break
+            if len(out) >= 10:
+                break
+        return {"city": city, "state": state, "source": "live",
+                "restaurants": out}
+    except Exception as e:
+        return {"city": city, "state": state, "source": "error",
+                "restaurants": [], "error": str(e)[:100]}
+
+
+# ---------------- Rides (passenger) quote ----------------
+@app.get("/api/rides/quote")
+def rides_quote(pickup_address: str = "", dropoff_address: str = "",
+                plat: float = None, plng: float = None,
+                dlat: float = None, dlng: float = None):
+    """Passenger ride fare estimate. Geocodes both addresses (or uses
+    provided GPS coords), calculates real driving distance, returns fare."""
+    if not pickup_address or not dropoff_address:
+        raise HTTPException(400, "pickup_address and dropoff_address required")
+
+    # pickup coords: use GPS if provided, else geocode
+    if plat and plng:
+        p_lat, p_lng = plat, plng
+        p_approx = False
+    else:
+        p_lat, p_lng = geocode(pickup_address, {})
+        p_approx = True
+    # dropoff coords
+    if dlat and dlng:
+        d_lat, d_lng = dlat, dlng
+        d_approx = False
+    else:
+        d_lat, d_lng = geocode(dropoff_address, {})
+        d_approx = True
+
+    if not p_lat or not d_lat:
+        raise HTTPException(400,
+            "Couldn't map one of those addresses — check the spelling and try again.")
+
+    miles = driving_miles(p_lat, p_lng, d_lat, d_lng)
+
+    # ride pricing (passenger rides cost more than food delivery)
+    base_fare = fin_setting("ride_base_fare", 4.99)
+    per_mile = fin_setting("ride_per_mile", 2.00)
+    gas_pct = fin_setting("ride_gas_pct", 10.0)
+    max_miles = fin_setting("ride_max_miles", 150.0)
+
+    mileage_charge = round(miles * per_mile, 2)
+    fare = round(base_fare + mileage_charge, 2)
+    gas_fee = round(fare * gas_pct / 100, 2)
+    total = round(fare + gas_fee, 2)
+
+    # driver pay estimate (70% of fare)
+    driver_pay_est = round(fare * 0.70, 2)
+    company_profit_est = round(total - driver_pay_est - gas_fee, 2)
+
+    too_far = miles > max_miles
+    approximate = p_approx or d_approx
+
+    ai_note = ""
+    if company_profit_est >= 3:
+        ai_note = "✅ Good fare — healthy margin."
+    elif company_profit_est >= 1:
+        ai_note = "⚠️ Thin margin on this ride."
+    else:
+        ai_note = "🔴 Below target margin — consider adjusting."
+
+    return {
+        "miles": miles,
+        "base_fare": base_fare,
+        "per_mile": per_mile,
+        "mileage_charge": mileage_charge,
+        "fare": fare,
+        "gas_pct": gas_pct,
+        "gas_fee": gas_fee,
+        "total": total,
+        "driver_pay_est": driver_pay_est,
+        "company_profit_est": company_profit_est,
+        "ai_note": ai_note,
+        "geocoded": True,
+        "too_far": too_far,
+        "max_miles": max_miles,
+        "approximate": approximate,
+        "plat": p_lat, "plng": p_lng,
+        "dlat": d_lat, "dlng": d_lng,
+    }
+
+
+# ---------------- Public fare calculator ----------------
+@app.post("/api/fare-quote")
+async def fare_quote(req: Request):
+    """Accurate upfront fare estimate. Takes structured from/to addresses,
+    geocodes both, calculates REAL driving distance, returns the price."""
+    body = await req.json()
+    frm = body.get("from") or {}
+    to = body.get("to") or {}
+    kind = body.get("kind", "courier")
+
+    # validate required fields
+    for label, a in (("pickup", frm), ("delivery", to)):
+        if not a.get("street") or not a.get("city") or not a.get("state"):
+            raise HTTPException(400, f"{label}: street, city, and state required")
+
+    def full_addr(a):
+        s = a["street"].strip()
+        if a.get("apt"):
+            s += ", " + a["apt"].strip()
+        s += f", {a['city'].strip()}, {a['state'].strip().upper()}"
+        if a.get("zip"):
+            s += " " + a["zip"].strip()
+        return s
+
+    from_full = full_addr(frm)
+    to_full = full_addr(to)
+
+    # geocode both with structured parts for max accuracy
+    flat, flng = geocode(from_full, frm)
+    tlat, tlng = geocode(to_full, to)
+    if not flat or not tlat:
+        raise HTTPException(400,
+            "Couldn't find one of those addresses. Double-check street, city, state.")
+
+    # real driving distance
+    miles = driving_miles(flat, flng, tlat, tlng)
+    q = calc_quote(flat, flng, tlat, tlng, kind)
+
+    return {
+        "from": from_full, "to": to_full,
+        "distance_miles": miles,
+        "delivery_fee": q["delivery_fee"],
+        "driver_pay": q["driver_pay"],
+        "warnings": q["warnings"],
+        "from_lat": flat, "from_lng": flng,
+        "to_lat": tlat, "to_lng": tlng,
+    }
+
+
+# ---------------- Watcher mode (PIN 5683): read-only live view + chat ----------------
+WATCHER_PIN = "5683"
+
+
 @app.get("/api/rides/quote")
 def rides_quote(pickup_address: str = "", dropoff_address: str = "",
                 plat: float = None, plng: float = None,
