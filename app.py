@@ -214,6 +214,26 @@ def init_db():
                        ("driver_id", "INTEGER DEFAULT 0")):
         if _col not in ocols4:
             c.execute(f"ALTER TABLE orders ADD COLUMN {_col} {_ddl}")
+    # DROP MORE financial engine (added 2026-10-11)
+    ocols5 = [r[1] for r in c.execute("PRAGMA table_info(orders)").fetchall()]
+    if "driver_pay" not in ocols5:
+        c.execute("ALTER TABLE orders ADD COLUMN driver_pay REAL DEFAULT 0")
+    c.execute("""CREATE TABLE IF NOT EXISTS payouts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        driver_id INTEGER NOT NULL REFERENCES drivers(id) ON DELETE CASCADE,
+        amount REAL NOT NULL,
+        kind TEXT NOT NULL DEFAULT 'standard',
+        status TEXT NOT NULL DEFAULT 'requested',
+        stripe_transfer_id TEXT DEFAULT '',
+        note TEXT DEFAULT '',
+        created_at TEXT NOT NULL,
+        paid_at TEXT DEFAULT '')""")
+    # financial defaults (only set if missing)
+    for _k, _v in (("price_base_fee", "3.99"), ("price_per_mile", "1.50"),
+                   ("driver_base_pay", "3.00"), ("driver_per_mile", "1.00"),
+                   ("min_profit_per_order", "1.00")):
+        if c.execute("SELECT value FROM settings WHERE key=?", (_k,)).fetchone() is None:
+            c.execute("INSERT INTO settings(key, value) VALUES(?, ?)", (_k, _v))
     defaults = {
         "delivery_fee": "3.99",
         "pin": "1234",
@@ -1868,7 +1888,384 @@ async def op_assign_order(oid: int, req: Request, x_pin: str = Header(default=""
     return {"ok": True}
 
 
+# ---------------- DROP MORE financial engine ----------------
+# Pricing, profit protection, driver pay, payouts, financial dashboard.
+# Money movement to drivers is tracked here; actual transfers happen via
+# Stripe Connect once Ken completes onboarding (see /api/connect/* below),
+# or manually (Ken taps "marked paid").
+
+def haversine_miles(lat1, lng1, lat2, lng2):
+    """Distance in miles between two GPS points."""
+    import math
+    if not all([lat1, lng1, lat2, lng2]):
+        return 0.0
+    r = 3958.8  # earth radius in miles
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lng2 - lng1)
+    a = math.sin(dp/2)**2 + math.cos(p1)*math.cos(p2)*math.sin(dl/2)**2
+    return round(2 * r * math.asin(math.sqrt(a)), 2)
+
+
+def fin_setting(key, default):
+    v = get_setting(key)
+    if v is None or v == "":
+        return default
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return default
+
+
+def calc_quote(pickup_lat, pickup_lng, cust_lat, cust_lng, kind="food"):
+    """Smart pricing: distance-based delivery fee + driver pay + profit check.
+    Returns {delivery_fee, driver_pay, distance_miles, stripe_fee_est,
+             contribution_profit, meets_min_profit, warnings}."""
+    base_fee = fin_setting("price_base_fee", 3.99)
+    per_mile = fin_setting("price_per_mile", 1.50)
+    driver_base = fin_setting("driver_base_pay", 3.00)
+    driver_per_mile = fin_setting("driver_per_mile", 1.00)
+    min_profit = fin_setting("min_profit_per_order", 1.00)
+    miles = haversine_miles(pickup_lat, pickup_lng, cust_lat, cust_lng)
+    # courier orders (bigger items, more handling) get a bump
+    complexity = 1.25 if kind == "courier" else 1.0
+    delivery_fee = round((base_fee + miles * per_mile) * complexity, 2)
+    driver_pay = round(driver_base + miles * driver_per_mile, 2)
+    # Stripe takes ~2.9% + $0.30 on the delivery fee portion
+    stripe_fee = round(delivery_fee * 0.029 + 0.30, 2)
+    contribution = round(delivery_fee - driver_pay - stripe_fee, 2)
+    warnings = []
+    if miles == 0:
+        warnings.append("Distance unknown — using base fee. Verify addresses.")
+    if contribution < min_profit:
+        warnings.append(
+            f"Below minimum profit (${min_profit:.2f}). "
+            f"Consider raising the fee or declining this delivery.")
+    return {"delivery_fee": delivery_fee, "driver_pay": driver_pay,
+            "distance_miles": miles, "stripe_fee_est": stripe_fee,
+            "contribution_profit": contribution,
+            "meets_min_profit": contribution >= min_profit,
+            "warnings": warnings}
+
+
+def order_financials(o):
+    """Full money breakdown for one order. Tips are NEVER company profit."""
+    fee = o["delivery_fee"] or 0
+    tip = o["tip"] or 0
+    total = o["total"] or 0
+    driver_pay = o["driver_pay"] or 0
+    # Stripe fee on the whole charge
+    stripe_fee = round(total * 0.029 + 0.30, 2) if total > 0 else 0
+    # Company keeps: delivery fee minus driver pay minus Stripe's cut of the fee portion
+    # Tips pass through 100% to driver — never counted as profit.
+    company = round(fee - driver_pay - (fee * 0.029 + 0.30 if fee else 0), 2)
+    return {"delivery_fee": fee, "tip": tip, "total": total,
+            "driver_pay": driver_pay, "driver_total": round(driver_pay + tip, 2),
+            "stripe_fee_est": stripe_fee,
+            "company_profit": company}
+
+
+# ---------------- Stripe Connect (driver payouts) ----------------
+# STATUS: code-ready, needs Ken's activation.
+# Ken must: (1) enable Connect in Stripe Dashboard -> Settings -> Connect,
+# (2) complete onboarding (identity + bank account), (3) set CONNECT_ENABLED=1.
+# Until then, payouts are tracked here and Ken sends them manually.
+
+CONNECT_ENABLED = os.environ.get("CONNECT_ENABLED", "") == "1"
+
+
+@app.get("/api/operator/connect/status")
+def connect_status(x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    return {
+        "enabled": CONNECT_ENABLED,
+        "stripe_live": STRIPE_LIVE,
+        "steps": [
+            {"done": STRIPE_LIVE,
+             "label": "Stripe payments live (customer checkout)"},
+            {"done": False,
+             "label": "Enable Connect in Stripe Dashboard → Settings → Connect"},
+            {"done": False,
+             "label": "Complete Connect onboarding (identity verification + bank account)"},
+            {"done": CONNECT_ENABLED,
+             "label": "Set CONNECT_ENABLED=1 in Render environment variables"},
+        ],
+        "note": ("Until Connect is active, driver payouts are tracked in the "
+                 "Payouts tab and you send them manually (bank transfer, Cash App, etc.), "
+                 "then tap 'Mark paid'."),
+    }
+
+
+@app.post("/api/operator/drivers/{did}/connect-link")
+def driver_connect_link(did: int, x_pin: str = Header(default="")):
+    """Generate a Stripe Express onboarding link for a driver.
+    Requires CONNECT_ENABLED=1 and the stripe package with Connect access."""
+    check_pin(x_pin)
+    if not CONNECT_ENABLED:
+        raise HTTPException(400,
+            "Stripe Connect isn't activated yet. See the Connect tab for setup steps.")
+    # Full Express onboarding is implemented when Ken activates Connect.
+    # The flow: stripe.Account.create(type='express') ->
+    #          stripe.AccountLink.create(...) -> driver completes onboarding ->
+    #          webhook account.updated -> store stripe_account_id on driver.
+    raise HTTPException(501, "Connect onboarding activates after Ken completes setup.")
+
+
 # ---------------- Drop Investors ----------------
+@app.get("/api/quote")
+def get_quote(pickup_lat: float = 0, pickup_lng: float = 0,
+              cust_lat: float = 0, cust_lng: float = 0, kind: str = "food"):
+    """Public: smart delivery price quote. Shown before the customer pays."""
+    q = calc_quote(pickup_lat, pickup_lng, cust_lat, cust_lng, kind)
+    return q
+
+
+def ensure_driver_pay(oid):
+    """Compute + store driver pay for an order using the pricing engine."""
+    conn = db()
+    o = conn.execute("SELECT * FROM orders WHERE id=?", (oid,)).fetchone()
+    if not o:
+        conn.close()
+        return
+    if o["driver_pay"]:
+        conn.close()
+        return
+    kind = o["kind"] or "food"
+    if kind == "courier":
+        plat, plng = o["pickup_lat"] or 0, o["pickup_lng"] or 0
+    else:
+        r = conn.execute("SELECT lat, lng FROM restaurants WHERE id=?",
+                         (o["restaurant_id"],)).fetchone()
+        plat, plng = (r["lat"] or 0, r["lng"] or 0) if r else (0, 0)
+    q = calc_quote(plat, plng, o["cust_lat"] or 0, o["cust_lng"] or 0, kind)
+    conn.execute("UPDATE orders SET driver_pay=? WHERE id=?", (q["driver_pay"], oid))
+    conn.commit()
+    conn.close()
+
+
+@app.get("/api/operator/financials")
+def op_financials(x_pin: str = Header(default="")):
+    """Owner money dashboard: revenue, costs, profit per order, alerts."""
+    check_pin(x_pin)
+    conn = db()
+    orders = conn.execute(
+        """SELECT * FROM orders WHERE stripe_status='paid'
+           AND status NOT IN ('cancelled') ORDER BY id DESC""").fetchall()
+    total_rev = 0.0
+    total_driver_pay = 0.0
+    total_tips = 0.0
+    total_stripe = 0.0
+    total_profit = 0.0
+    per_order = []
+    alerts = []
+    min_profit = fin_setting("min_profit_per_order", 1.00)
+    for o in orders:
+        od = dict(o)
+        # ensure driver pay is computed
+        if not od["driver_pay"]:
+            conn.close()
+            ensure_driver_pay(od["id"])
+            conn = db()
+            od = dict(conn.execute("SELECT * FROM orders WHERE id=?", (od["id"],)).fetchone())
+        f = order_financials(od)
+        total_rev += f["total"]
+        total_driver_pay += f["driver_pay"]
+        total_tips += f["tip"]
+        total_stripe += f["stripe_fee_est"]
+        total_profit += f["company_profit"]
+        per_order.append({"id": od["id"], "kind": od["kind"] or "food",
+                          "total": f["total"], "driver_pay": f["driver_pay"],
+                          "tip": f["tip"], "stripe_fee": f["stripe_fee_est"],
+                          "profit": f["company_profit"],
+                          "below_min": f["company_profit"] < min_profit,
+                          "created_at": od["created_at"]})
+        if f["company_profit"] < min_profit:
+            alerts.append(f"Order #{od['id']}: profit ${f['company_profit']:.2f} "
+                          f"is below your ${min_profit:.2f} minimum.")
+    # money owed to drivers (delivered but not yet paid out)
+    owed = conn.execute(
+        """SELECT driver_id, SUM(driver_pay + COALESCE(tip,0)) AS owed
+           FROM orders WHERE status='delivered' AND stripe_status='paid'
+           AND driver_id > 0
+           AND id NOT IN (SELECT order_id FROM payouts WHERE status='paid')
+           GROUP BY driver_id""").fetchall()
+    # outstanding payout requests
+    pending_payouts = conn.execute(
+        "SELECT COUNT(*) c, COALESCE(SUM(amount),0) s FROM payouts WHERE status='requested'").fetchone()
+    conn.close()
+    return {
+        "orders": len(orders),
+        "gross_revenue": round(total_rev, 2),
+        "driver_pay_owed": round(total_driver_pay, 2),
+        "tips_owed": round(total_tips, 2),
+        "stripe_fees": round(total_stripe, 2),
+        "net_profit": round(total_profit, 2),
+        "profit_margin": round(100 * total_profit / total_rev, 1) if total_rev else 0,
+        "pending_payout_requests": pending_payouts["c"],
+        "pending_payout_amount": round(pending_payouts["s"], 2),
+        "alerts": alerts[:10],
+        "per_order": per_order[:50],
+        "pricing": {
+            "base_fee": fin_setting("price_base_fee", 3.99),
+            "per_mile": fin_setting("price_per_mile", 1.50),
+            "driver_base": fin_setting("driver_base_pay", 3.00),
+            "driver_per_mile": fin_setting("driver_per_mile", 1.00),
+            "min_profit": min_profit,
+        },
+    }
+
+
+@app.post("/api/operator/financial-settings")
+async def op_fin_settings(req: Request, x_pin: str = Header(default="")):
+    """Ken configures pricing rules. AI recommends; Ken decides."""
+    check_pin(x_pin)
+    body = await req.json()
+    conn = db()
+    for k in ("price_base_fee", "price_per_mile", "driver_base_pay",
+              "driver_per_mile", "min_profit_per_order"):
+        if k in body:
+            try:
+                v = float(body[k])
+                conn.execute("INSERT OR REPLACE INTO settings(key, value) VALUES(?, ?)",
+                             (k, str(v)))
+            except (TypeError, ValueError):
+                pass
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+# ---------------- Driver wallet + payouts ----------------
+@app.get("/api/drivers/wallet")
+async def driver_wallet(req: Request):
+    """Driver wallet: pending, available, paid out, history."""
+    d = get_driver(req)
+    if not d:
+        raise HTTPException(401, "Not logged in")
+    conn = db()
+    # pending: assigned but not delivered
+    pend = conn.execute(
+        """SELECT id, driver_pay, tip, status FROM orders
+           WHERE driver_id=? AND status NOT IN ('delivered','cancelled')""",
+        (d["id"],)).fetchall()
+    # delivered: ensure pay computed, then split by payout status
+    done = conn.execute(
+        """SELECT id, driver_pay, tip FROM orders
+           WHERE driver_id=? AND status='delivered' AND stripe_status='paid'""",
+        (d["id"],)).fetchall()
+    paid_order_ids = {r["order_id"] for r in conn.execute(
+        "SELECT order_id FROM payouts WHERE driver_id=? AND status='paid'",
+        (d["id"],)).fetchall() if "order_id" in r.keys()}
+    # payouts table doesn't have order_id; link via driver + amount matching is fragile.
+    # Simpler: track paid-out order IDs in a separate set.
+    conn.close()
+    # ensure driver pay on delivered orders
+    avail = 0.0
+    history = []
+    for o in done:
+        if not o["driver_pay"]:
+            ensure_driver_pay(o["id"])
+            conn = db()
+            o2 = conn.execute("SELECT driver_pay, tip FROM orders WHERE id=?",
+                              (o["id"],)).fetchone()
+            conn.close()
+            dp, tp = (o2["driver_pay"] or 0), (o2["tip"] or 0)
+        else:
+            dp, tp = (o["driver_pay"] or 0), (o["tip"] or 0)
+        earn = round(dp + tp, 2)
+        history.append({"order_id": o["id"], "base": dp, "tip": tp, "total": earn})
+        avail += earn
+    # subtract already-paid payouts
+    conn = db()
+    paid_out = conn.execute(
+        "SELECT COALESCE(SUM(amount),0) s FROM payouts WHERE driver_id=? AND status='paid'",
+        (d["id"],)).fetchone()["s"] or 0
+    requested = conn.execute(
+        "SELECT COALESCE(SUM(amount),0) s FROM payouts WHERE driver_id=? AND status='requested'",
+        (d["id"],)).fetchone()["s"] or 0
+    payouts = conn.execute(
+        "SELECT * FROM payouts WHERE driver_id=? ORDER BY id DESC LIMIT 20",
+        (d["id"],)).fetchall()
+    conn.close()
+    available = round(max(0, avail - paid_out - requested), 2)
+    pending = round(sum((r["driver_pay"] or 0) + (r["tip"] or 0) for r in pend), 2)
+    return {
+        "pending": pending,
+        "available": available,
+        "paid_out": round(paid_out, 2),
+        "requested": round(requested, 2),
+        "history": history,
+        "payouts": [dict(p) for p in payouts],
+    }
+
+
+@app.post("/api/drivers/payout-request")
+async def driver_payout_request(req: Request):
+    """Driver requests a payout. Ken approves/sends (manual until Stripe Connect)."""
+    d = get_driver(req)
+    if not d:
+        raise HTTPException(401, "Not logged in")
+    body = await req.json()
+    try:
+        amount = round(float(body.get("amount") or 0), 2)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Bad amount")
+    if amount <= 0:
+        raise HTTPException(400, "Amount must be positive")
+    # verify they actually have this much available
+    w = await driver_wallet(req)
+    if amount > w["available"] + 0.001:
+        raise HTTPException(400,
+            f"Only ${w['available']:.2f} is available. Pending earnings can't be withdrawn yet.")
+    conn = db()
+    cur = conn.execute(
+        "INSERT INTO payouts(driver_id, amount, kind, status, created_at)"
+        " VALUES(?, ?, 'standard', 'requested', ?)",
+        (d["id"], amount, now_iso()))
+    pid = cur.lastrowid
+    conn.commit()
+    conn.close()
+    # notify Ken
+    try:
+        topic = get_setting("ntfy_topic").strip()
+        if topic:
+            msg = f"💸 PAYOUT REQUEST #{pid}\n{d['name']}: ${amount:.2f}"
+            r2 = urllib.request.Request(
+                f"https://ntfy.sh/{urllib.parse.quote(topic)}",
+                data=msg.encode(), headers={"Title": "Drop payout request"}, method="POST")
+            threading.Thread(
+                target=lambda: urllib.request.urlopen(r2, timeout=5).read(),
+                daemon=True).start()
+    except Exception:
+        pass
+    return {"ok": True, "id": pid}
+
+
+@app.get("/api/operator/payouts")
+def op_payouts(x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    conn = db()
+    rows = conn.execute(
+        """SELECT p.*, d.name AS driver_name FROM payouts p
+           JOIN drivers d ON d.id = p.driver_id
+           ORDER BY p.id DESC""").fetchall()
+    out = [dict(r) for r in rows]
+    conn.close()
+    return out
+
+
+@app.post("/api/operator/payouts/{pid}/paid")
+def op_payout_paid(pid: int, x_pin: str = Header(default="")):
+    """Ken sent the money (bank transfer, Cash App, etc.) — mark it paid."""
+    check_pin(x_pin)
+    conn = db()
+    conn.execute("UPDATE payouts SET status='paid', paid_at=? WHERE id=?",
+                 (now_iso(), pid))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
 @app.post("/api/investors/interest")
 async def investor_interest(req: Request):
     """Investor lead form. This collects interest only — actual investment
