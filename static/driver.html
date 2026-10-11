@@ -26,6 +26,8 @@
     <button class="on" data-t="del">Deliveries</button>
     <button data-t="msg">Inbox <span id="msgbadge"></span></button>
     <button data-t="earn">Earnings</button>
+    <button data-t="news">📢 News</button>
+    <button data-t="help">🆘 Help</button>
     <button data-t="me">Profile</button>
   </div>
 
@@ -56,6 +58,27 @@
     <div id="whist"></div>
     <h3>Payout history</h3>
     <div id="wpay"></div>
+  </div>
+
+  <div class="tab" id="t-news">
+    <div class="card"><h3>📢 Driver Broadcasts</h3><p class="small">Updates from Drop HQ — new features, bonuses, important news.</p><div id="newslist"><p class="small">Loading…</p></div></div>
+  </div>
+
+  <div class="tab" id="t-help">
+    <div class="card"><h3>🎯 My Goals</h3>
+      <div class="row"><span>Today: <b id="goal-today">$0</b> / <b id="goal-daily-t">$100</b></span></div>
+      <div style="background:#222;border-radius:10px;height:12px;margin:8px 0"><div id="goal-daily-bar" style="background:#2ecc71;height:100%;border-radius:10px;width:0%"></div></div>
+      <div class="row"><span>This week: <b id="goal-week">$0</b> / <b id="goal-weekly-t">$500</b></span></div>
+      <div style="background:#222;border-radius:10px;height:12px;margin:8px 0"><div id="goal-weekly-bar" style="background:#3498db;height:100%;border-radius:10px;width:0%"></div></div>
+      <div class="row"><input id="goal-d" type="number" placeholder="Daily $" style="flex:1;margin-right:6px"><input id="goal-w" type="number" placeholder="Weekly $" style="flex:1;margin-right:6px"><button class="btn small" id="goal-save" style="width:auto">Set</button></div>
+    </div>
+    <div class="card"><h3>🆘 File a complaint</h3>
+      <p class="small">Something wrong? Tell us. AI will categorize it and suggest a fix to management.</p>
+      <label>Subject</label><input id="comp-subject" placeholder="What's the issue?">
+      <label>Details</label><textarea id="comp-msg" rows="3" placeholder="Describe what happened…" style="width:100%"></textarea>
+      <button class="btn" id="comp-send" style="margin-top:8px">Submit complaint</button>
+      <p class="small" id="comp-msg-status"></p></div>
+    <div class="card"><h3>My complaints</h3><div id="complist"><p class="small">Loading…</p></div></div>
   </div>
 
   <div class="tab" id="t-me">
@@ -99,7 +122,8 @@ $('gobtn').onclick=async()=>{
   if(!r.ok){$('loginmsg').textContent=j.detail||'Login failed.';return;}
   $('login').style.display='none';$('app').style.display='block';
   $('dname').textContent='· '+j.name;
-  loadOrders();
+  DID=j.id||j.driver_id||0;
+  loadOrders(); loadNews();
 };
 // Photo uploads
 async function uploadPhoto(type){
@@ -225,5 +249,63 @@ $('locToggle').onclick=()=>{
 };
 
 setInterval(()=>{ if($('app').style.display!=='none') loadOrders(); },10000);
+
+// Broadcasts
+async function loadNews(){
+  const b=await(await fetch('/api/drivers/broadcasts')).json();
+  $('newslist').innerHTML=b.map(x=>`
+    <div class="card" style="margin:8px 0"><b>📢 ${x.title.replace(/</g,'&lt;')}</b>
+    <p class="small">${x.message.replace(/</g,'&lt;')}</p>
+    <span class="small">${x.created_at.slice(0,10)}</span></div>`).join('')
+    ||'<p class="small">No announcements yet.</p>';
+}
+
+// Goals
+let DID=0;
+async function loadGoals(){
+  if(!DID) return;
+  const g=await(await fetch(`/api/drivers/goals?driver_id=${DID}`)).json();
+  $('goal-today').textContent='$'+g.today_earned.toFixed(2);
+  $('goal-daily-t').textContent='$'+g.daily_target.toFixed(2);
+  $('goal-week').textContent='$'+g.week_earned.toFixed(2);
+  $('goal-weekly-t').textContent='$'+g.weekly_target.toFixed(2);
+  $('goal-daily-bar').style.width=Math.min(100,g.today_earned/g.daily_target*100)+'%';
+  $('goal-weekly-bar').style.width=Math.min(100,g.week_earned/g.weekly_target*100)+'%';
+}
+document.getElementById('goal-save').onclick=async()=>{
+  const d=parseFloat(document.getElementById('goal-d').value)||100;
+  const w=parseFloat(document.getElementById('goal-w').value)||500;
+  await fetch('/api/drivers/goals',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({driver_id:DID,daily_target:d,weekly_target:w})});
+  loadGoals();
+};
+
+// Complaints
+document.getElementById('comp-send').onclick=async()=>{
+  const s=document.getElementById('comp-subject').value.trim();
+  const m=document.getElementById('comp-msg').value.trim();
+  if(!s||!m){document.getElementById('comp-msg-status').textContent='Fill in both fields.';return;}
+  const r=await(await fetch('/api/drivers/complaint',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({driver_id:DID,subject:s,message:m})})).json();
+  document.getElementById('comp-msg-status').textContent=r.ok?`✅ Submitted (${r.ai_category}). We'll review it.`:'Failed.';
+  document.getElementById('comp-subject').value='';document.getElementById('comp-msg').value='';
+  loadComplaints();
+};
+async function loadComplaints(){
+  if(!DID) return;
+  const c=await(await fetch(`/api/drivers/complaints?driver_id=${DID}`)).json();
+  $('complist').innerHTML=c.map(x=>`
+    <div class="card" style="margin:8px 0"><b>${x.subject.replace(/</g,'&lt;')}</b> <span class="badge">${x.status}</span>
+    <p class="small">${x.ai_summary}</p>
+    ${x.ken_response?`<p class="small" style="color:#2ecc71"><b>Response:</b> ${x.ken_response.replace(/</g,'&lt;')}</p>`:'<p class="small">Awaiting review…</p>'}</div>`).join('')
+    ||'<p class="small">No complaints filed.</p>';
+}
+// Load news/goals when tabs clicked
+document.querySelectorAll('.tabs button').forEach(b=>{
+  b.addEventListener('click',()=>{
+    if(b.dataset.t==='news') loadNews();
+    if(b.dataset.t==='help'){ loadGoals(); loadComplaints(); }
+  });
+});
 </script>
 <script src="/static/chat.js"></script></body></html>

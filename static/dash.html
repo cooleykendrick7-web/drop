@@ -26,6 +26,7 @@
     <button data-t="live">⚡ Live</button>
     <button data-t="bot">🤖 AI Bot</button>
     <button data-t="pay">💳 Payments</button>
+    <button data-t="crew">📢 Crew</button>
     <button data-t="more">⋯ More</button>
   </div>
   <div class="tabs sub" id="moretabs" style="display:none;flex-wrap:wrap;background:#141419">
@@ -199,6 +200,15 @@
     </div>
   </div>
 
+  <div class="tab" id="t-crew">
+    <div class="card"><h3>📢 Broadcast to Drivers</h3>
+      <p class="small">Post updates, bonuses, news — all drivers see it in their News tab.</p>
+      <label>Title</label><input id="bc-title" placeholder="e.g. Weekend bonus!">
+      <label>Message</label><textarea id="bc-msg" rows="3" placeholder="Details…" style="width:100%"></textarea>
+      <button class="btn" id="bc-send" style="margin-top:8px">Send broadcast</button>
+      <p class="small" id="bc-status"></p></div>
+    <div class="card"><h3>🆘 Driver Complaints</h3><p class="small">AI categorizes and suggests fixes.</p><div id="complist"></div></div>
+  </div>
   <div class="tab" id="t-pay">
     <div class="card" style="border-left:4px solid #f39c12">
       <h3 style="margin-top:0">💳 Universal Payment Control Center</h3>
@@ -304,6 +314,36 @@ document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
   if(b.dataset.t==='earn') loadEarn(); if(b.dataset.t==='menu') loadMenu(); if(b.dataset.t==='set') loadSet(); if(b.dataset.t==='sup') loadTix(); if(b.dataset.t==='promo') loadPromos(); if(b.dataset.t==='stats') loadStats(); if(b.dataset.t==='upd') loadProposals(); if(b.dataset.t==='drv') loadDrivers(); if(b.dataset.t==='biz') loadBiz(); if(b.dataset.t==='inv') loadInv(); if(b.dataset.t==='money') loadMoney(); if(b.dataset.t==='deals') loadDeals(); if(b.dataset.t==='audit') loadAudit(); if(b.dataset.t==='out') loadOutreach(); if(b.dataset.t==='live') loadLive(); if(b.dataset.t==='pay') loadPay(); if(b.dataset.t==='bot'){ loadBot(); loadIdeas(); }
 
 /* ---- Payment Control Center ---- */
+async function loadCrew(){
+  // Complaints
+  const c=await(await fetch('/api/operator/complaints',{headers:H()})).json();
+  $('complist').innerHTML=c.map(x=>`
+    <div class="card" style="margin:8px 0;border-left:3px solid ${x.status==='open'?'#e74c3c':'#2ecc71'}">
+      <div class="row"><b>${x.driver_name}: ${x.subject.replace(/</g,'&lt;')}</b><span class="badge">${x.status.toUpperCase()}</span></div>
+      <p class="small">${x.message.replace(/</g,'&lt;')}</p>
+      <p class="small" style="color:#f39c12"><b>AI:</b> ${x.ai_summary} — ${x.ai_suggestion}</p>
+      ${x.ken_response?`<p class="small" style="color:#2ecc71"><b>You:</b> ${x.ken_response.replace(/</g,'&lt;')}</p>`:`
+      <div class="row"><input id="resp-${x.id}" placeholder="Your response…" style="flex:1;margin-right:6px">
+      <button class="btn small" onclick="respondComplaint(${x.id})" style="width:auto">Reply</button></div>`}
+    </div>`).join('')||'<p class="small">No complaints.</p>';
+}
+async function respondComplaint(id){
+  const r=document.getElementById('resp-'+id).value.trim();
+  if(!r)return;
+  await fetch(`/api/operator/complaints/${id}/respond`,{method:'POST',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({response:r})});
+  loadCrew();
+}
+document.getElementById('bc-send').onclick=async()=>{
+  const t=document.getElementById('bc-title').value.trim();
+  const m=document.getElementById('bc-msg').value.trim();
+  if(!t||!m){document.getElementById('bc-status').textContent='Fill in both.';return;}
+  const r=await(await fetch('/api/operator/broadcasts',{method:'POST',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({title:t,message:m})})).json();
+  document.getElementById('bc-status').textContent=r.ok?'✅ Broadcast sent to all drivers!':'Failed.';
+  document.getElementById('bc-title').value='';document.getElementById('bc-msg').value='';
+};
+// Hook crew tab into tab switcher
+const _origShow=document.querySelectorAll('.tabs button');
+_origShow.forEach(b=>b.addEventListener('click',()=>{ if(b.dataset.t==='crew') loadCrew(); }));
 async function loadPay(){
   const d=await(await fetch('/api/operator/payments/overview',{headers:H()})).json();
   $('providernote').innerHTML=`⚠️ <b>Provider status:</b> ${d.provider_note}`;

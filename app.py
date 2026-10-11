@@ -260,6 +260,24 @@ def init_db():
     # Live restaurant cache (from OpenStreetMap, 24h TTL)
     c.execute("""CREATE TABLE IF NOT EXISTS live_cache (
         key TEXT PRIMARY KEY, data TEXT NOT NULL, cached_at TEXT NOT NULL)""")
+    # Driver broadcasts (Ken's announcements to all drivers)
+    c.execute("""CREATE TABLE IF NOT EXISTS driver_broadcasts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL, message TEXT NOT NULL,
+        created_at TEXT NOT NULL)""")
+    # Driver complaints (AI triages, suggests solutions to Ken)
+    c.execute("""CREATE TABLE IF NOT EXISTS driver_complaints (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        driver_id INTEGER NOT NULL, subject TEXT NOT NULL,
+        message TEXT NOT NULL, ai_summary TEXT DEFAULT '',
+        ai_suggestion TEXT DEFAULT '', status TEXT DEFAULT 'open',
+        ken_response TEXT DEFAULT '',
+        created_at TEXT NOT NULL)""")
+    # Driver earnings goals
+    c.execute("""CREATE TABLE IF NOT EXISTS driver_goals (
+        driver_id INTEGER PRIMARY KEY,
+        daily_target REAL DEFAULT 100, weekly_target REAL DEFAULT 500,
+        updated_at TEXT NOT NULL)""")
     # WATCH portal comments
     c.execute("""CREATE TABLE IF NOT EXISTS watch_comments (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1283,6 +1301,151 @@ async def user_save_card(req: Request):
 def user_delete_card(cid: int, phone: str = ""):
     conn = db()
     conn.execute("DELETE FROM saved_cards WHERE id=? AND phone=?", (cid, phone))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+# ---------------- Driver broadcasts ----------------
+@app.get("/api/drivers/broadcasts")
+def driver_broadcasts():
+    conn = db()
+    rows = conn.execute(
+        "SELECT * FROM driver_broadcasts ORDER BY id DESC LIMIT 20").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+@app.post("/api/operator/broadcasts")
+async def op_broadcast(req: Request, x_pin: str = Header(default="")):
+    """Ken posts an announcement to all drivers."""
+    check_pin(x_pin)
+    body = await req.json()
+    title = (body.get("title") or "").strip()[:100]
+    message = (body.get("message") or "").strip()[:1000]
+    if not title or not message:
+        raise HTTPException(400, "Title and message required")
+    conn = db()
+    conn.execute(
+        "INSERT INTO driver_broadcasts(title, message, created_at) VALUES(?,?,?)",
+        (title, message, now_iso()))
+    conn.commit()
+    conn.close()
+    log_event("broadcast", f"📢 {title}", message[:100])
+    return {"ok": True}
+
+
+# ---------------- Driver complaints (AI triaged) ----------------
+@app.post("/api/drivers/complaint")
+async def driver_complaint(req: Request):
+    """Driver files a complaint. AI summarizes and suggests solution."""
+    body = await req.json()
+    driver_id = int(body.get("driver_id") or 0)
+    subject = (body.get("subject") or "").strip()[:100]
+    message = (body.get("message") or "").strip()[:1000]
+    if not driver_id or not subject or not message:
+        raise HTTPException(400, "driver_id, subject, and message required")
+    # AI triage: categorize and suggest
+    msg_lower = message.lower()
+    if any(w in msg_lower for w in ["pay", "money", "payout", "earn"]):
+        category = "💰 Pay issue"
+        suggestion = "Check their payout status and recent deliveries. Verify amounts match."
+    elif any(w in msg_lower for w in ["customer", "rude", "complaint"]):
+        category = "😤 Customer issue"
+        suggestion = "Review the order details and customer feedback. Consider mediating."
+    elif any(w in msg_lower for w in ["app", "bug", "broken", "error", "crash"]):
+        category = "🐛 App issue"
+        suggestion = "Check if it's a known bug. May need a fix pushed."
+    elif any(w in msg_lower for w in ["safety", "danger", "threat"]):
+        category = "🚨 Safety concern"
+        suggestion = "PRIORITY: Review immediately. May need to suspend involved parties."
+    else:
+        category = "📝 General"
+        suggestion = "Review the details and respond directly to the driver."
+    ai_summary = f"{category}: {subject}"
+    conn = db()
+    conn.execute(
+        "INSERT INTO driver_complaints(driver_id, subject, message, ai_summary, ai_suggestion, created_at)"
+        " VALUES(?,?,?,?,?,?)",
+        (driver_id, subject, message, ai_summary, suggestion, now_iso()))
+    conn.commit()
+    conn.close()
+    log_event("complaint", f"📝 Complaint from driver #{driver_id}", ai_summary)
+    return {"ok": True, "ai_category": category}
+
+
+@app.get("/api/drivers/complaints")
+def driver_my_complaints(driver_id: int = 0):
+    conn = db()
+    rows = conn.execute(
+        "SELECT * FROM driver_complaints WHERE driver_id=? ORDER BY id DESC",
+        (driver_id,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+@app.get("/api/operator/complaints")
+def op_complaints(x_pin: str = Header(default="")):
+    """Ken sees all complaints with AI suggestions."""
+    check_pin(x_pin)
+    conn = db()
+    rows = conn.execute(
+        "SELECT dc.*, d.name as driver_name FROM driver_complaints dc"
+        " JOIN drivers d ON d.id=dc.driver_id"
+        " ORDER BY dc.id DESC").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+@app.post("/api/operator/complaints/{cid}/respond")
+async def op_complaint_respond(cid: int, req: Request, x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    body = await req.json()
+    response = (body.get("response") or "").strip()[:1000]
+    conn = db()
+    conn.execute(
+        "UPDATE driver_complaints SET ken_response=?, status='responded' WHERE id=?",
+        (response, cid))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+# ---------------- Driver earnings goals ----------------
+@app.get("/api/drivers/goals")
+def driver_goals_get(driver_id: int = 0):
+    conn = db()
+    r = conn.execute("SELECT * FROM driver_goals WHERE driver_id=?", (driver_id,)).fetchone()
+    # Get today's earnings
+    today = now_iso()[:10]
+    earned = conn.execute(
+        "SELECT COALESCE(SUM(amount),0) as total FROM payouts"
+        " WHERE driver_id=? AND date(created_at)=?",
+        (driver_id, today)).fetchone()
+    week_earned = conn.execute(
+        "SELECT COALESCE(SUM(amount),0) as total FROM payouts"
+        " WHERE driver_id=? AND date(created_at) >= date('now','-7 days')",
+        (driver_id,)).fetchone()
+    conn.close()
+    return {
+        "daily_target": r["daily_target"] if r else 100,
+        "weekly_target": r["weekly_target"] if r else 500,
+        "today_earned": earned["total"] if earned else 0,
+        "week_earned": week_earned["total"] if week_earned else 0,
+    }
+
+
+@app.post("/api/drivers/goals")
+async def driver_goals_set(req: Request):
+    body = await req.json()
+    driver_id = int(body.get("driver_id") or 0)
+    daily = float(body.get("daily_target") or 100)
+    weekly = float(body.get("weekly_target") or 500)
+    conn = db()
+    conn.execute(
+        "INSERT OR REPLACE INTO driver_goals(driver_id, daily_target, weekly_target, updated_at)"
+        " VALUES(?,?,?,?)",
+        (driver_id, daily, weekly, now_iso()))
     conn.commit()
     conn.close()
     return {"ok": True}
