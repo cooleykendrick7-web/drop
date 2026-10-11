@@ -33,28 +33,6 @@ input,textarea,select{padding:9px!important;font-size:.9rem}
 </div>
 
 <div id="app" style="display:none">
-  <!-- Watcher mode: shown when 5683 PIN is used. Status only, no controls. -->
-  <div id="watcherview" style="display:none;max-width:520px;margin:0 auto">
-    <div class="health" id="w-health-emoji" style="font-size:3rem;text-align:center;margin:20px 0 6px">⏳</div>
-    <div class="health-lbl" id="w-health-lbl" style="text-align:center;font-size:1.2rem;font-weight:800;margin-bottom:20px">Checking…</div>
-    <div class="statgrid" id="w-stats" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0"></div>
-    <div class="card">
-      <b>💼 Investment opportunities</b>
-      <p class="small">Drop is growing. Want a piece of it?</p>
-      <a class="btn small" href="/investors.html" style="text-decoration:none;text-align:center;display:block">Learn about investing →</a>
-    </div>
-    <div class="card">
-      <b>💬 Suggestions & comments</b>
-      <p class="small">Got an idea? Tell the owner directly.</p>
-      <div id="w-chatbox" style="max-height:200px;overflow-y:auto;margin:8px 0"></div>
-      <div class="row">
-        <input id="w-chatmsg" placeholder="Type a suggestion…" style="flex:1;margin-right:8px">
-        <button class="btn small" id="w-chatsend" style="width:auto">Send</button>
-      </div>
-    </div>
-    <p class="small" style="text-align:center;opacity:.5">👀 Watch mode — status only, auto-refreshes</p>
-  </div>
-  <div id="fullview">
   <div class="tabs">
     <button class="on" data-t="orders">Orders</button>
     <button data-t="money">💰 Money</button>
@@ -259,11 +237,10 @@ input,textarea,select{padding:9px!important;font-size:.9rem}
       3. New paid orders will buzz your phone instantly.<br>
       No account or signup needed.</p></div>
   </div>
-  </div><!-- /fullview -->
 </div>
 
 <script>
-let PIN='', lastSeen=0, isWatcher=false;
+let PIN='', lastSeen=0;
 const H=()=>({'X-PIN':PIN});
 const $=id=>document.getElementById(id);
 const NEXT={placed:'confirmed',confirmed:'picked_up',picked_up:'on_the_way',on_the_way:'delivered'};
@@ -299,91 +276,23 @@ async function loadStats(){
 
 $('gobtn').onclick=async()=>{
   PIN=$('pin').value.trim();
-  isWatcher=(PIN==='5683');
-  // watcher PIN: validate against watcher endpoint; operator PIN: validate against operator endpoint
-  const testUrl=isWatcher?'/api/watcher/live':'/api/operator/orders';
-  const r=await fetch(testUrl,{headers:H()});
+  const r=await fetch('/api/operator/orders',{headers:H()});
   if(r.status===401){$('loginmsg').textContent='Wrong PIN.';return;}
   sessionStorage.setItem('droppin',PIN);
   $('login').style.display='none';$('app').style.display='block';
-  if(isWatcher){
-    $('watcherview').style.display='block';
-    $('fullview').style.display='none';
-    loadWatcherView();
-    setInterval(()=>{if(isWatcher)loadWatcherView();},15000);
-    loadWatcherChat();
-    setInterval(()=>{if(isWatcher)loadWatcherChat();},10000);
-  } else {
-    loadOrders(true);
-  }
+  loadOrders(true);
 };
 PIN=sessionStorage.getItem('droppin')||'';
 if(PIN){
-  isWatcher=(PIN==='5683');
   $('login').style.display='none';$('app').style.display='block';
-  if(isWatcher){
-    $('watcherview').style.display='block';
-    $('fullview').style.display='none';
-    loadWatcherView();
-    setInterval(()=>{if(isWatcher)loadWatcherView();},15000);
-    loadWatcherChat();
-    setInterval(()=>{if(isWatcher)loadWatcherChat();},10000);
-  } else {
-    loadOrders(true);
-  }
+  loadOrders(true);
 }
 $('logoutbtn').onclick=()=>{
   if(!confirm('Log out of the operator portal?'))return;
   sessionStorage.removeItem('droppin');
-  PIN=''; isWatcher=false;
+  PIN='';
   location.reload();
 };
-
-/* --- Watcher mode (PIN 5683): status only --- */
-async function loadWatcherView(){
-  const r=await fetch('/api/watcher/live',{headers:H()});
-  if(!r.ok)return;
-  const j=await r.json();
-  const s=j.orders_by_status||{};
-  const active=Object.entries(s).filter(([k])=>!['delivered','cancelled'].includes(k))
-    .reduce((a,[,v])=>a+v,0);
-  const delivered=s.delivered||0;
-  const online=j.drivers.filter(d=>d.online).length;
-  let emoji='✅', lbl='Doing good', color='#4ade80';
-  if(!j.open){emoji='🔴';lbl='Currently closed';color='#f66';}
-  else if(active>5){emoji='🔥';lbl='Busy — lots of orders!';color='#fbbf24';}
-  else if(active===0&&delivered===0){emoji='😴';lbl='Quiet right now';color='#888';}
-  $('w-health-emoji').textContent=emoji;
-  $('w-health-lbl').textContent=lbl;
-  $('w-health-lbl').style.color=color;
-  $('w-stats').innerHTML=`
-    <div class="stat"><b>${j.open?'🟢 Open':'🔴 Closed'}</b><span class="small">Site status</span></div>
-    <div class="stat"><b>${active}</b><span class="small">Active orders</span></div>
-    <div class="stat"><b>${delivered}</b><span class="small">Delivered today</span></div>
-    <div class="stat"><b>${online}</b><span class="small">Drivers online</span></div>`;
-}
-async function loadWatcherChat(){
-  const r=await fetch('/api/watcher/messages',{headers:H()});
-  if(!r.ok)return;
-  const j=await r.json();
-  const box=$('w-chatbox');
-  box.innerHTML=j.map(m=>`
-    <div style="padding:6px 10px;border-radius:10px;margin:4px 0;max-width:90%;
-      ${m.sender==='owner'?'background:var(--acc);color:#fff;margin-left:auto':'background:#1c1c22'}">
-      <b class="small">${m.sender==='owner'?'👑 Owner':'👀 You'}</b><br>
-      <span class="small">${m.message.replace(/</g,'&lt;')}</span></div>`).join('')
-    ||'<p class="small">No messages yet.</p>';
-  box.scrollTop=box.scrollHeight;
-}
-document.addEventListener('click',async e=>{
-  if(e.target&&e.target.id==='w-chatsend'){
-    const msg=$('w-chatmsg').value.trim();
-    if(!msg)return;
-    await fetch('/api/watcher/messages',{method:'POST',
-      headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({message:msg})});
-    $('w-chatmsg').value=''; loadWatcherChat();
-  }
-});
 
 async function activateSched(oid){
   if(!confirm('Activate order #'+oid+' now?'))return;
@@ -991,7 +900,7 @@ async function loadWatchChat(){
   // flash the card border + banner when VIPs are waiting
   const card=$('watchercard');
   if(card)card.style.border=unseen?'2px solid #f66':'2px solid #fbbf24';
-  if(unseen&&!isWatcher){
+  if(unseen){
     banner(`👀 ${unseen} new VIP message${unseen>1?'s':''} — check Watcher chat!`);
     try{beep();}catch(e){}
   }

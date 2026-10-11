@@ -15,7 +15,8 @@
 .chatmsg.owner{background:var(--acc);color:#fff;margin-left:auto}
 </style>
 </head><body>
-<header class="topbar"><a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg" alt="Drop"><b>Drop</b></a><button class="btn small ghost" id="logoutbtn" style="width:auto">Log out</button></header>
+<header class="topbar"><a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg" alt="Drop"><b>Drop</b></a>
+<button class="btn small ghost" id="logoutbtn" style="width:auto;margin-left:auto;display:none">🚪 Log out</button></header>
 
 <div id="login" class="card" style="max-width:400px;margin:40px auto">
   <h2>👀 Live Status</h2>
@@ -32,6 +33,12 @@
   <div class="statgrid" id="stats"></div>
 
   <div class="card">
+    <b>💼 Investment opportunities</b>
+    <p class="small">Drop is growing. Want to be part of it?</p>
+    <a class="btn" href="/investors.html" style="text-decoration:none;text-align:center;display:block">Learn about investing →</a>
+  </div>
+
+  <div class="card">
     <b>💬 Message the owner</b>
     <div class="chatbox" id="chatbox"></div>
     <div class="row" style="margin-top:8px">
@@ -44,24 +51,28 @@
 
 <script>
 const $=id=>document.getElementById(id);
-let PIN=localStorage.getItem('watchpin')||'';
+let PIN=sessionStorage.getItem('watchpin')||'';
 const H=()=>({'x-pin':PIN});
 
 $('gobtn').onclick=async()=>{
   PIN=$('pin').value.trim();
   const r=await fetch('/api/watcher/login',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({pin:PIN})});
-  if(r.ok){localStorage.setItem('watchpin',PIN);showApp();}
+  if(r.ok){sessionStorage.setItem('watchpin',PIN);showApp();}
   else $('loginmsg').textContent='Invalid code.';
 };
 if(PIN)showApp();
-$('logoutbtn').onclick=()=>{localStorage.removeItem('watchpin');PIN='';$('app').style.display='none';$('login').style.display='block';$('pin').value='';};
 
 function showApp(){
   $('login').style.display='none';$('app').style.display='block';
+  $('logoutbtn').style.display='block';
   load(); setInterval(load,15000);
   loadChat(); setInterval(loadChat,10000);
 }
+$('logoutbtn').onclick=()=>{
+  sessionStorage.removeItem('watchpin');
+  location.reload();
+};
 async function load(){
   const r=await fetch('/api/watcher/live',{headers:H()});
   if(r.status===401){sessionStorage.removeItem('watchpin');location.reload();return;}
