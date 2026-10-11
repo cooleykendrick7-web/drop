@@ -133,14 +133,20 @@ async function load(){
     pick.appendChild(opt);
   }
   const gpsCity = await new Promise(resolve=>{
-    if(!navigator.geolocation) return resolve(null);
-    navigator.geolocation.getCurrentPosition(async pos=>{
-      window._gps = {lat: pos.coords.latitude, lng: pos.coords.longitude};
-      try{
-        const nc = await (await fetch(`/api/nearest-city?lat=${pos.coords.latitude}&lng=${pos.coords.longitude}`)).json();
-        resolve(nc);
-      }catch(e){ resolve(null); }
-    }, ()=>resolve(null), {timeout:8000, maximumAge:600000});
+    let done=false;
+    const finish=v=>{if(!done){done=true;resolve(v);}};
+    // Force resolve after 12s no matter what — never hang
+    setTimeout(()=>finish(null), 12000);
+    if(!navigator.geolocation) return finish(null);
+    try{
+      navigator.geolocation.getCurrentPosition(async pos=>{
+        window._gps = {lat: pos.coords.latitude, lng: pos.coords.longitude};
+        try{
+          const nc = await (await fetch(`/api/nearest-city?lat=${pos.coords.latitude}&lng=${pos.coords.longitude}`)).json();
+          finish(nc);
+        }catch(e){ finish(null); }
+      }, ()=>finish(null), {timeout:8000, maximumAge:600000});
+    }catch(e){ finish(null); }
   });
   const _updHead = ()=>{ const hc=document.getElementById('headcity'); const v=(pick.value||'').split('|')[0]; if(v){hc.textContent=v;hc.style.display='';} };
   // GPS only auto-sets city if user hasn't manually chosen one
@@ -153,6 +159,9 @@ async function load(){
     const hc = document.getElementById('headcity');
     hc.textContent = gpsCity.detected_city; hc.style.display = '';
     document.getElementById('gpsnote').innerHTML = `📍 You're in <b>${gpsCity.detected_city}</b> — Drop isn't there <i>yet</i>. <a href="#suggest">Suggest a spot</a> and we'll come to you.`;
+  } else if(!manualMode){
+    // GPS didn't work — show helpful message instead of hanging
+    document.getElementById('gpsnote').innerHTML = `📍 Couldn't detect location. <b>Tap "Use my location"</b> or enter your city manually.`;
   }
   pick.value = cur; _updHead();
   pick.onchange = ()=>{ localStorage.setItem('dropcity', pick.value); localStorage.setItem('dropcity_manual','1'); _updHead(); load(); };
