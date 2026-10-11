@@ -3582,6 +3582,59 @@ def places_search(city: str = "", state: str = "", lat: float = 0, lng: float = 
         return {"active": True, "error": str(e)[:200], "results": []}
 
 
+@app.get("/api/osm/restaurants")
+def osm_restaurants(city: str = "", state: str = "", lat: float = 0, lng: float = 0):
+    """FREE: Find real restaurants via OpenStreetMap. No API key needed."""
+    import urllib.request, urllib.parse, json
+    try:
+        if lat and lng:
+            # Search around GPS coordinates (15km radius)
+            query = f"""
+            [out:json][timeout:25];
+            (
+              node["amenity"="restaurant"](around:15000,{lat},{lng});
+              way["amenity"="restaurant"](around:15000,{lat},{lng});
+            );
+            out center 20;
+            """
+        elif city:
+            # Search in city area
+            query = f"""
+            [out:json][timeout:25];
+            area["name"="{city}"]["admin_level"~"8"]->.a;
+            (
+              node["amenity"="restaurant"](area.a);
+              way["amenity"="restaurant"](area.a);
+            );
+            out center 20;
+            """
+        else:
+            return {"active": True, "results": []}
+        url = "https://overpass-api.de/api/interpreter"
+        data = urllib.parse.urlencode({"data": query}).encode()
+        req = urllib.request.Request(url, data=data, method="POST",
+                                     headers={"User-Agent": "DropApp/1.0"})
+        resp = json.loads(urllib.request.urlopen(req, timeout=30).read())
+        results = []
+        for el in resp.get("elements", [])[:20]:
+            tags = el.get("tags", {})
+            name = tags.get("name")
+            if not name:
+                continue
+            rlat = el.get("lat") or el.get("center", {}).get("lat", 0)
+            rlng = el.get("lon") or el.get("center", {}).get("lon", 0)
+            results.append({
+                "name": name,
+                "address": tags.get("addr:street", "") + " " + tags.get("addr:housenumber", ""),
+                "cuisine": tags.get("cuisine", ""),
+                "lat": rlat, "lng": rlng,
+                "source": "openstreetmap",
+            })
+        return {"active": True, "results": results}
+    except Exception as e:
+        return {"active": True, "error": str(e)[:200], "results": []}
+
+
 # ---------------- WATCH portal comments ----------------
 # Friends comment, Ken replies. Legal name is auto-blocked.
 WATCH_BLOCKED_NAMES = ["kendrick cooley", "kendrick", "ken"]
