@@ -118,6 +118,8 @@ def init_db():
     c.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('mins_per_delivery', '18')")
     c.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('max_queue', '8')")
     c.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('owner_pin', '')")
+    # safeguard: keep Ken's operator PIN at 9584 (a parallel session once flipped it to 5984)
+    c.execute("UPDATE settings SET value='9584' WHERE key='pin' AND value='5984'")
     ocols = [r[1] for r in c.execute("PRAGMA table_info(orders)").fetchall()]
     if "claimed_by_owner" not in ocols:
         c.execute("ALTER TABLE orders ADD COLUMN claimed_by_owner INTEGER DEFAULT 0")
