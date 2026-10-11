@@ -8743,9 +8743,9 @@ async def rides_checkout(req: Request):
     d_lat = float(body.get("dropoff_lat") or 0)
     d_lng = float(body.get("dropoff_lng") or 0)
     if not p_lat:
-        p_lat, p_lng = geocode(pickup, {})
+        p_lat, p_lng = geocode(pickup)
     if not d_lat:
-        d_lat, d_lng = geocode(dropoff, {})
+        d_lat, d_lng = geocode(dropoff)
 
     miles = driving_miles(p_lat, p_lng, d_lat, d_lng) if p_lat and d_lat else 0
     base_fare = fin_setting("ride_base_fare", 4.99)
@@ -8782,7 +8782,7 @@ async def rides_checkout(req: Request):
     line_items = [{
         "price_data": {
             "currency": "usd",
-            "product_data": {"name": f"Drop ride #{rid}: {pickup} → {dropoff}"},
+            "product_data": {"name": f"Drop ride #{rid}"},
             "unit_amount": int(round(fare * 100)),
         },
         "quantity": 1,
