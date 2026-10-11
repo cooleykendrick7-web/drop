@@ -5416,6 +5416,19 @@ async def drop_request(req: Request):
          fee, fee, now_iso(), now_iso(),
          what, pickup_addr, plat, plng, dlat, dlng))
     oid = cur.lastrowid
+    # Check for nearby available drivers (within 15 miles) BEFORE closing
+    drivers_available = 0
+    if plat and plng:
+        import math
+        try:
+            drivers = conn.execute(
+                "SELECT lat, lng FROM drivers WHERE status='approved' AND lat != 0").fetchall()
+            for d in drivers:
+                dist = math.hypot(d["lat"] - plat, d["lng"] - plng) * 69
+                if dist <= 15:
+                    drivers_available += 1
+        except Exception:
+            pass
     conn.commit()
     conn.close()
     log_event("order", f"📦 Drop request #{oid}", f"{what[:40]} — ${fee:.2f}")
@@ -5433,7 +5446,8 @@ async def drop_request(req: Request):
                 daemon=True).start()
     except Exception:
         pass
-    return {"ok": True, "order_id": oid, "fee": fee}
+    return {"ok": True, "order_id": oid, "fee": fee, "drivers_available": drivers_available,
+            "no_drivers": drivers_available == 0}
 
 
 @app.get("/watch.html", response_class=HTMLResponse)

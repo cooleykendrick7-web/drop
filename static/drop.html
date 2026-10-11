@@ -83,6 +83,12 @@ $('go').onclick=async()=>{
     const r=await(await fetch('/api/drop/request',{method:'POST',
       headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
     if(r.ok){
+      if(r.no_drivers){
+        if(!confirm('⚠️ No drivers available in your area right now. Submit anyway? We\'ll notify you when a driver is available.')) {
+          $('go').disabled=false; $('go').textContent='Request Drop →';
+          return;
+        }
+      }
       location.href='/track.html?id='+r.order_id;
     } else {
       $('msg').textContent=r.detail||'Failed. Try again.';
