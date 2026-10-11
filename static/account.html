@@ -47,9 +47,28 @@ async function load(){
         <div class="row"><b>#${o.id} · ${o.restaurant_name||'Drop'}</b><b>$${o.total.toFixed(2)}</b></div>
         <span class="small">${new Date(o.created_at).toLocaleDateString()} · ${o.status.replace(/_/g,' ')}</span>
       </a>`).join('')||'<p class="small">No orders yet — <a href="/">fix that 🧡</a></p>'}</div>
-    <button class="btn ghost" id="logout" style="margin-top:14px">Log out</button>`;
+    <button class="btn ghost" id="logout" style="margin-top:14px">Log out</button>
+    <h2 style="margin-top:20px">💳 Saved cards</h2>
+    <div id="cards"></div>`;
+  loadCards();
   $('logout').onclick=async()=>{await fetch('/api/auth/logout',{method:'POST'});location.href='/';};
+}
+async function loadCards(){
+  const phone = localStorage.getItem('drop_phone')||'';
+  if(!phone) return;
+  const cards = await(await fetch(`/api/user/cards?phone=${encodeURIComponent(phone)}`)).json();
+  document.getElementById('cards').innerHTML = cards.map(c=>`
+    <div class="card" style="margin:8px 0">
+      <div class="row"><b>💳 •••• ${c.last4}</b><span class="small">${c.brand} ${c.exp_month}/${c.exp_year}</span></div>
+      <button class="btn small ghost" onclick="removeCard(${c.id})">Remove</button>
+    </div>`).join('')||'<p class="small">No saved cards. Cards you use at checkout will appear here.</p>';
+}
+async function removeCard(id){
+  const phone = localStorage.getItem('drop_phone')||'';
+  await fetch(`/api/user/cards/${id}?phone=${encodeURIComponent(phone)}`,{method:'DELETE'});
+  loadCards();
 }
 load();
 </script>
-<script src="/static/chat.js"></script></body></html>
+<script src="/static/chat.js"></script><script src="/static/drop-live.js"></script>
+</body></html>

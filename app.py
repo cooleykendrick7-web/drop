@@ -250,6 +250,13 @@ def init_db():
         email TEXT DEFAULT '', photo TEXT DEFAULT '',
         password_hash TEXT DEFAULT '',
         created_at TEXT NOT NULL)""")
+    # Saved payment methods (last4 + brand only, never full numbers)
+    c.execute("""CREATE TABLE IF NOT EXISTS saved_cards (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        phone TEXT NOT NULL, last4 TEXT NOT NULL,
+        brand TEXT DEFAULT '', exp_month TEXT DEFAULT '', exp_year TEXT DEFAULT '',
+        stripe_pm_id TEXT DEFAULT '',
+        created_at TEXT NOT NULL)""")
     # WATCH portal comments
     c.execute("""CREATE TABLE IF NOT EXISTS watch_comments (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -941,6 +948,95 @@ def ip_location(req: Request):
     except Exception:
         pass
     return {"city": "", "state": "", "lat": 0, "lng": 0}
+
+
+@app.post("/api/help/ask")
+async def help_ask(req: Request):
+    """AI help agent — answers questions about using Drop."""
+    body = await req.json()
+    q = (body.get("question") or "").strip().lower()
+    page = body.get("page") or ""
+    # Smart keyword-based answers (no API key needed)
+    if any(w in q for w in ["location", "gps", "where am i", "detect"]):
+        answer = "Tap '📍 Use my location' on the homepage. If it doesn't work, make sure location is allowed in your browser settings, or just type your city manually."
+    elif any(w in q for w in ["order", "track", "where is my"]):
+        answer = "After you order, you'll get a tracking link. You can also check your order history in your Account page."
+    elif any(w in q for w in ["pickup", "already ordered"]):
+        answer = "Use '📦 Request a Drop' — tell us what to pick up and where, and we'll bring it to you. Works in any city!"
+    elif any(w in q for w in ["pay", "payment", "card", "cost", "price", "fee"]):
+        answer = "Food delivery is $3.99 flat. Drop requests (pickup/delivery) are $1.50 per mile with a $3.99 minimum. You pay securely by card at checkout."
+    elif any(w in q for w in ["driver", "who"]):
+        answer = "Your driver is assigned after you order. You'll see their name, photo, rating, and live location on the tracking page."
+    elif any(w in q for w in ["cancel", "refund"]):
+        answer = "You can cancel from your tracking page. Refunds are processed automatically to your original payment method."
+    elif any(w in q for w in ["account", "password", "login", "profile"]):
+        answer = "Manage your profile, order history, and saved payment methods in the Account page (👤 icon, top right)."
+    elif any(w in q for w in ["business"]):
+        answer = "Business owners can create an account for volume discounts, saved addresses, and priority service. Check the Drop More section."
+    elif "human" in q or "support" in q or "contact" in q:
+        answer = "You can reach us at wearedropservicesllc@gmail.com or (262) 977-7869."
+    else:
+        answer = "I can help with orders, tracking, payments, location, drivers, and your account. What do you need help with?"
+    return {"answer": answer}
+
+
+@app.get("/api/user/orders")
+def user_order_history(phone: str = ""):
+    """Customer's order history."""
+    if not phone:
+        return []
+    conn = db()
+    rows = conn.execute(
+        "SELECT id, restaurant_id, pickup_name, address, total, status, created_at"
+        " FROM orders WHERE phone=? ORDER BY id DESC LIMIT 20",
+        (phone,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+@app.get("/api/user/cards")
+def user_saved_cards(phone: str = ""):
+    """Customer's saved payment methods (last4 only)."""
+    if not phone:
+        return []
+    conn = db()
+    rows = conn.execute(
+        "SELECT id, last4, brand, exp_month, exp_year FROM saved_cards"
+        " WHERE phone=? ORDER BY id DESC", (phone,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+@app.post("/api/user/cards")
+async def user_save_card(req: Request):
+    """Save a card reference (last4 + brand, never full number)."""
+    body = await req.json()
+    phone = (body.get("phone") or "").strip()
+    last4 = (body.get("last4") or "").strip()[-4:]
+    brand = (body.get("brand") or "").strip()[:20]
+    if not phone or len(last4) != 4:
+        raise HTTPException(400, "Phone and valid last4 required")
+    conn = db()
+    # Avoid duplicates
+    if not conn.execute("SELECT id FROM saved_cards WHERE phone=? AND last4=?",
+                        (phone, last4)).fetchone():
+        conn.execute(
+            "INSERT INTO saved_cards(phone, last4, brand, exp_month, exp_year, created_at)"
+            " VALUES(?,?,?,?,?,?)",
+            (phone, last4, brand, body.get("exp_month", "")[:2],
+             body.get("exp_year", "")[:4], now_iso()))
+        conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.delete("/api/user/cards/{cid}")
+def user_delete_card(cid: int, phone: str = ""):
+    conn = db()
+    conn.execute("DELETE FROM saved_cards WHERE id=? AND phone=?", (cid, phone))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
 
 
 @app.get("/api/nearest-city")
