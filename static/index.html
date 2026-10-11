@@ -52,8 +52,10 @@
   <p class="small">Enter where you're going — see your exact price before you ride.</p>
 
   <div style="border:1px solid var(--line);border-radius:10px;padding:12px;margin:8px 0">
-    <b class="small">📍 PICKUP — where are you?</b>
-    <button class="btn ghost small" id="f-gps" style="width:auto;margin-left:8px;padding:6px 12px">📍 Use my location</button>
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+      <b class="small">📍 PICKUP — where are you?</b>
+      <button class="btn" id="f-gps" style="width:auto;padding:10px 18px;font-size:.95rem">📍 Use my GPS location</button>
+    </div>
     <div class="addr-grid" style="margin-top:8px">
       <div class="full"><label>Street address <span class="small">(optional if using GPS)</span></label><input id="f-pickup-street" placeholder="123 Main St — or tap 📍 above"></div>
       <div><label>Apt / Unit <span class="small">(optional)</span></label><input id="f-pickup-apt" placeholder="Apt 4B"></div>
@@ -158,10 +160,24 @@ $('calc-fare').onclick=async()=>{
       <div class="price">$${r.total.toFixed(2)}</div>
       <div class="small">${r.miles} miles · Base $${r.base_fare.toFixed(2)} + $${r.mileage_charge.toFixed(2)} mileage</div>
       <div style="margin-top:16px;text-align:left">
-        <label style="display:block;font-size:.85rem;font-weight:700;margin:8px 0 4px">Your name *</label>
-        <input id="h-name" placeholder="Your name" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--line);background:#0a0a0c;color:#fff;box-sizing:border-box">
-        <label style="display:block;font-size:.85rem;font-weight:700;margin:8px 0 4px">Your phone *</label>
-        <input id="h-phone" placeholder="(701) 555-1234" inputmode="tel" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--line);background:#0a0a0c;color:#fff;box-sizing:border-box">
+        <div style="display:flex;gap:8px;margin-bottom:12px">
+          <button class="btn ghost small htab on" data-mode="guest" style="flex:1">👤 Book as guest</button>
+          <button class="btn ghost small htab" data-mode="login" style="flex:1">🔑 Log in & book</button>
+        </div>
+        <div id="h-guest-form">
+          <label style="display:block;font-size:.85rem;font-weight:700;margin:8px 0 4px">Your name *</label>
+          <input id="h-name" placeholder="Your name" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--line);background:#0a0a0c;color:#fff;box-sizing:border-box">
+          <label style="display:block;font-size:.85rem;font-weight:700;margin:8px 0 4px">Your phone *</label>
+          <input id="h-phone" placeholder="(701) 555-1234" inputmode="tel" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--line);background:#0a0a0c;color:#fff;box-sizing:border-box">
+        </div>
+        <div id="h-login-form" style="display:none">
+          <label style="display:block;font-size:.85rem;font-weight:700;margin:8px 0 4px">Phone *</label>
+          <input id="h-li-phone" placeholder="(701) 555-1234" inputmode="tel" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--line);background:#0a0a0c;color:#fff;box-sizing:border-box">
+          <label style="display:block;font-size:.85rem;font-weight:700;margin:8px 0 4px">Password *</label>
+          <input id="h-li-pw" type="password" placeholder="Your password" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--line);background:#0a0a0c;color:#fff;box-sizing:border-box">
+          <button class="btn ghost small" id="h-li-go" style="width:100%;margin-top:8px">Log in</button>
+          <p class="small" id="h-li-msg" style="text-align:center"></p>
+        </div>
         <label style="display:block;font-size:.85rem;font-weight:700;margin:8px 0 4px">Tip your driver <span class="small">(100% to them)</span></label>
         <div style="display:flex;gap:8px;margin:4px 0">
           ${[0,1,3,5].map(t=>`<button class="btn ghost small htip" data-t="${t}" style="flex:1;padding:8px">$${t}</button>`).join('')}
@@ -171,6 +187,38 @@ $('calc-fare').onclick=async()=>{
         <p class="small" style="opacity:.6;text-align:center">🔒 Secure payment via Stripe · Driver auto-assigned</p>
       </div>
     </div>`;
+    // tab switching
+    let bookMode='guest';
+    document.querySelectorAll('.htab').forEach(t=>{
+      t.onclick=()=>{
+        bookMode=t.dataset.mode;
+        document.querySelectorAll('.htab').forEach(x=>x.classList.remove('on'));
+        t.classList.add('on');
+        $('h-guest-form').style.display=bookMode==='guest'?'block':'none';
+        $('h-login-form').style.display=bookMode==='login'?'block':'none';
+      };
+    });
+    // login handler
+    $('h-li-go').onclick=async()=>{
+      const phone=$('h-li-phone').value.trim(), pw=$('h-li-pw').value;
+      if(!phone||!pw){$('h-li-msg').textContent='Enter phone and password.';return;}
+      try{
+        const r=await(await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({phone,password:pw})})).json();
+        if(r.ok){
+          // switch to guest form with pre-filled name/phone
+          bookMode='guest';
+          document.querySelectorAll('.htab').forEach(x=>x.classList.remove('on'));
+          document.querySelector('.htab[data-mode="guest"]').classList.add('on');
+          $('h-guest-form').style.display='block';
+          $('h-login-form').style.display='none';
+          $('h-name').value=r.user.name||'';
+          $('h-phone').value=r.user.phone||'';
+          $('h-li-msg').textContent='✅ Logged in as '+r.user.name;
+          $('h-li-msg').style.color='#4ade80';
+        } else { $('h-li-msg').textContent='❌ '+(r.detail||'Login failed'); }
+      }catch(e){ $('h-li-msg').textContent='❌ Connection error.'; }
+    };
     document.querySelectorAll('.htip').forEach(b=>{
       b.onclick=()=>{ homeTip=parseFloat(b.dataset.t);
         document.querySelectorAll('.htip').forEach(x=>x.style.borderColor='');
