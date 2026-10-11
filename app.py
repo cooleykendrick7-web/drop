@@ -7591,9 +7591,10 @@ def watcher_live(x_pin: str = Header(default="")):
     # active orders (no customer phone, no totals)
     active = conn.execute(
         """SELECT o.id, o.status, o.kind, o.customer_name,
-                  o.restaurant_name, o.pickup_name, o.created_at, o.updated_at,
+                  r.name as restaurant_name, o.pickup_name, o.created_at, o.updated_at,
                   d.name as driver_name
            FROM orders o LEFT JOIN drivers d ON d.id=o.driver_id
+           LEFT JOIN restaurants r ON r.id=o.restaurant_id
            WHERE o.status NOT IN ('delivered','cancelled')
            ORDER BY o.id DESC LIMIT 20""").fetchall()
     # drivers online (no earnings, no pay)
