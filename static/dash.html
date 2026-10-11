@@ -16,11 +16,18 @@
 </div>
 
 <div id="app" style="display:none">
-  <div class="tabs">
-    <button class="on" data-t="orders">Orders</button>
+  <div class="tabs" style="flex-wrap:wrap">
+    <button class="on" data-t="home">🏠 Home</button>
+    <button data-t="orders">📦 Orders</button>
     <button data-t="money">💰 Money</button>
     <button data-t="deals">🤝 Deals <span id="dealbadge"></span></button>
-    <button data-t="drv">Drivers <span id="drvbadge"></span></button>
+    <button data-t="drv">🚗 Drivers <span id="drvbadge"></span></button>
+    <button data-t="out">📧 Outreach <span id="outbadge"></span></button>
+    <button data-t="live">⚡ Live</button>
+    <button data-t="bot">🤖 AI Bot</button>
+    <button data-t="more">⋯ More</button>
+  </div>
+  <div class="tabs sub" id="moretabs" style="display:none;flex-wrap:wrap;background:#141419">
     <button data-t="biz">Drop More</button>
     <button data-t="earn">Earnings</button>
     <button data-t="menu">Menu</button>
@@ -29,14 +36,31 @@
     <button data-t="sup">Support <span id="tixbadge"></span></button>
     <button data-t="stats">Stats</button>
     <button data-t="inv">Investors <span id="invbadge"></span></button>
-    <button data-t="out">📧 Outreach <span id="outbadge"></span></button>
-    <button data-t="live">⚡ Live</button>
-    <button data-t="bot">🤖 AI Bot</button>
     <button data-t="audit">Audit</button>
     <button data-t="set">Settings</button>
   </div>
 
-  <div class="tab on" id="t-orders">
+  <div class="tab on" id="t-home">
+    <div class="hero" style="text-align:center;padding:20px 16px">
+      <h1 style="margin:0;font-size:1.8rem">Welcome back, <span style="color:var(--acc)">Ken</span> 👑</h1>
+      <p class="small" id="homedate"></p>
+    </div>
+    <div id="attention"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0" id="homestats"></div>
+    <div class="card">
+      <h3 style="margin-top:0">⚡ Quick actions</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <button class="btn" onclick="goTab('orders')">📦 Orders</button>
+        <button class="btn" onclick="goTab('money')">💰 Money</button>
+        <button class="btn" onclick="goTab('drv')">🚗 Drivers</button>
+        <button class="btn" onclick="goTab('out')">📧 Outreach</button>
+        <button class="btn" onclick="goTab('live')">⚡ Live feed</button>
+        <button class="btn" onclick="goTab('bot')">🤖 Ask AI</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="tab" id="t-orders">
     <div class="card" id="loccard"><div class="row"><span><b>📍 Share my location</b><br>
       <span class="small">While ON, customers watch your car move on their tracking map.</span></span>
       <button class="btn small ghost" id="locToggle" style="width:auto;padding:10px 20px">Start</button></div>
@@ -237,12 +261,47 @@ function beep(){
 }
 function banner(t){const a=$('alert');a.textContent=t;a.style.display='block';setTimeout(()=>a.style.display='none',8000);}
 
+function goTab(t){
+  const btn=document.querySelector(`.tabs button[data-t="${t}"]`);
+  if(btn) btn.click();
+}
 document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
+  if(b.dataset.t==='more'){
+    const m=$('moretabs'); m.style.display=m.style.display==='none'?'flex':'none';
+    b.classList.toggle('on'); return;
+  }
   document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
   b.classList.add('on'); $('t-'+b.dataset.t).classList.add('on');
+  if(b.dataset.t==='home') loadHome();
   if(b.dataset.t==='earn') loadEarn(); if(b.dataset.t==='menu') loadMenu(); if(b.dataset.t==='set') loadSet(); if(b.dataset.t==='sup') loadTix(); if(b.dataset.t==='promo') loadPromos(); if(b.dataset.t==='stats') loadStats(); if(b.dataset.t==='upd') loadProposals(); if(b.dataset.t==='drv') loadDrivers(); if(b.dataset.t==='biz') loadBiz(); if(b.dataset.t==='inv') loadInv(); if(b.dataset.t==='money') loadMoney(); if(b.dataset.t==='deals') loadDeals(); if(b.dataset.t==='audit') loadAudit(); if(b.dataset.t==='out') loadOutreach(); if(b.dataset.t==='live') loadLive(); if(b.dataset.t==='bot'){ loadBot(); loadIdeas(); }
 });
+
+/* ---- Home dashboard ---- */
+async function loadHome(){
+  $('homedate').textContent=new Date().toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'});
+  const s=await(await fetch('/api/operator/command-stats',{headers:H()})).json();
+  const cards=[
+    ['📦','Orders today',s.orders_today,'#ff5a00'],
+    ['💰','Revenue today','$'+(s.revenue_today||0).toFixed(2),'#2ecc71'],
+    ['🛵','Active now',s.active_orders,'#3498db'],
+    ['🍽️','Restaurants',s.restaurants,'#9b59b6'],
+    ['🌍','Cities',s.cities,'#f39c12'],
+    ['🤝','Pending deals',s.pending_partners,'#e74c3c'],
+  ];
+  $('homestats').innerHTML=cards.map(([e,l,v,c])=>`
+    <div class="card" style="text-align:center;border-top:3px solid ${c};margin:0">
+      <div style="font-size:1.8rem">${e}</div>
+      <div style="font-size:1.4rem;font-weight:800">${v}</div>
+      <div class="small">${l}</div>
+    </div>`).join('');
+  // Attention items
+  const attn=[];
+  if(s.pending_partners>0) attn.push(`🤝 <b>${s.pending_partners}</b> partner applications waiting — <a href="#" onclick="goTab('deals');return false">review them</a>`);
+  if(s.active_orders>0) attn.push(`🛵 <b>${s.active_orders}</b> active orders right now — <a href="#" onclick="goTab('orders');return false">view</a>`);
+  if(s.paused) attn.push(`⏸️ Ordering is <b>paused</b> — <a href="#" onclick="goTab('set');return false">resume in Settings</a>`);
+  $('attention').innerHTML=attn.length?`<div class="card" style="border-left:4px solid #ff5a00"><b>👀 Needs your attention</b><br>${attn.join('<br>')}</div>`:'';
+}
 
 async function loadStats(){
   const a=await (await fetch('/api/operator/analytics',{headers:H()})).json();
@@ -263,10 +322,10 @@ $('gobtn').onclick=async()=>{
   if(r.status===401){$('loginmsg').textContent='Wrong PIN.';return;}
   sessionStorage.setItem('droppin',PIN);
   $('login').style.display='none';$('app').style.display='block';
-  loadOrders(true);
+  loadHome();
 };
 PIN=sessionStorage.getItem('droppin')||'';
-if(PIN){$('login').style.display='none';$('app').style.display='block';loadOrders(true);}
+if(PIN){$('login').style.display='none';$('app').style.display='block';loadHome();}
 
 async function loadOrders(first){
   const r=await fetch('/api/operator/orders',{headers:H()});

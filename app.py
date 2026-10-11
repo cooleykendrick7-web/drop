@@ -718,6 +718,30 @@ def nearest_city(lat: float = 0, lng: float = 0):
     return {"detected_city": city, "detected_state": state, "match": match}
 
 
+@app.get("/api/nearby")
+def nearby_restaurants(lat: float = 0, lng: float = 0, radius: float = 50):
+    """Restaurants within `radius` miles of the given GPS point. Foolproof: no coords = empty."""
+    import math
+    if not lat or not lng:
+        return []
+    conn = db()
+    rows = conn.execute("SELECT * FROM restaurants WHERE lat != 0 AND lng != 0").fetchall()
+    out = []
+    for r in rows:
+        d = math.hypot(r["lat"] - lat, r["lng"] - lng) * 69  # degrees -> miles
+        if d <= radius:
+            rd = dict(r)
+            rd["distance_mi"] = round(d, 1)
+            items = conn.execute(
+                "SELECT * FROM menu_items WHERE restaurant_id=? AND available=1 ORDER BY id",
+                (r["id"],)).fetchall()
+            rd["menu"] = [dict(i) for i in items]
+            out.append(rd)
+    conn.close()
+    out.sort(key=lambda x: x["distance_mi"])
+    return out
+
+
 @app.post("/api/spot/suggest")
 async def spot_suggest(req: Request):
     """Customer suggests a restaurant/spot. Deduped, notifies Ken."""
@@ -1780,6 +1804,30 @@ def list_businesses():
     return {"businesses": out, "categories": cats}
 
 
+@app.get("/api/businesses/nearby")
+def nearby_businesses(lat: float = 0, lng: float = 0, radius: float = 50):
+    """Businesses within `radius` miles of GPS point."""
+    import math
+    if not lat or not lng:
+        return {"businesses": [], "categories": []}
+    conn = db()
+    rows = conn.execute("SELECT * FROM businesses WHERE open=1 AND lat != 0").fetchall()
+    out = []
+    for b in rows:
+        d = math.hypot(b["lat"] - lat, b["lng"] - lng) * 69
+        if d <= radius:
+            bd = dict(b)
+            bd["distance_mi"] = round(d, 1)
+            out.append(bd)
+    conn.close()
+    out.sort(key=lambda x: x["distance_mi"])
+    cats = []
+    for b in out:
+        if b["category"] not in cats:
+            cats.append(b["category"])
+    return {"businesses": out, "categories": cats}
+
+
 @app.post("/api/operator/businesses")
 async def op_add_business(req: Request, x_pin: str = Header(default="")):
     check_pin(x_pin)
@@ -2228,17 +2276,29 @@ async def driver_earnings(req: Request):
 
 @app.post("/api/operator/orders/{oid}/assign")
 async def op_assign_order(oid: int, req: Request, x_pin: str = Header(default="")):
-    """Ken assigns an order to a driver (0 = Ken himself)."""
+    """Ken assigns an order to a driver (0 = Ken himself). Enforces 15-mile radius."""
     check_pin(x_pin)
     body = await req.json()
     driver_id = int(body.get("driver_id") or 0)
     conn = db()
     if driver_id:
-        dr = conn.execute("SELECT id, name FROM drivers WHERE id=? AND status='approved'",
+        dr = conn.execute("SELECT id, name, last_lat, last_lng FROM drivers WHERE id=? AND status='approved'",
                           (driver_id,)).fetchone()
         if not dr:
             conn.close()
             raise HTTPException(400, "Driver not found or not approved")
+        # 15-mile radius check: driver must be near the restaurant
+        o = conn.execute("SELECT restaurant_id FROM orders WHERE id=?", (oid,)).fetchone()
+        if o and o["restaurant_id"]:
+            r = conn.execute("SELECT lat, lng, name FROM restaurants WHERE id=?",
+                             (o["restaurant_id"],)).fetchone()
+            if r and r["lat"] and dr["last_lat"]:
+                import math
+                d = math.hypot(r["lat"] - dr["last_lat"], r["lng"] - dr["last_lng"]) * 69
+                if d > 15:
+                    conn.close()
+                    raise HTTPException(400,
+                        f"{dr['name']} is {d:.1f} miles from {r['name']} — outside the 15-mile delivery radius. Assign a closer driver.")
     conn.execute("UPDATE orders SET driver_id=?, updated_at=? WHERE id=?",
                  (driver_id, now_iso(), oid))
     conn.commit()

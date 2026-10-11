@@ -9,7 +9,7 @@
 <link rel="stylesheet" href="/static/styles.css">
 </head><body>
 <header class="topbar">
-  <a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg" alt="Drop"><b>Drop</b><span class="tag">Bismarck</span></a>
+  <a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg" alt="Drop"><b>Drop</b><span class="tag" id="headcity" style="display:none"></span></a>
   <a class="acct" href="/account.html">👤 Account</a>
 </header>
 
@@ -19,6 +19,17 @@
   <p class="tagline" id="tagline">One flat $3.99 fee. Real-time tracking.</p>
   <div style="margin:0 0 14px"><select id="citypick" style="max-width:280px;margin:0 auto;font-weight:700"></select></div>
   <p class="small" id="gpsnote" style="margin:-6px 0 12px"></p>
+  <div class="row" style="justify-content:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+    <button class="btn small ghost" id="usegps" style="width:auto">📍 Use my location</button>
+    <button class="btn small ghost" id="manualcity" style="width:auto">✏️ Enter city manually</button>
+  </div>
+  <div id="manualbox" style="display:none;margin:0 0 12px">
+    <div class="row" style="justify-content:center;gap:6px">
+      <input id="mancity" placeholder="City" style="max-width:140px">
+      <input id="manstate" placeholder="ST" maxlength="2" style="max-width:60px">
+      <button class="btn small" id="mangobtn" style="width:auto">Go</button>
+    </div>
+  </div>
   <a class="cta" href="#restaurants">Order now</a>
   <div class="trust">
     <span class="pill">🔒 Secure checkout</span>
@@ -108,6 +119,7 @@ async function load(){
   const gpsCity = await new Promise(resolve=>{
     if(!navigator.geolocation) return resolve(null);
     navigator.geolocation.getCurrentPosition(async pos=>{
+      window._gps = {lat: pos.coords.latitude, lng: pos.coords.longitude};
       try{
         const nc = await (await fetch(`/api/nearest-city?lat=${pos.coords.latitude}&lng=${pos.coords.longitude}`)).json();
         resolve(nc);
@@ -117,15 +129,64 @@ async function load(){
   if(gpsCity && gpsCity.match){
     cur = `${gpsCity.match.city}|${gpsCity.match.state}`;
     localStorage.setItem('dropcity', cur);
+    const hc = document.getElementById('headcity');
+    hc.textContent = gpsCity.match.city; hc.style.display = '';
     document.getElementById('gpsnote').innerHTML = `📍 You're in <b>${gpsCity.detected_city||gpsCity.match.city}</b> — showing spots near you.`;
   } else if(gpsCity && gpsCity.detected_city){
+    const hc = document.getElementById('headcity');
+    hc.textContent = gpsCity.detected_city; hc.style.display = '';
     document.getElementById('gpsnote').innerHTML = `📍 You're in <b>${gpsCity.detected_city}</b> — Drop isn't there <i>yet</i>. <a href="#suggest">Suggest a spot</a> and we'll come to you.`;
   }
-  pick.value = cur;
-  pick.onchange = ()=>{ localStorage.setItem('dropcity', pick.value); load(); };
+  // Manual city selection also updates the header
+  const _updHead = ()=>{ const hc=document.getElementById('headcity'); const v=(pick.value||'').split('|')[0]; if(v){hc.textContent=v;hc.style.display='';} };
+  pick.value = cur; _updHead();
+  pick.onchange = ()=>{ localStorage.setItem('dropcity', pick.value); _updHead(); load(); };
+  // Manual city entry + Use-my-location button
+  document.getElementById('manualcity').onclick=()=>{
+    const b=document.getElementById('manualbox');
+    b.style.display=b.style.display==='none'?'block':'none';
+  };
+  document.getElementById('mangobtn').onclick=async()=>{
+    const c=document.getElementById('mancity').value.trim();
+    const s=document.getElementById('manstate').value.trim().toUpperCase();
+    if(!c||!s){alert('Enter both city and state (e.g. Atlanta GA)');return;}
+    // Add to picker if it's a Drop city, else just set the label
+    const key=`${c}|${s}`;
+    if(![...pick.options].some(o=>o.value===key)){
+      const opt=document.createElement('option');opt.value=key;opt.textContent=`${c}, ${s}`;
+      pick.appendChild(opt);
+    }
+    pick.value=key; localStorage.setItem('dropcity',key); _updHead(); load();
+    document.getElementById('manualbox').style.display='none';
+  };
+  document.getElementById('usegps').onclick=()=>{
+    if(!navigator.geolocation){alert('GPS not available on this device');return;}
+    document.getElementById('gpsnote').innerHTML='📍 Locating you…';
+    navigator.geolocation.getCurrentPosition(async pos=>{
+      window._gps={lat:pos.coords.latitude,lng:pos.coords.longitude};
+      try{
+        const nc=await(await fetch(`/api/nearest-city?lat=${pos.coords.latitude}&lng=${pos.coords.longitude}`)).json();
+        if(nc.match){
+          const key=`${nc.match.city}|${nc.match.state}`;
+          pick.value=key; localStorage.setItem('dropcity',key); _updHead();
+          document.getElementById('gpsnote').innerHTML=`📍 You're in <b>${nc.detected_city||nc.match.city}</b> — showing spots near you.`;
+        }else if(nc.detected_city){
+          document.getElementById('gpsnote').innerHTML=`📍 You're in <b>${nc.detected_city}</b> — showing spots within 50 miles.`;
+        }
+        load();
+      }catch(e){document.getElementById('gpsnote').innerHTML='Could not detect location.';}
+    },()=>{document.getElementById('gpsnote').innerHTML='Location permission denied.';},{timeout:10000});
+  };
   const [ccity, cstate] = (pick.value||'|').split('|');
-  const r = (await (await fetch('/api/restaurants')).json()).filter(x=>(x.city||'Bismarck')===ccity && (x.state||'ND')===cstate);
-  document.getElementById('count').textContent = r.length + ' spots in ' + ccity;
+  // 50-mile radius when we have GPS, otherwise fall back to city match
+  let r;
+  if(window._gps && window._gps.lat){
+    r = await (await fetch(`/api/nearby?lat=${window._gps.lat}&lng=${window._gps.lng}&radius=50`)).json();
+    document.getElementById('count').textContent = r.length + ' spots within 50 miles';
+  } else {
+    r = (await (await fetch('/api/restaurants')).json()).filter(x=>(x.city||'Bismarck')===ccity && (x.state||'ND')===cstate);
+    document.getElementById('count').textContent = r.length + ' spots in ' + ccity;
+  }
   // one-tap reorder
   let reorder='';
   try{
@@ -133,9 +194,11 @@ async function load(){
     if(last && last.rid){
       const lr=r.find(x=>x.id===last.rid);
       if(lr) reorder=`<a class="card rest" href="/restaurant.html?id=${lr.id}&reorder=1" style="border-color:var(--acc)">
+        ${lr.photo?`<div class="rphoto" style="background-image:url('${lr.photo}')"></div>`:`<div class="rphoto" style="background:linear-gradient(135deg,#ff5a00,#ffaa00);display:flex;align-items:center;justify-content:center;font-size:3rem">🔁</div>`}
+        <div class="rbody">
         <div class="emoji">🔁</div>
         <div class="meta"><b>Order again from ${lr.name}</b><span>Your last order, one tap</span></div>
-        <span class="badge open">REORDER</span></a>`;
+        <span class="badge open">REORDER</span></div></a>`;
     }
   }catch(e){}
   document.getElementById('list').innerHTML = reorder + r.map(x=>`

@@ -60,7 +60,14 @@ const $=id=>document.getElementById(id);
 const ICONS={'Auto Parts':'🔧','Clothing':'👕','Office Supplies':'📎','Hardware':'🔨','Electronics':'🔌','General':'🏬'};
 
 async function load(){
-  const j=await (await fetch('/api/businesses')).json();
+  let url='/api/businesses';
+  if(navigator.geolocation){
+    try{
+      const pos=await new Promise((res,rej)=>navigator.geolocation.getCurrentPosition(res,rej,{timeout:8000}));
+      url=`/api/businesses/nearby?lat=${pos.coords.latitude}&lng=${pos.coords.longitude}&radius=50`;
+    }catch(e){}
+  }
+  const j=await (await fetch(url)).json();
   BIZ=j.businesses; CATS=['All',...j.categories];
   $('cats').innerHTML=CATS.map(c=>`<button class="${c==='All'?'on':''}" onclick="setCat('${c}')">${c}</button>`).join('');
   render();
