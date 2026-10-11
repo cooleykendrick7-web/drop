@@ -3191,6 +3191,84 @@ def search_city(city: str = "", state: str = ""):
                 "restaurants": [], "error": str(e)[:100]}
 
 
+# ---------------- Rides (passenger) quote ----------------
+@app.get("/api/rides/quote")
+def rides_quote(pickup_address: str = "", dropoff_address: str = "",
+                plat: float = None, plng: float = None,
+                dlat: float = None, dlng: float = None):
+    """Passenger ride fare estimate. Geocodes both addresses (or uses
+    provided GPS coords), calculates real driving distance, returns fare."""
+    if not pickup_address or not dropoff_address:
+        raise HTTPException(400, "pickup_address and dropoff_address required")
+
+    # pickup coords: use GPS if provided, else geocode
+    if plat and plng:
+        p_lat, p_lng = plat, plng
+        p_approx = False
+    else:
+        p_lat, p_lng = geocode(pickup_address, {})
+        p_approx = True
+    # dropoff coords
+    if dlat and dlng:
+        d_lat, d_lng = dlat, dlng
+        d_approx = False
+    else:
+        d_lat, d_lng = geocode(dropoff_address, {})
+        d_approx = True
+
+    if not p_lat or not d_lat:
+        raise HTTPException(400,
+            "Couldn't map one of those addresses — check the spelling and try again.")
+
+    miles = driving_miles(p_lat, p_lng, d_lat, d_lng)
+
+    # ride pricing (passenger rides cost more than food delivery)
+    base_fare = fin_setting("ride_base_fare", 4.99)
+    per_mile = fin_setting("ride_per_mile", 2.00)
+    gas_pct = fin_setting("ride_gas_pct", 10.0)
+    max_miles = fin_setting("ride_max_miles", 150.0)
+
+    mileage_charge = round(miles * per_mile, 2)
+    fare = round(base_fare + mileage_charge, 2)
+    gas_fee = round(fare * gas_pct / 100, 2)
+    total = round(fare + gas_fee, 2)
+
+    # driver pay estimate (70% of fare)
+    driver_pay_est = round(fare * 0.70, 2)
+    company_profit_est = round(total - driver_pay_est - gas_fee, 2)
+
+    too_far = miles > max_miles
+    approximate = p_approx or d_approx
+
+    ai_note = ""
+    if company_profit_est >= 3:
+        ai_note = "✅ Good fare — healthy margin."
+    elif company_profit_est >= 1:
+        ai_note = "⚠️ Thin margin on this ride."
+    else:
+        ai_note = "🔴 Below target margin — consider adjusting."
+
+    return {
+        "miles": miles,
+        "base_fare": base_fare,
+        "per_mile": per_mile,
+        "mileage_charge": mileage_charge,
+        "fare": fare,
+        "gas_pct": gas_pct,
+        "gas_fee": gas_fee,
+        "total": total,
+        "driver_pay_est": driver_pay_est,
+        "company_profit_est": company_profit_est,
+        "ai_note": ai_note,
+        "geocoded": True,
+        "too_far": too_far,
+        "max_miles": max_miles,
+        "approximate": approximate,
+        "plat": p_lat, "plng": p_lng,
+        "dlat": d_lat, "dlng": d_lng,
+    }
+
+
 # ---------------- Rides table + full ride flow ----------------
 def init_rides_table():
     conn = db()
@@ -3263,6 +3341,32 @@ async def rides_request(req: Request):
 
     log_event("ride", f"🚗 Ride request #{rid}", f"{name}: {pickup} → {dropoff}")
     return {"ok": True, "order_id": rid, "ride_id": rid, "total": total}
+
+
+@app.get("/api/rides/driver/{driver_id}")
+def driver_rides(driver_id: int, req: Request):
+    """Driver's ride history with earnings."""
+    # verify driver PIN or operator PIN
+    pin = req.headers.get("x-pin", "")
+    conn = db()
+    drv = conn.execute("SELECT * FROM drivers WHERE id=?", (driver_id,)).fetchone()
+    if not drv:
+        conn.close()
+        raise HTTPException(404, "Driver not found")
+    # allow if PIN matches driver PIN or operator PIN
+    if pin != drv["pin"] and pin != get_setting("pin"):
+        conn.close()
+        raise HTTPException(401, "Bad PIN")
+    rides = conn.execute(
+        "SELECT * FROM rides WHERE driver_id=? ORDER BY id DESC LIMIT 50",
+        (driver_id,)).fetchall()
+    total_earned = sum(r["driver_pay"] for r in rides if r["status"] == "completed")
+    conn.close()
+    return {
+        "rides": [dict(r) for r in rides],
+        "total_earned": round(total_earned, 2),
+        "ride_count": len([r for r in rides if r["status"] == "completed"]),
+    }
 
 
 @app.get("/api/rides/{ride_id}")
@@ -3342,31 +3446,6 @@ async def complete_ride(ride_id: int, req: Request, x_pin: str = Header(default=
     return {"ok": True}
 
 
-@app.get("/api/rides/driver/{driver_id}")
-def driver_rides(driver_id: int, req: Request):
-    """Driver's ride history with earnings."""
-    # verify driver PIN or operator PIN
-    pin = req.headers.get("x-pin", "")
-    conn = db()
-    drv = conn.execute("SELECT * FROM drivers WHERE id=?", (driver_id,)).fetchone()
-    if not drv:
-        conn.close()
-        raise HTTPException(404, "Driver not found")
-    # allow if PIN matches driver PIN or operator PIN
-    if pin != drv["pin"] and pin != get_setting("pin"):
-        conn.close()
-        raise HTTPException(401, "Bad PIN")
-    rides = conn.execute(
-        "SELECT * FROM rides WHERE driver_id=? ORDER BY id DESC LIMIT 50",
-        (driver_id,)).fetchall()
-    total_earned = sum(r["driver_pay"] for r in rides if r["status"] == "completed")
-    conn.close()
-    return {
-        "rides": [dict(r) for r in rides],
-        "total_earned": round(total_earned, 2),
-        "ride_count": len([r for r in rides if r["status"] == "completed"]),
-    }
-
 
 @app.get("/api/operator/rides")
 def operator_rides(req: Request, x_pin: str = Header(default="")):
@@ -3407,84 +3486,6 @@ async def assign_ride_driver(ride_id: int, req: Request, x_pin: str = Header(def
         pass
     log_event("ride", f"👨‍✈️ Driver {drv['name']} assigned to ride #{ride_id}", "")
     return {"ok": True}
-
-
-# ---------------- Rides (passenger) quote ----------------
-@app.get("/api/rides/quote")
-def rides_quote(pickup_address: str = "", dropoff_address: str = "",
-                plat: float = None, plng: float = None,
-                dlat: float = None, dlng: float = None):
-    """Passenger ride fare estimate. Geocodes both addresses (or uses
-    provided GPS coords), calculates real driving distance, returns fare."""
-    if not pickup_address or not dropoff_address:
-        raise HTTPException(400, "pickup_address and dropoff_address required")
-
-    # pickup coords: use GPS if provided, else geocode
-    if plat and plng:
-        p_lat, p_lng = plat, plng
-        p_approx = False
-    else:
-        p_lat, p_lng = geocode(pickup_address, {})
-        p_approx = True
-    # dropoff coords
-    if dlat and dlng:
-        d_lat, d_lng = dlat, dlng
-        d_approx = False
-    else:
-        d_lat, d_lng = geocode(dropoff_address, {})
-        d_approx = True
-
-    if not p_lat or not d_lat:
-        raise HTTPException(400,
-            "Couldn't map one of those addresses — check the spelling and try again.")
-
-    miles = driving_miles(p_lat, p_lng, d_lat, d_lng)
-
-    # ride pricing (passenger rides cost more than food delivery)
-    base_fare = fin_setting("ride_base_fare", 4.99)
-    per_mile = fin_setting("ride_per_mile", 2.00)
-    gas_pct = fin_setting("ride_gas_pct", 10.0)
-    max_miles = fin_setting("ride_max_miles", 150.0)
-
-    mileage_charge = round(miles * per_mile, 2)
-    fare = round(base_fare + mileage_charge, 2)
-    gas_fee = round(fare * gas_pct / 100, 2)
-    total = round(fare + gas_fee, 2)
-
-    # driver pay estimate (70% of fare)
-    driver_pay_est = round(fare * 0.70, 2)
-    company_profit_est = round(total - driver_pay_est - gas_fee, 2)
-
-    too_far = miles > max_miles
-    approximate = p_approx or d_approx
-
-    ai_note = ""
-    if company_profit_est >= 3:
-        ai_note = "✅ Good fare — healthy margin."
-    elif company_profit_est >= 1:
-        ai_note = "⚠️ Thin margin on this ride."
-    else:
-        ai_note = "🔴 Below target margin — consider adjusting."
-
-    return {
-        "miles": miles,
-        "base_fare": base_fare,
-        "per_mile": per_mile,
-        "mileage_charge": mileage_charge,
-        "fare": fare,
-        "gas_pct": gas_pct,
-        "gas_fee": gas_fee,
-        "total": total,
-        "driver_pay_est": driver_pay_est,
-        "company_profit_est": company_profit_est,
-        "ai_note": ai_note,
-        "geocoded": True,
-        "too_far": too_far,
-        "max_miles": max_miles,
-        "approximate": approximate,
-        "plat": p_lat, "plng": p_lng,
-        "dlat": d_lat, "dlng": d_lng,
-    }
 
 
 # ---------------- Dropper AI assistant ----------------
