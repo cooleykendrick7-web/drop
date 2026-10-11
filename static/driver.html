@@ -1,0 +1,140 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Dropper Portal — Drive for Drop</title>
+<link rel="icon" href="/static/logo-mark.jpg">
+<link rel="stylesheet" href="/static/styles.css">
+<style>.tabs{display:flex;gap:6px;margin:10px 0}.tabs button{flex:1;background:#2a2a33;color:#fff;border:0;border-radius:10px;padding:11px 4px;font-weight:700}.tabs button.on{background:var(--acc)}.tab{display:none}.tab.on{display:block}</style>
+</head><body>
+<header class="topbar"><a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg" alt="Drop"><b>Drop</b><span class="tag">dropper</span></a><span class="small" id="dname"></span></header>
+
+<div id="login" class="card">
+  <h1>Dropper login</h1>
+  <p class="small">Approved drivers only. <a href="/drive.html">Apply here</a> if you haven't yet.</p>
+  <label>Phone</label><input id="phone" inputmode="tel" placeholder="(555) 123-4567">
+  <label>Password</label><input id="pass" type="password" placeholder="Your password">
+  <button class="btn" id="gobtn">Log in</button>
+  <p class="small" id="loginmsg"></p>
+</div>
+
+<div id="app" style="display:none">
+  <div class="card" id="loccard"><div class="row"><span><b>📍 Share my location</b><br>
+    <span class="small">While ON, customers watch your car on their tracking map.</span></span>
+    <button class="btn small ghost" id="locToggle" style="width:auto;padding:10px 20px">Start</button></div>
+    <p class="small" id="locmsg"></p></div>
+
+  <div class="tabs">
+    <button class="on" data-t="del">Deliveries</button>
+    <button data-t="earn">Earnings</button>
+    <button data-t="me">Profile</button>
+  </div>
+
+  <div class="tab on" id="t-del"><div id="olist"><p class="small">Loading…</p></div></div>
+
+  <div class="tab" id="t-earn">
+    <div class="card"><h2 style="margin:0">Your earnings</h2>
+      <div class="total" id="etotal">$0.00</div>
+      <p class="small" id="ecount"></p></div>
+  </div>
+
+  <div class="tab" id="t-me">
+    <div class="card"><h2 style="margin:0" id="mname"></h2>
+      <p class="small" id="mstats"></p>
+      <p class="small" id="mvehicle"></p>
+      <button class="btn small ghost" id="logout">Log out</button></div>
+    <div class="card"><h3>Need help?</h3>
+      <p class="small">Message Drop support anytime from the 💬 chat bubble — we typically reply fast.</p></div>
+  </div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const NEXT={picked_up:'on_the_way',on_the_way:'delivered'};
+const NEXTLBL={on_the_way:'🛵 On the way',delivered:'📦 Delivered'};
+
+document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
+  b.classList.add('on'); $('t-'+b.dataset.t).classList.add('on');
+  if(b.dataset.t==='earn') loadEarn(); if(b.dataset.t==='me') loadMe();
+});
+
+$('gobtn').onclick=async()=>{
+  const r=await fetch('/api/drivers/login',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({phone:$('phone').value,password:$('pass').value})});
+  const j=await r.json();
+  if(!r.ok){$('loginmsg').textContent=j.detail||'Login failed.';return;}
+  $('login').style.display='none';$('app').style.display='block';
+  $('dname').textContent='· '+j.name;
+  loadOrders();
+};
+$('logout').onclick=async()=>{
+  await fetch('/api/drivers/logout',{method:'POST'});
+  location.reload();
+};
+
+async function loadOrders(){
+  const r=await fetch('/api/drivers/orders');
+  if(r.status===401){location.reload();return;}
+  const orders=await r.json();
+  $('olist').innerHTML='<h2>My deliveries ('+orders.length+')</h2>'+(orders.map(o=>{
+    const restDest=o.plat?`${o.plat},${o.plng}`:encodeURIComponent(o.pickup_addr||'');
+    const custDest=o.cust_lat?`${o.cust_lat},${o.cust_lng}`:encodeURIComponent(o.address||'');
+    return `<div class="card order">
+      <div class="row"><b>#${o.id} · ${o.kind==='courier'?'📦 Courier':'🍔 Food'}</b>
+        <span class="badge">${o.status_label}</span></div>
+      <p><b>Pick up:</b> ${o.pickup_label}<br><span class="small">📍 ${o.pickup_addr||''}</span></p>
+      ${o.kind==='courier'?`<p><b>Items:</b> ${o.items.map(i=>i.name).join(', ')}</p>`:o.items.map(i=>`<div class="row small"><span>${i.qty}× ${i.name}</span></div>`).join('')}
+      <p><b>Deliver to:</b> ${o.customer_name} · <a href="tel:${o.phone}">${o.phone}</a><br>
+        <span class="small">🏠 ${o.address}</span>${o.notes?`<br><span class="small">📝 ${o.notes}</span>`:''}</p>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <a class="btn small" href="https://www.google.com/maps/dir/?api=1&destination=${restDest}" target="_blank" style="flex:1;text-decoration:none;text-align:center">🧭 To pickup</a>
+        <a class="btn small" href="https://www.google.com/maps/dir/?api=1&destination=${custDest}" target="_blank" style="flex:1;text-decoration:none;text-align:center">🏠 To customer</a>
+      </div>
+      <div style="margin-top:8px">
+        ${NEXT[o.status]?`<button class="btn small" onclick="setStatus(${o.id},'${NEXT[o.status]}')">${NEXTLBL[NEXT[o.status]]}</button>`:''}
+        ${o.status==='confirmed'?`<button class="btn small" onclick="setStatus(${o.id},'picked_up')">🛍️ Picked up</button>`:''}
+      </div>
+    </div>`;
+  }).join('')||'<p class="small">No deliveries assigned right now. New orders will appear here.</p>');
+}
+async function setStatus(id,s){
+  await fetch('/api/drivers/orders/'+id+'/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:s})});
+  if(s==='on_the_way'&&!locWatch) $('locToggle').click();
+  loadOrders();
+}
+async function loadEarn(){
+  const e=await (await fetch('/api/drivers/earnings')).json();
+  $('etotal').textContent='$'+e.total.toFixed(2);
+  $('ecount').textContent=e.deliveries+' deliveries · $'+e.fees.toFixed(2)+' fees + $'+e.tips.toFixed(2)+' tips';
+}
+async function loadMe(){
+  const m=await (await fetch('/api/drivers/me')).json();
+  $('mname').textContent=m.name;
+  $('mstats').innerHTML=`⭐ On-time rate: <b>${m.on_time_rate}%</b> · ${m.deliveries} deliveries`;
+  $('mvehicle').textContent=`${m.vehicle_year} ${m.vehicle_make} ${m.vehicle_model} ${m.vehicle_color}`.trim();
+}
+
+// GPS sharing
+let locWatch=null, lastPost=0;
+$('locToggle').onclick=()=>{
+  if(locWatch){
+    navigator.geolocation.clearWatch(locWatch); locWatch=null;
+    $('locToggle').textContent='Start'; $('locToggle').classList.add('ghost');
+    $('loccard').style.border=''; $('locmsg').textContent=''; return;
+  }
+  if(!navigator.geolocation){$('locmsg').textContent='GPS not available.';return;}
+  $('locmsg').textContent='Sharing… keep this page open while you deliver.';
+  $('locToggle').textContent='Stop'; $('locToggle').classList.remove('ghost');
+  $('loccard').style.border='2px solid var(--ok)';
+  locWatch=navigator.geolocation.watchPosition(p=>{
+    const now=Date.now(); if(now-lastPost<15000) return; lastPost=now;
+    fetch('/api/drivers/location',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({lat:p.coords.latitude,lng:p.coords.longitude})}).catch(()=>{});
+    $('locmsg').textContent='📍 Live — updated '+new Date().toLocaleTimeString();
+  },()=>{$('locmsg').textContent='GPS blocked — allow location for this site.';},
+  {enableHighAccuracy:true,maximumAge:10000,timeout:20000});
+};
+
+setInterval(()=>{ if($('app').style.display!=='none') loadOrders(); },10000);
+</script>
+<script src="/static/chat.js"></script></body></html>

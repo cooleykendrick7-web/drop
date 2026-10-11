@@ -1,0 +1,127 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Drop More — We pick it up for you | Bismarck, ND</title>
+<link rel="icon" href="/static/logo-mark.jpg">
+<link rel="stylesheet" href="/static/styles.css">
+<style>
+.catbar{display:flex;gap:8px;overflow-x:auto;padding:10px 0;position:sticky;top:0}
+.catbar button{flex:0 0 auto;background:#1c1c22;color:#fff;border:1px solid var(--line);border-radius:20px;padding:8px 16px;font-weight:700}
+.catbar button.on{background:var(--acc);border-color:var(--acc)}
+.bizcard{display:flex;gap:12px;align-items:center}
+.bizcard .ico{font-size:32px}
+.pickupform input,.pickupform textarea,.pickupform select{width:100%;margin:6px 0}
+</style>
+</head><body>
+<header class="topbar"><a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg" alt="Drop"><b>Drop</b><span class="tag">More</span></a><a class="acct" href="/account.html">👤 Account</a></header>
+
+<div class="hero" style="text-align:center;padding:28px 16px">
+  <h1 style="margin:0">Drop <span style="color:var(--acc)">More</span></h1>
+  <p class="sub">Auto parts, clothing, supplies, documents — we pick it up, we drop it off.<br>Bismarck's courier for local business.</p>
+</div>
+
+<div class="catbar" id="cats"></div>
+<div id="blist"></div>
+
+<div class="card" id="reqcard" style="display:none">
+  <h2>📦 Request a pickup</h2>
+  <div class="pickupform">
+    <label>Pickup from</label>
+    <input id="p-biz" readonly>
+    <div class="row"><button class="btn small ghost" id="p-custom" style="width:auto">Or enter a custom pickup spot</button></div>
+    <div id="custompick" style="display:none">
+      <input id="p-name" placeholder="Store / business name">
+      <input id="p-addr" placeholder="Pickup address">
+    </div>
+    <label>What should we pick up?</label>
+    <textarea id="p-items" rows="3" placeholder="e.g. 2x Duralast Gold brake pads, front — or 'blue dress shirt, size L'"></textarea>
+    <label>Estimated item cost ($) <span class="small">— what you think it'll cost at the store</span></label>
+    <input id="p-est" inputmode="decimal" placeholder="0.00">
+    <label>Your name</label><input id="p-cname" placeholder="Full name">
+    <label>Phone</label><input id="p-phone" placeholder="(555) 123-4567" inputmode="tel">
+    <label>Deliver to</label><input id="p-daddr" placeholder="Delivery address">
+    <label>Notes <span class="small">(optional)</span></label><textarea id="p-notes" rows="2" placeholder="Gate code, suite number, etc."></textarea>
+    <label>Tip your driver <span class="small">(100% goes to your driver)</span></label>
+    <div class="row" id="tips">
+      <button class="btn small ghost tipb" data-v="0">$0</button>
+      <button class="btn small ghost tipb" data-v="1">$1</button>
+      <button class="btn small ghost tipb on" data-v="2">$2</button>
+      <button class="btn small ghost tipb" data-v="5">$5</button>
+      <input id="p-tipc" inputmode="decimal" placeholder="Custom" style="max-width:90px">
+    </div>
+    <button class="btn" id="p-submit">Request pickup →</button>
+    <p class="small" id="p-msg"></p>
+    <p class="small">How it works: you request → we confirm the pickup &amp; total → you pay securely → we grab it and drop it at your door. Delivery fee <b>$3.99</b>.</p>
+  </div>
+</div>
+
+<script>
+let BIZ=[], CATS=[], curCat='All', curBiz=null, tip=2;
+const $=id=>document.getElementById(id);
+const ICONS={'Auto Parts':'🔧','Clothing':'👕','Office Supplies':'📎','Hardware':'🔨','Electronics':'🔌','General':'🏬'};
+
+async function load(){
+  const j=await (await fetch('/api/businesses')).json();
+  BIZ=j.businesses; CATS=['All',...j.categories];
+  $('cats').innerHTML=CATS.map(c=>`<button class="${c==='All'?'on':''}" onclick="setCat('${c}')">${c}</button>`).join('');
+  render();
+}
+function setCat(c){curCat=c;document.querySelectorAll('#cats button').forEach(b=>b.classList.toggle('on',b.textContent===c));render();}
+function render(){
+  const list=BIZ.filter(b=>curCat==='All'||b.category===curCat);
+  $('blist').innerHTML=list.map(b=>`
+    <div class="card"><div class="bizcard">
+      <div class="ico">${ICONS[b.category]||'🏪'}</div>
+      <div style="flex:1"><b>${b.name}</b><br>
+        <span class="small">${b.category} · 📍 ${b.address||'Bismarck, ND'}</span>
+        ${b.phone?`<br><a class="small" href="tel:${b.phone}">${b.phone}</a>`:''}</div>
+      <button class="btn small" onclick="pick(${b.id})">Pick up →</button>
+    </div></div>`).join('')||'<p class="small">No businesses in this category yet.</p>';
+}
+function pick(id){
+  curBiz=BIZ.find(b=>b.id===id);
+  $('p-biz').value=curBiz.name+' — '+curBiz.address;
+  $('custompick').style.display='none';
+  $('reqcard').style.display='block';
+  $('reqcard').scrollIntoView({behavior:'smooth'});
+  $('p-msg').textContent='';
+}
+$('p-custom').onclick=()=>{
+  curBiz=null;
+  $('p-biz').value='Custom pickup location (fill below)';
+  $('custompick').style.display='block';
+};
+document.querySelectorAll('.tipb').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.tipb').forEach(x=>x.classList.remove('on'));
+  b.classList.add('on'); tip=parseFloat(b.dataset.v); $('p-tipc').value='';
+});
+$('p-tipc').oninput=e=>{
+  document.querySelectorAll('.tipb').forEach(x=>x.classList.remove('on'));
+  tip=parseFloat(e.target.value)||0;
+};
+$('p-submit').onclick=async()=>{
+  const custom=!curBiz;
+  const body={
+    business_id: curBiz?curBiz.id:0,
+    pickup_name: custom?$('p-name').value.trim():'',
+    pickup_address: custom?$('p-addr').value.trim():'',
+    item_desc: $('p-items').value.trim(),
+    est_total: parseFloat($('p-est').value)||0,
+    tip,
+    customer:{name:$('p-cname').value.trim(),phone:$('p-phone').value.trim(),
+              address:$('p-daddr').value.trim(),notes:$('p-notes').value.trim()},
+  };
+  if(!body.item_desc||!body.customer.name||!body.customer.phone||!body.customer.address){
+    $('p-msg').textContent='Please fill in items, name, phone, and delivery address.';return;
+  }
+  if(custom&&(!body.pickup_name||!body.pickup_address)){
+    $('p-msg').textContent='Please enter the pickup store name and address.';return;
+  }
+  $('p-msg').textContent='Sending…';
+  const r=await fetch('/api/courier-orders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const j=await r.json();
+  if(r.ok){ location.href='/checkout.html?order_id='+j.order_id+'&courier=1'; }
+  else $('p-msg').textContent='Error: '+(j.detail||'could not send request');
+};
+load();
+</script>
+<script src="/static/chat.js"></script></body></html>

@@ -18,12 +18,15 @@
 <div id="app" style="display:none">
   <div class="tabs">
     <button class="on" data-t="orders">Orders</button>
+    <button data-t="drv">Drivers <span id="drvbadge"></span></button>
+    <button data-t="biz">Drop More</button>
     <button data-t="earn">Earnings</button>
     <button data-t="menu">Menu</button>
     <button data-t="promo">Promos</button>
     <button data-t="upd">Updates <span id="updbadge"></span></button>
     <button data-t="sup">Support <span id="tixbadge"></span></button>
     <button data-t="stats">Stats</button>
+    <button data-t="inv">Investors <span id="invbadge"></span></button>
     <button data-t="set">Settings</button>
   </div>
 
@@ -33,6 +36,26 @@
       <button class="btn small ghost" id="locToggle" style="width:auto;padding:10px 20px">Start</button></div>
       <p class="small" id="locmsg"></p></div>
     <div id="olist"></div>
+  </div>
+
+  <div class="tab" id="t-drv">
+    <div class="card"><b>🚗 Dropper applications</b>
+      <p class="small">Nobody drives without your approval. Review each application, then <b>Approve</b> or <b>Deny</b>.</p></div>
+    <h3>Pending review <span id="drvpend"></span></h3>
+    <div id="drvlist"></div>
+    <h3>Active drivers</h3>
+    <div id="drvactive"></div>
+  </div>
+
+  <div class="tab" id="t-biz">
+    <div class="card"><b>📦 Drop More businesses</b>
+      <p class="small">Auto parts, clothing, supplies — the pickup points for courier orders.</p></div>
+    <div id="bizlist"></div>
+    <div class="card"><h3>Add business</h3>
+      <input id="bname" placeholder="Name"><input id="bcat" placeholder="Category (Auto Parts, Clothing, …)">
+      <input id="baddr" placeholder="Street address, Bismarck, ND">
+      <input id="bphone" placeholder="Phone"><input id="bweb" placeholder="Website URL">
+      <button class="btn" id="addbiz">Add business</button></div>
   </div>
 
   <div class="tab" id="t-earn">
@@ -76,6 +99,12 @@
     <div class="card"><h2 style="margin:0">Last 14 days</h2>
       <p class="small" id="statsum">Loading…</p>
       <div id="statbars"></div></div>
+  </div>
+
+  <div class="tab" id="t-inv">
+    <div class="card"><b>💰 Investor interest</b>
+      <p class="small">People who want to invest in Drop. Reach out personally — investment paperwork needs a lawyer.</p></div>
+    <div id="invlist"></div>
   </div>
 
   <div class="tab" id="t-set">
@@ -126,7 +155,7 @@ document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
   b.classList.add('on'); $('t-'+b.dataset.t).classList.add('on');
-  if(b.dataset.t==='earn') loadEarn(); if(b.dataset.t==='menu') loadMenu(); if(b.dataset.t==='set') loadSet(); if(b.dataset.t==='sup') loadTix(); if(b.dataset.t==='promo') loadPromos(); if(b.dataset.t==='stats') loadStats(); if(b.dataset.t==='upd') loadProposals();
+  if(b.dataset.t==='earn') loadEarn(); if(b.dataset.t==='menu') loadMenu(); if(b.dataset.t==='set') loadSet(); if(b.dataset.t==='sup') loadTix(); if(b.dataset.t==='promo') loadPromos(); if(b.dataset.t==='stats') loadStats(); if(b.dataset.t==='upd') loadProposals(); if(b.dataset.t==='drv') loadDrivers(); if(b.dataset.t==='biz') loadBiz(); if(b.dataset.t==='inv') loadInv();
 });
 
 async function loadStats(){
@@ -177,7 +206,7 @@ async function loadOrders(first){
       📍 ${o.address}${o.notes?`<br>📝 ${o.notes}`:''}</p>
       ${o.items.map(i=>`<div class="row small"><span>${i.qty}× ${i.name}</span><span>$${i.line.toFixed(2)}</span></div>`).join('')}
       <div class="row"><span class="small">Food $${o.food_total.toFixed(2)} + fee $${o.delivery_fee.toFixed(2)}${o.tip?` + tip $${o.tip.toFixed(2)}`:''}${o.discount?` − disc $${o.discount.toFixed(2)}`:''}</span><b>$${o.total.toFixed(2)}</b></div>
-      <div class="small">${o.paid?'💰 Paid ✓':'⚠️ NOT PAID'} · ${new Date(o.created_at).toLocaleString()}</div>
+      <div class="small">${o.paid?'💰 Paid ✓':'⚠️ NOT PAID'} · ${o.driver_name?`🚗 ${o.driver_name}`:'🚗 Ken'} · ${new Date(o.created_at).toLocaleString()}</div>
       ${active?`<div style="display:flex;gap:8px;margin-top:10px">
         <a class="btn small" href="https://www.google.com/maps/dir/?api=1&destination=${restDest}" target="_blank" style="flex:1;text-decoration:none;text-align:center">🧭 To restaurant</a>
         <a class="btn small" href="https://www.google.com/maps/dir/?api=1&destination=${custDest}" target="_blank" style="flex:1;text-decoration:none;text-align:center">🏠 To customer</a>
@@ -185,6 +214,7 @@ async function loadOrders(first){
       <div style="margin-top:8px">
         ${NEXT[o.status]?`<button class="btn small" onclick="setStatus(${o.id},'${NEXT[o.status]}')">${NEXTLBL[NEXT[o.status]]}</button>`:''}
         ${active?`<button class="btn small ghost" onclick="setStatus(${o.id},'cancelled')">Cancel</button>`:''}
+        ${active?`<button class="btn small ghost" onclick="assignDriver(${o.id})">🚗 Assign driver</button>`:''}
       </div>
     </div>`;};
   $('olist').innerHTML = '<h2>Active ('+open.length+')</h2>'+(open.map((o,i)=>card(o,i)).join('')||'<p class="small">None right now.</p>')
@@ -196,6 +226,26 @@ async function setStatus(id,s){
     // one tap: customer starts seeing Ken drive to them
     $('locToggle').click();
   }
+  loadOrders();
+}
+let DRIVERS=[];
+async function assignDriver(oid){
+  DRIVERS=await (await fetch('/api/operator/drivers?status=approved',{headers:H()})).json();
+  const box=document.createElement('div');
+  box.className='card'; box.style.marginTop='8px';
+  box.innerHTML=`<b>Assign order #${oid}</b><div class="row" style="margin-top:8px">
+    <select id="as-${oid}" style="flex:1;margin-right:6px">
+      <option value="0">Ken (me)</option>
+      ${DRIVERS.map(d=>`<option value="${d.id}">${d.name} (⭐${d.deliveries?Math.round(100*d.on_time/d.deliveries):100}%, ${d.deliveries} deliveries)</option>`).join('')}
+    </select>
+    <button class="btn small" onclick="doAssign(${oid})">Assign</button></div>`;
+  const cards=document.querySelectorAll('.card.order');
+  const card=[...cards].find(c=>c.innerHTML.includes(`assignDriver(${oid})`));
+  if(card){ card.appendChild(box); box.querySelector('button').onclick=()=>doAssign(oid); }
+}
+async function doAssign(oid){
+  const did=parseInt(document.getElementById('as-'+oid).value);
+  await fetch('/api/operator/orders/'+oid+'/assign',{method:'POST',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({driver_id:did})});
   loadOrders();
 }
 async function loadEarn(){
@@ -396,5 +446,74 @@ async function aiSuggest(id){
 async function resolveTix(id){
   await fetch('/api/operator/tickets/'+id+'/resolve',{method:'POST',headers:H()});
   loadTix();
+}
+
+/* --- Drivers: approve / deny --- */
+async function loadDrivers(){
+  const d=await (await fetch('/api/operator/drivers',{headers:H()})).json();
+  const pend=d.filter(x=>x.status==='pending'), act=d.filter(x=>x.status==='approved');
+  $('drvbadge').textContent=pend.length?`(${pend.length})`:'';
+  $('drvpend').textContent=pend.length?`(${pend.length})`:'';
+  const esc=s=>(s||'').replace(/</g,'&lt;');
+  $('drvlist').innerHTML=pend.map(x=>`
+    <div class="card order new">
+      <div class="row"><b>#${x.id} — ${esc(x.name)}</b><span class="badge">PENDING</span></div>
+      <p class="small">📞 <a href="tel:${esc(x.phone)}">${esc(x.phone)}</a> ${x.email?`· ✉️ ${esc(x.email)}`:''}<br>
+      🪪 ${esc(x.license_number)} (${esc(x.license_state)}) · 🛡️ ${esc(x.insurance)||'—'}<br>
+      🚗 ${esc(x.vehicle_year)} ${esc(x.vehicle_make)} ${esc(x.vehicle_model)} ${esc(x.vehicle_color)}<br>
+      🕐 ${esc(x.availability)||'—'}<br>💼 ${esc(x.experience)||'—'}</p>
+      <div class="row"><button class="btn small" onclick="drvAct(${x.id},'approve')">✅ Approve</button>
+      <button class="btn small ghost" onclick="drvAct(${x.id},'deny')">❌ Deny</button></div>
+    </div>`).join('')||'<p class="small">No pending applications.</p>';
+  $('drvactive').innerHTML=act.map(x=>{
+    const rate=x.deliveries?Math.round(100*x.on_time/x.deliveries):100;
+    return `<div class="card"><div class="row"><b>${esc(x.name)}</b>
+      <span class="badge open">⭐ ${rate}% · ${x.deliveries} deliveries</span></div>
+      <p class="small">📞 ${esc(x.phone)} · 🚗 ${esc(x.vehicle_year)} ${esc(x.vehicle_make)} ${esc(x.vehicle_model)}</p>
+      <button class="btn small ghost" onclick="drvAct(${x.id},'suspend')">⏸ Suspend</button></div>`;
+  }).join('')||'<p class="small">No active drivers yet.</p>';
+}
+async function drvAct(id,act){
+  if(act==='deny'&&!confirm('Deny this application?'))return;
+  if(act==='suspend'&&!confirm('Suspend this driver?'))return;
+  await fetch(`/api/operator/drivers/${id}/${act}`,{method:'POST',headers:H()});
+  loadDrivers();
+}
+
+/* --- Drop More businesses --- */
+async function loadBiz(){
+  const j=await (await fetch('/api/businesses')).json();
+  const esc=s=>(s||'').replace(/</g,'&lt;');
+  $('bizlist').innerHTML=j.businesses.map(b=>`
+    <div class="card"><div class="row"><b>${esc(b.name)}</b>
+      <span class="badge">${esc(b.category)}</span></div>
+      <p class="small">📍 ${esc(b.address)}${b.phone?` · 📞 ${esc(b.phone)}`:''}</p>
+      <button class="btn small ghost" onclick="delBiz(${b.id})">Delete</button></div>`).join('')
+    ||'<p class="small">No businesses yet.</p>';
+}
+$('addbiz').onclick=async()=>{
+  const body={name:$('bname').value.trim(),category:$('bcat').value.trim(),
+    address:$('baddr').value.trim(),phone:$('bphone').value.trim(),website:$('bweb').value.trim()};
+  if(!body.name)return;
+  await fetch('/api/operator/businesses',{method:'POST',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify(body)});
+  $('bname').value=$('bcat').value=$('baddr').value=$('bphone').value=$('bweb').value='';
+  loadBiz();
+};
+async function delBiz(id){
+  if(!confirm('Delete this business?'))return;
+  await fetch('/api/operator/businesses/'+id,{method:'DELETE',headers:H()});
+  loadBiz();
+}
+
+/* --- Investor leads --- */
+async function loadInv(){
+  const l=await (await fetch('/api/operator/investor-leads',{headers:H()})).json();
+  $('invbadge').textContent=l.length?`(${l.length})`:'';
+  const esc=s=>(s||'').replace(/</g,'&lt;');
+  $('invlist').innerHTML=l.map(x=>`
+    <div class="card"><div class="row"><b>${esc(x.name)}</b><span class="badge open">${esc(x.amount_range)||'—'}</span></div>
+      <p class="small">✉️ <a href="mailto:${esc(x.email)}">${esc(x.email)}</a>${x.phone?` · 📞 <a href="tel:${esc(x.phone)}">${esc(x.phone)}</a>`:''} · ${x.created_at.slice(0,10)}</p>
+      ${x.message?`<p class="small">“${esc(x.message)}”</p>`:''}</div>`).join('')
+    ||'<p class="small">No investor interest yet.</p>';
 }
 </script></body></html>

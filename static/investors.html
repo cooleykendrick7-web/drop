@@ -1,0 +1,91 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Invest in Drop — Bismarck's Delivery Company</title>
+<link rel="icon" href="/static/logo-mark.jpg">
+<link rel="stylesheet" href="/static/styles.css">
+<style>.statgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:16px 0}
+.stat{background:#141419;border:1px solid var(--line);border-radius:14px;padding:16px;text-align:center}
+.stat b{font-size:1.6rem;color:var(--acc);display:block}
+.invform input,.invform textarea,.invform select{width:100%;margin:6px 0}
+.invform label{font-weight:700;margin-top:10px;display:block}</style>
+</head><body>
+<header class="topbar"><a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg" alt="Drop"><b>Drop</b><span class="tag">investors</span></a></header>
+
+<div class="hero" style="text-align:center;padding:32px 16px">
+  <img class="logo-full" src="/static/logo.jpg" alt="Drop" style="width:min(180px,50vw);border-radius:20px">
+  <h1 style="margin:12px 0 4px">Invest in <span style="color:var(--acc)">Drop</span></h1>
+  <p class="sub">Bismarck's own delivery company — food today, everything local tomorrow.<br>
+  Pick up · Deliver · Done.</p>
+</div>
+
+<div class="card">
+  <h2>The opportunity</h2>
+  <p>National delivery apps take up to <b>30% from restaurants</b> and treat drivers as disposable. Drop is built different:</p>
+  <p class="small">🧡 <b>Local-first:</b> built in Bismarck, for Bismarck — real relationships with local businesses.<br>
+  📦 <b>Drop More:</b> expanding beyond food into auto parts, clothing, supplies, and documents — recurring B2B courier revenue.<br>
+  🚗 <b>Droppers:</b> our own driver team with real support, keeping 100% of tips.<br>
+  🤖 <b>AI-powered:</b> self-updating menus, live GPS tracking, automated marketing.<br>
+  💰 <b>Lean:</b> no corporate overhead — every dollar goes into growth.</p>
+</div>
+
+<div class="card">
+  <h2>By the numbers</h2>
+  <div class="statgrid">
+    <div class="stat"><b id="s-rest">–</b><span class="small">Restaurants</span></div>
+    <div class="stat"><b id="s-biz">–</b><span class="small">Drop More businesses</span></div>
+    <div class="stat"><b id="s-orders">–</b><span class="small">Orders delivered</span></div>
+    <div class="stat"><b>$3.99</b><span class="small">Flat delivery fee</span></div>
+  </div>
+  <p class="small">Live numbers, pulled straight from the platform.</p>
+</div>
+
+<div class="card">
+  <h2>Where investment goes</h2>
+  <p class="small">🚗 <b>Driver team</b> — recruiting and onboarding Droppers across Bismarck<br>
+  📣 <b>Marketing</b> — AI-driven local advertising to win customers from the national apps<br>
+  🏪 <b>Business partnerships</b> — signing local stores to Drop More courier contracts<br>
+  💻 <b>Technology</b> — mobile apps, smarter dispatch, more automation</p>
+</div>
+
+<div class="card invform">
+  <h2>Express interest</h2>
+  <p class="small">Tell us a little about yourself and we'll reach out with details. This is not an offer to sell securities — any investment would be structured properly with legal counsel.</p>
+  <label>Full name *</label><input id="i-name" placeholder="Jane Investor">
+  <div class="row"><div style="flex:1"><label>Email *</label><input id="i-email" inputmode="email" placeholder="you@email.com"></div>
+  <div style="flex:1"><label>Phone</label><input id="i-phone" inputmode="tel" placeholder="(555) 123-4567"></div></div>
+  <label>Investment range</label>
+  <select id="i-amt">
+    <option value="">Prefer not to say</option>
+    <option>Under $1,000</option><option>$1,000 – $5,000</option>
+    <option>$5,000 – $25,000</option><option>$25,000+</option>
+  </select>
+  <label>Message <span class="small">(optional)</span></label>
+  <textarea id="i-msg" rows="3" placeholder="What interests you about Drop?"></textarea>
+  <button class="btn" id="i-submit">I'm interested →</button>
+  <p class="small" id="i-status"></p>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+(async()=>{
+  try{
+    const r=await (await fetch('/api/restaurants')).json();
+    $('s-rest').textContent=r.length;
+    const b=await (await fetch('/api/businesses')).json();
+    $('s-biz').textContent=b.businesses.length;
+    // orders count is operator-only; show a growing placeholder
+    $('s-orders').textContent='Growing';
+  }catch(e){}
+})();
+$('i-submit').onclick=async()=>{
+  const body={name:$('i-name').value.trim(),email:$('i-email').value.trim(),
+    phone:$('i-phone').value.trim(),amount_range:$('i-amt').value,
+    message:$('i-msg').value.trim()};
+  if(!body.name||!body.email.includes('@')){$('i-status').textContent='Name and a valid email are required.';return;}
+  $('i-status').textContent='Sending…';
+  const r=await fetch('/api/investors/interest',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(r.ok){$('i-status').textContent='✅ Thanks! We\'ll be in touch soon.';$('i-name').value='';$('i-email').value='';$('i-phone').value='';$('i-msg').value='';}
+  else $('i-status').textContent='Something went wrong — please try again.';
+};
+</script>
+<script src="/static/chat.js"></script></body></html>

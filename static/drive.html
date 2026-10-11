@@ -1,0 +1,79 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Drive for Drop — Now Hiring in Bismarck, ND</title>
+<link rel="icon" href="/static/logo-mark.jpg">
+<link rel="stylesheet" href="/static/styles.css">
+<style>.appform input,.appform textarea,.appform select{width:100%;margin:6px 0}
+.appform label{font-weight:700;margin-top:10px;display:block}
+.chk{display:flex;gap:10px;align-items:flex-start;margin:12px 0}
+.chk input{width:auto;margin-top:4px}</style>
+</head><body>
+<header class="topbar"><a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg" alt="Drop"><b>Drop</b></a></header>
+
+<div class="hero" style="text-align:center;padding:28px 16px">
+  <h1 style="margin:0">Drive for <span style="color:var(--acc)">Drop</span> 🚗</h1>
+  <p class="sub">Bismarck's own delivery team — <b>Droppers</b>.<br>
+  Keep 100% of your tips. Get paid per delivery. Work when you want.</p>
+</div>
+
+<div class="card">
+  <h2>What you need</h2>
+  <p class="small">✅ Valid driver's license &nbsp; ✅ Insured vehicle &nbsp; ✅ 18 or older<br>
+  ✅ Smartphone with GPS &nbsp; ✅ Pass a background check</p>
+</div>
+
+<div class="card appform" id="appform">
+  <h2>Driver application</h2>
+  <label>Full name *</label><input id="d-name" placeholder="Jane Doe">
+  <div class="row"><div style="flex:1"><label>Phone *</label><input id="d-phone" inputmode="tel" placeholder="(555) 123-4567"></div>
+  <div style="flex:1"><label>Email</label><input id="d-email" inputmode="email" placeholder="you@email.com"></div></div>
+  <label>Create a password * <span class="small">(6+ characters — for your driver portal)</span></label>
+  <input id="d-pass" type="password" placeholder="Choose a password">
+  <div class="row"><div style="flex:2"><label>Driver's license number *</label><input id="d-lic" placeholder="License #"></div>
+  <div style="flex:1"><label>State *</label><input id="d-licst" placeholder="ND" maxlength="4"></div></div>
+  <label>Auto insurance <span class="small">(company + policy #, or "will provide")</span></label>
+  <input id="d-ins" placeholder="e.g. State Farm, policy #12345">
+  <h3>Your vehicle</h3>
+  <div class="row">
+    <div style="flex:1"><label>Make</label><input id="d-make" placeholder="Honda"></div>
+    <div style="flex:1"><label>Model</label><input id="d-model" placeholder="Civic"></div>
+  </div>
+  <div class="row">
+    <div style="flex:1"><label>Year</label><input id="d-year" inputmode="numeric" placeholder="2019"></div>
+    <div style="flex:1"><label>Color</label><input id="d-color" placeholder="Blue"></div>
+  </div>
+  <label>Availability <span class="small">(days / hours you can drive)</span></label>
+  <input id="d-avail" placeholder="e.g. Weekdays 11am–8pm, weekends">
+  <label>Delivery experience <span class="small">(optional)</span></label>
+  <textarea id="d-exp" rows="2" placeholder="Any delivery or driving experience?"></textarea>
+  <div class="chk"><input type="checkbox" id="d-bg">
+    <span class="small">I consent to a background check and confirm I'm 18 or older with a valid license and insured vehicle. *</span></div>
+  <button class="btn" id="d-submit">Submit application →</button>
+  <p class="small" id="d-msg"></p>
+  <p class="small">What happens next: our team reviews every application personally. If approved, you'll get access to your own <b>Dropper portal</b> with your deliveries, GPS navigation, earnings, and support chat.</p>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+$('d-submit').onclick=async()=>{
+  const body={name:$('d-name').value.trim(),phone:$('d-phone').value.trim(),
+    email:$('d-email').value.trim(),password:$('d-pass').value,
+    license_number:$('d-lic').value.trim(),license_state:$('d-licst').value.trim(),
+    insurance:$('d-ins').value.trim(),vehicle_make:$('d-make').value.trim(),
+    vehicle_model:$('d-model').value.trim(),vehicle_year:$('d-year').value.trim(),
+    vehicle_color:$('d-color').value.trim(),availability:$('d-avail').value.trim(),
+    experience:$('d-exp').value.trim(),background_consent:$('d-bg').checked};
+  if(!body.name||!body.phone||body.password.length<6){$('d-msg').textContent='Name, phone, and a 6+ character password are required.';return;}
+  if(!body.license_number||!body.license_state){$('d-msg').textContent="Please add your driver's license info.";return;}
+  if(!body.background_consent){$('d-msg').textContent='Background check consent is required.';return;}
+  $('d-msg').textContent='Submitting…';
+  const r=await fetch('/api/drivers/apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const j=await r.json();
+  if(r.ok){
+    $('appform').innerHTML=`<h2>✅ Application received!</h2>
+      <p>Thanks, ${body.name.split(' ')[0]} — we'll review your application and reach out at <b>${body.phone}</b> once you're approved. Then you'll get your Dropper portal login.</p>
+      <p class="small">Application #${j.id}</p>`;
+  } else $('d-msg').textContent='Error: '+(j.detail||'could not submit');
+};
+</script>
+<script src="/static/chat.js"></script></body></html>
