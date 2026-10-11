@@ -226,6 +226,30 @@ def init_db():
         driver_appeal TEXT DEFAULT '',
         resolution TEXT DEFAULT '', decided_by TEXT DEFAULT '',
         created_at TEXT NOT NULL, resolved_at TEXT DEFAULT '')""")
+    # Business accounts (Drop More B2B)
+    c.execute("""CREATE TABLE IF NOT EXISTS business_accounts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        business_name TEXT NOT NULL, contact_name TEXT NOT NULL,
+        email TEXT NOT NULL UNIQUE, phone TEXT NOT NULL,
+        password_hash TEXT NOT NULL,
+        address TEXT DEFAULT '', city TEXT DEFAULT '', state TEXT DEFAULT '',
+        total_orders INTEGER DEFAULT 0, total_spent REAL DEFAULT 0,
+        discount_tier TEXT DEFAULT 'standard',
+        created_at TEXT NOT NULL)""")
+    # Driver ratings (start at 100%, customers rate down/up)
+    c.execute("""CREATE TABLE IF NOT EXISTS driver_ratings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        driver_id INTEGER NOT NULL, order_id INTEGER NOT NULL,
+        rating INTEGER NOT NULL, comment TEXT DEFAULT '',
+        customer_name TEXT DEFAULT '',
+        created_at TEXT NOT NULL)""")
+    # User profiles (customers)
+    c.execute("""CREATE TABLE IF NOT EXISTS user_profiles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        phone TEXT UNIQUE NOT NULL, name TEXT DEFAULT '',
+        email TEXT DEFAULT '', photo TEXT DEFAULT '',
+        password_hash TEXT DEFAULT '',
+        created_at TEXT NOT NULL)""")
     # WATCH portal comments
     c.execute("""CREATE TABLE IF NOT EXISTS watch_comments (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2509,6 +2533,189 @@ def order_photos(oid: int):
         " WHERE order_id=? ORDER BY id", (oid,)).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+# ---------------- Business accounts (Drop More B2B) ----------------
+@app.post("/api/business/register")
+async def business_register(req: Request):
+    import hashlib
+    body = await req.json()
+    name = (body.get("business_name") or "").strip()[:100]
+    contact = (body.get("contact_name") or "").strip()[:80]
+    email = (body.get("email") or "").strip().lower()[:120]
+    phone = (body.get("phone") or "").strip()[:30]
+    pw = body.get("password") or ""
+    if not all([name, contact, email, phone, pw]):
+        raise HTTPException(400, "All fields required")
+    if len(pw) < 6:
+        raise HTTPException(400, "Password must be 6+ characters")
+    conn = db()
+    if conn.execute("SELECT id FROM business_accounts WHERE email=?", (email,)).fetchone():
+        conn.close()
+        raise HTTPException(400, "Email already registered")
+    ph = hashlib.sha256(pw.encode()).hexdigest()
+    cur = conn.execute(
+        "INSERT INTO business_accounts(business_name, contact_name, email, phone, password_hash, created_at)"
+        " VALUES(?,?,?,?,?,?)",
+        (name, contact, email, phone, ph, now_iso()))
+    bid = cur.lastrowid
+    conn.commit()
+    conn.close()
+    log_event("business", f"🏢 New business: {name}", contact)
+    return {"ok": True, "id": bid}
+
+
+@app.post("/api/business/login")
+async def business_login(req: Request):
+    import hashlib
+    body = await req.json()
+    email = (body.get("email") or "").strip().lower()
+    pw = body.get("password") or ""
+    conn = db()
+    b = conn.execute("SELECT * FROM business_accounts WHERE email=?", (email,)).fetchone()
+    conn.close()
+    if not b or b["password_hash"] != hashlib.sha256(pw.encode()).hexdigest():
+        raise HTTPException(401, "Invalid login")
+    return {"ok": True, "id": b["id"], "business_name": b["business_name"],
+            "discount_tier": b["discount_tier"]}
+
+
+def _biz_price(miles: float, tier: str = "standard") -> dict:
+    """$1.50/mile base, discounts for volume."""
+    base = round(miles * 1.50, 2)
+    discount = 0
+    if tier == "gold":
+        discount = round(base * 0.15, 2)  # 15% off
+    elif tier == "silver":
+        discount = round(base * 0.10, 2)  # 10% off
+    return {"miles": round(miles, 1), "base": base, "discount": discount,
+            "total": round(base - discount, 2), "tier": tier}
+
+
+@app.post("/api/business/quote")
+async def business_quote(req: Request):
+    """Price a pickup/dropoff by distance."""
+    import math
+    body = await req.json()
+    plat, plng = float(body.get("plat") or 0), float(body.get("plng") or 0)
+    dlat, dlng = float(body.get("dlat") or 0), float(body.get("dlng") or 0)
+    tier = (body.get("tier") or "standard").strip()
+    if not all([plat, plng, dlat, dlng]):
+        raise HTTPException(400, "Pickup and dropoff coordinates required")
+    miles = math.hypot(dlat - plat, dlng - plng) * 69
+    return _biz_price(miles, tier)
+
+
+# ---------------- Driver ratings ----------------
+@app.post("/api/drivers/rate")
+async def driver_rate(req: Request):
+    """Customer rates driver 1-5 + comment. Drivers start at 100% (5.0)."""
+    body = await req.json()
+    driver_id = int(body.get("driver_id") or 0)
+    order_id = int(body.get("order_id") or 0)
+    rating = int(body.get("rating") or 0)
+    comment = (body.get("comment") or "").strip()[:500]
+    customer = (body.get("customer_name") or "").strip()[:80]
+    if not driver_id or not order_id or rating < 1 or rating > 5:
+        raise HTTPException(400, "driver_id, order_id, rating 1-5 required")
+    conn = db()
+    # Prevent duplicate rating for same order
+    if conn.execute("SELECT id FROM driver_ratings WHERE order_id=?",
+                    (order_id,)).fetchone():
+        conn.close()
+        raise HTTPException(400, "Already rated")
+    conn.execute(
+        "INSERT INTO driver_ratings(driver_id, order_id, rating, comment, customer_name, created_at)"
+        " VALUES(?,?,?,?,?,?)",
+        (driver_id, order_id, rating, comment, customer, now_iso()))
+    # Recalculate driver rating (weighted: start at 5.0)
+    ratings = conn.execute(
+        "SELECT rating FROM driver_ratings WHERE driver_id=?", (driver_id,)).fetchall()
+    # Start at 100% (5.0), blend with actual ratings
+    total = 5.0 * 3  # 3 "perfect" starter ratings
+    count = 3
+    for r in ratings:
+        total += r["rating"]
+        count += 1
+    new_rating = round(total / count, 2)
+    conn.execute("UPDATE drivers SET rating=?, rating_count=? WHERE id=?",
+                 (new_rating, len(ratings), driver_id))
+    conn.commit()
+    conn.close()
+    log_event("rating", f"⭐ Driver #{driver_id} rated {rating}/5",
+              f"New avg: {new_rating}")
+    return {"ok": True, "new_rating": new_rating}
+
+
+@app.get("/api/operator/driver-ratings/{did}")
+def op_driver_ratings(did: int, x_pin: str = Header(default="")):
+    """Ken sees all ratings + comments for a driver."""
+    check_pin(x_pin)
+    conn = db()
+    rows = conn.execute(
+        "SELECT * FROM driver_ratings WHERE driver_id=? ORDER BY id DESC",
+        (did,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+# ---------------- User profiles ----------------
+@app.post("/api/user/profile")
+async def user_profile_upsert(req: Request):
+    """Create/update customer profile: name, email, phone, photo, password."""
+    import hashlib
+    body = await req.json()
+    phone = (body.get("phone") or "").strip()[:30]
+    if not phone:
+        raise HTTPException(400, "Phone required")
+    conn = db()
+    existing = conn.execute("SELECT * FROM user_profiles WHERE phone=?", (phone,)).fetchone()
+    ph = ""
+    if body.get("password"):
+        ph = hashlib.sha256(body["password"].encode()).hexdigest()
+    if existing:
+        conn.execute(
+            "UPDATE user_profiles SET name=?, email=?, photo=?,"
+            " password_hash=CASE WHEN ?='' THEN password_hash ELSE ? END WHERE phone=?",
+            (body.get("name", existing["name"])[:80],
+             body.get("email", existing["email"])[:120],
+             body.get("photo", existing["photo"])[:500],
+             ph, ph, phone))
+    else:
+        conn.execute(
+            "INSERT INTO user_profiles(phone, name, email, photo, password_hash, created_at)"
+            " VALUES(?,?,?,?,?,?)",
+            (phone, body.get("name", "")[:80], body.get("email", "")[:120],
+             body.get("photo", "")[:500], ph, now_iso()))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.get("/api/user/profile")
+def user_profile_get(phone: str = ""):
+    conn = db()
+    r = conn.execute("SELECT phone, name, email, photo FROM user_profiles WHERE phone=?",
+                     (phone,)).fetchone()
+    conn.close()
+    return dict(r) if r else {}
+
+
+@app.get("/api/operator/users")
+def op_users(x_pin: str = Header(default=""), q: str = ""):
+    """Ken sees all user profiles, can click to contact."""
+    check_pin(x_pin)
+    conn = db()
+    if q:
+        rows = conn.execute(
+            "SELECT * FROM user_profiles WHERE phone LIKE ? OR name LIKE ? OR email LIKE ?"
+            " ORDER BY id DESC LIMIT 50",
+            (f"%{q}%", f"%{q}%", f"%{q}%")).fetchall()
+    else:
+        rows = conn.execute("SELECT * FROM user_profiles ORDER BY id DESC LIMIT 50").fetchall()
+    conn.close()
+    # Don't expose password hashes
+    return [{k: v for k, v in dict(r).items() if k != "password_hash"} for r in rows]
 
 
 # ---------------- Driver food receipts + reimbursement ----------------
