@@ -161,6 +161,13 @@ def init_db():
         detail TEXT DEFAULT '', source_url TEXT DEFAULT '',
         status TEXT NOT NULL DEFAULT 'pending',
         created_at TEXT NOT NULL)""")
+    # support ticket replies (added 2026-10-10)
+    c.execute("""CREATE TABLE IF NOT EXISTS ticket_replies (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ticket_id INTEGER NOT NULL REFERENCES support_tickets(id) ON DELETE CASCADE,
+        sender TEXT NOT NULL DEFAULT 'customer',
+        message TEXT NOT NULL,
+        created_at TEXT NOT NULL)""")
     defaults = {
         "delivery_fee": "3.99",
         "pin": "1234",
@@ -1229,6 +1236,154 @@ def op_resolve_ticket(tid: int, x_pin: str = Header(default="")):
     conn.commit()
     conn.close()
     return {"ok": True}
+
+
+def ticket_thread(tid):
+    """Full thread: original message + replies, oldest first."""
+    conn = db()
+    t = conn.execute("SELECT * FROM support_tickets WHERE id=?", (tid,)).fetchone()
+    if not t:
+        conn.close()
+        return None
+    msgs = [{"sender": "customer", "message": t["message"], "created_at": t["created_at"]}]
+    for r in conn.execute(
+            "SELECT sender, message, created_at FROM ticket_replies"
+            " WHERE ticket_id=? ORDER BY id", (tid,)).fetchall():
+        msgs.append(dict(r))
+    conn.close()
+    return {"id": t["id"], "name": t["name"], "order_id": t["order_id"],
+            "status": t["status"], "messages": msgs}
+
+
+@app.get("/api/support/thread/{tid}")
+def support_thread(tid: int, phone: str = ""):
+    """Customer views their ticket thread. Phone must match the ticket."""
+    th = ticket_thread(tid)
+    if not th:
+        raise HTTPException(404, "Ticket not found")
+    conn = db()
+    row = conn.execute("SELECT phone FROM support_tickets WHERE id=?", (tid,)).fetchone()
+    conn.close()
+    if (row["phone"] or "") != (phone or "").strip():
+        raise HTTPException(403, "Phone doesn't match this ticket")
+    return th
+
+
+@app.post("/api/support/reply")
+async def support_reply(req: Request):
+    """Customer replies on their ticket."""
+    body = await req.json()
+    try:
+        tid = int(body.get("ticket_id") or 0)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Bad ticket")
+    phone = (body.get("phone") or "").strip()
+    message = (body.get("message") or "").strip()[:2000]
+    if not message:
+        raise HTTPException(400, "Message required")
+    conn = db()
+    row = conn.execute("SELECT phone FROM support_tickets WHERE id=?", (tid,)).fetchone()
+    if not row or (row["phone"] or "") != phone:
+        conn.close()
+        raise HTTPException(403, "Phone doesn't match this ticket")
+    conn.execute("INSERT INTO ticket_replies(ticket_id, sender, message, created_at)"
+                 " VALUES(?, 'customer', ?, ?)", (tid, message, now_iso()))
+    conn.execute("UPDATE support_tickets SET status='open' WHERE id=?", (tid,))
+    conn.commit()
+    conn.close()
+    # nudge Ken
+    try:
+        topic = get_setting("ntfy_topic").strip()
+        if topic:
+            msg = f"💬 SUPPORT REPLY #{tid}\n{message[:200]}"
+            req2 = urllib.request.Request(
+                f"https://ntfy.sh/{urllib.parse.quote(topic)}",
+                data=msg.encode(), headers={"Title": "Drop support reply"}, method="POST")
+            threading.Thread(
+                target=lambda: urllib.request.urlopen(req2, timeout=5).read(),
+                daemon=True).start()
+    except Exception:
+        pass
+    return {"ok": True}
+
+
+@app.get("/api/operator/tickets/{tid}/thread")
+def op_ticket_thread(tid: int, x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    th = ticket_thread(tid)
+    if not th:
+        raise HTTPException(404, "Ticket not found")
+    return th
+
+
+@app.post("/api/operator/tickets/{tid}/reply")
+async def op_ticket_reply(tid: int, req: Request, x_pin: str = Header(default="")):
+    """Ken replies to the customer."""
+    check_pin(x_pin)
+    body = await req.json()
+    message = (body.get("message") or "").strip()[:2000]
+    if not message:
+        raise HTTPException(400, "Message required")
+    conn = db()
+    t = conn.execute("SELECT id FROM support_tickets WHERE id=?", (tid,)).fetchone()
+    if not t:
+        conn.close()
+        raise HTTPException(404, "Ticket not found")
+    conn.execute("INSERT INTO ticket_replies(ticket_id, sender, message, created_at)"
+                 " VALUES(?, 'operator', ?, ?)", (tid, message, now_iso()))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.post("/api/operator/tickets/{tid}/suggest")
+def op_ticket_suggest(tid: int, x_pin: str = Header(default="")):
+    """AI assist: drafts a reply from the ticket text + live order context.
+    Ken reviews/edits before sending — the draft never goes out on its own."""
+    check_pin(x_pin)
+    conn = db()
+    t = conn.execute("SELECT * FROM support_tickets WHERE id=?", (tid,)).fetchone()
+    if not t:
+        conn.close()
+        raise HTTPException(404, "Ticket not found")
+    last_customer = t["message"]
+    r = conn.execute("SELECT sender, message FROM ticket_replies WHERE ticket_id=?"
+                     " AND sender='customer' ORDER BY id DESC LIMIT 1", (tid,)).fetchone()
+    if r:
+        last_customer = r["message"]
+    order = None
+    if t["order_id"]:
+        order = conn.execute("SELECT * FROM orders WHERE id=?", (t["order_id"],)).fetchone()
+    conn.close()
+    text = (t["message"] + " " + last_customer).lower()
+    name = (t["name"] or "there").split()[0]
+    draft = ""
+    if order:
+        od = order_dict(order)
+        items = ", ".join(f"{i['qty']}x {i['name']}" for i in od["items"])
+        if any(k in text for k in ("where", "late", "long", "status", "arrive", "track")):
+            draft = (f"Hi {name}! Your order #{od['id']} is currently: {od['status_label']}. "
+                     f"You ordered {items}. You can watch it live on your tracking page — "
+                     f"it refreshes every few seconds. Thanks for your patience!")
+        elif any(k in text for k in ("refund", "wrong", "missing", "cold", "bad", "mistake")):
+            draft = (f"Hi {name}, I'm sorry about that. I've got your order #{od['id']} "
+                     f"({items}) pulled up and I'm looking into it right now. "
+                     f"I'll make it right — give me a few minutes.")
+        elif any(k in text for k in ("cancel",)):
+            draft = (f"Hi {name}, I can cancel order #{od['id']} for you. "
+                     f"If it's already paid, you'll be refunded automatically. "
+                     f"Just confirm and I'll take care of it.")
+    if not draft:
+        if any(k in text for k in ("refund", "wrong", "missing", "cold", "bad", "late")):
+            draft = (f"Hi {name}, sorry to hear that — I'm looking into it right now "
+                     f"and I'll make it right. Can you share your order number if you have it?")
+        elif any(k in text for k in ("fee", "cost", "charge", "price")):
+            draft = (f"Hi {name}! Delivery is a flat $3.99 — no surge pricing, no hidden fees. "
+                     f"What can I help you with?")
+        else:
+            draft = (f"Hi {name}, thanks for reaching out! I've got your message "
+                     f"and I'm on it — I'll get back to you shortly.")
+    return {"draft": draft}
 
 
 @app.post("/api/operator/restaurants")
