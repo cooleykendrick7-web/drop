@@ -53,12 +53,18 @@ async function geocode(addr){
   }catch(e){return null;}
 }
 
+let acF=null, acT=null;
+attachAutocomplete($('from'), p=>{acF=p;});
+attachAutocomplete($('to'), p=>{acT=p;});
 $('quote').onclick=async()=>{
   const from=$('from').value.trim(), to=$('to').value.trim();
   if(!from||!to){$('msg').textContent='Enter both addresses first.';return;}
   $('price').textContent='Calculating real road distance…';
   try{
-    const q=await(await fetch(`/api/pickup/quote?pickup_address=${encodeURIComponent(from)}&delivery_address=${encodeURIComponent(to)}`)).json();
+    let url=`/api/pickup/quote?pickup_address=${encodeURIComponent(from)}&delivery_address=${encodeURIComponent(to)}`;
+    if(acF) url+=`&plat=${acF.lat}&plng=${acF.lng}`;
+    if(acT) url+=`&dlat=${acT.lat}&dlng=${acT.lng}`;
+    const q=await(await fetch(url)).json();
     if(q.detail) throw new Error(q.detail);
     quoted=q.fee+q.gas_fee;
     $('price').textContent=`$${quoted.toFixed(2)} (${q.miles} road mi · fee $${q.fee.toFixed(2)} + ⛽ $${q.gas_fee.toFixed(2)})`;
@@ -100,5 +106,6 @@ $('go').onclick=async()=>{
     $('go').disabled=false; $('go').textContent='Request Drop →';
   }
 };
-</script><script src="/static/drop-live.js"></script>
+</script><script src="/static/autocomplete.js"></script>
+<script src="/static/drop-live.js"></script>
 </body></html>

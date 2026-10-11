@@ -83,7 +83,9 @@ function updateTotals(){
   $('qtotal').textContent='$'+(fee+gas+tip).toFixed(2);
 }
 
-let gpsDl=null;
+let gpsDl=null, acR=null, acD=null;
+attachAutocomplete($('raddr'), p=>{acR=p;});
+attachAutocomplete($('daddr'), p=>{acD=p;});
 $('dloc').onclick=()=>{
   if(!navigator.geolocation){alert('Location not available — type the address instead.');return;}
   $('dloc').textContent='…';
@@ -102,7 +104,11 @@ $('quote').onclick=async()=>{
   if(!from||!to){$('msg').textContent='Enter the restaurant address and your delivery address first.';return;}
   $('qnote').textContent='Calculating real road distance…';
   try{
-    const q=await(await fetch(`/api/pickup/quote?pickup_address=${encodeURIComponent(from)}&delivery_address=${encodeURIComponent(to)}`)).json();
+    let url=`/api/pickup/quote?pickup_address=${encodeURIComponent(from)}&delivery_address=${encodeURIComponent(to)}`;
+    const pc=acR, dc=acD||(gpsDl?{lat:gpsDl.lat,lng:gpsDl.lng}:null);
+    if(pc) url+=`&plat=${pc.lat}&plng=${pc.lng}`;
+    if(dc) url+=`&dlat=${dc.lat}&dlng=${dc.lng}`;
+    const q=await(await fetch(url)).json();
     if(q.detail) throw new Error(q.detail);
     gasPct=q.gas_pct; $('gaspct').textContent=gasPct;
     quotedMiles=q.miles; quotedFee=q.fee; quotedGas=q.gas_fee;
@@ -123,6 +129,8 @@ $('go').onclick=async()=>{
     customer_name:$('cname').value.trim(),
     phone:$('cphone').value.trim(),
     tip:tip,
+    ...((acR)?{pickup_lat:acR.lat, pickup_lng:acR.lng}:{}),
+    ...((acD||gpsDl)?{delivery_lat:(acD||gpsDl).lat, delivery_lng:(acD||gpsDl).lng}:{}),
   };
   if(!body.restaurant||!body.pickup_address||!body.delivery_address||!body.customer_name){
     $('msg').textContent='Please fill in the restaurant, both addresses, and your name.';return;
@@ -145,5 +153,6 @@ $('go').onclick=async()=>{
   }
 };
 </script>
+<script src="/static/autocomplete.js"></script>
 <script src="/static/drop-live.js"></script>
 </body></html>

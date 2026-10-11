@@ -7200,6 +7200,54 @@ def ride_fare_quote(pickup_addr, dropoff_addr, plat=None, plng=None, dlat=None, 
             "plat": plat, "plng": plng, "dlat": dlat, "dlng": dlng}
 
 
+_ac_cache = {}
+
+@app.get("/api/places/autocomplete")
+def places_autocomplete(q: str = ""):
+    """Type-ahead address suggestions for every address field on the site.
+    Proxied server-side (Photon has no CORS); cached 1hr. Returns
+    label + exact coords so picking a suggestion skips geocoding entirely."""
+    q = (q or "").strip()[:100]
+    if len(q) < 3:
+        return {"suggestions": []}
+    import time
+    now = time.time()
+    hit = _ac_cache.get(q.lower())
+    if hit and now - hit[1] < 3600:
+        return {"suggestions": hit[0]}
+    suggestions = []
+    try:
+        import urllib.request, urllib.parse, json
+        url = f"https://photon.komoot.io/api/?q={urllib.parse.quote(q)}&limit=6"
+        rq = urllib.request.Request(url, headers={"User-Agent": "DropApp/1.0"})
+        data = json.loads(urllib.request.urlopen(rq, timeout=8).read())
+        for f in (data.get("features") or [])[:6]:
+            p = f.get("properties", {})
+            lng, lat = f["geometry"]["coordinates"]
+            parts = []
+            hn, st = p.get("housenumber"), p.get("street")
+            if hn and st:
+                parts.append(f"{hn} {st}")
+            elif st:
+                parts.append(st)
+            elif p.get("name"):
+                parts.append(p["name"])
+            city = p.get("city") or p.get("town") or p.get("village")
+            if city:
+                parts.append(city)
+            if p.get("state"):
+                parts.append(p["state"])
+            if p.get("postcode"):
+                parts.append(p["postcode"])
+            label = ", ".join(parts)
+            if label and not any(s["label"] == label for s in suggestions):
+                suggestions.append({"label": label, "lat": float(lat), "lng": float(lng)})
+    except Exception:
+        pass
+    _ac_cache[q.lower()] = (suggestions, now)
+    return {"suggestions": suggestions}
+
+
 @app.get("/api/rides/quote")
 def rides_quote(pickup_address: str = "", dropoff_address: str = "",
                 plat: float = None, plng: float = None,
@@ -7466,13 +7514,29 @@ def op_ride_wait_charge(rid: int, x_pin: str = Header(default="")):
 
 
 @app.get("/api/pickup/quote")
-def pickup_quote(pickup_address: str = "", delivery_address: str = ""):
+def pickup_quote(pickup_address: str = "", delivery_address: str = "",
+                 plat: float = None, plng: float = None,
+                 dlat: float = None, dlng: float = None):
     """Server-side exact quote: real road miles + fee + gas. The frontend
-    calls this so the displayed price always matches what the server charges."""
-    if not pickup_address.strip() or not delivery_address.strip():
-        raise HTTPException(400, "Both addresses are required")
-    plat, plng, p_prec = _geocode(pickup_address.strip()[:200])
-    dlat, dlng, d_prec = _geocode(delivery_address.strip()[:200])
+    calls this so the displayed price always matches what the server charges.
+    Accepts raw coords (autocomplete pick / GPS) to skip geocoding."""
+    def _f(v):
+        try:
+            return float(v) if v not in (None, "") else None
+        except (TypeError, ValueError):
+            return None
+    plat, plng, dlat, dlng = _f(plat), _f(plng), _f(dlat), _f(dlng)
+    approx = False
+    if plat is None:
+        if not pickup_address.strip():
+            raise HTTPException(400, "Both addresses are required")
+        plat, plng, p_prec = _geocode(pickup_address.strip()[:200])
+        approx = p_prec == "approximate"
+    if dlat is None:
+        if not delivery_address.strip():
+            raise HTTPException(400, "Both addresses are required")
+        dlat, dlng, d_prec = _geocode(delivery_address.strip()[:200])
+        approx = approx or d_prec == "approximate"
     approx = p_prec == "approximate" or d_prec == "approximate"
     if not all([plat, plng, dlat, dlng]):
         raise HTTPException(400, "Couldn't map one of those addresses — check the spelling and try again.")
@@ -7503,9 +7567,17 @@ async def pickup_request(req: Request):
         tip = 0.0
     if not restaurant or not pickup_addr or not delivery_addr or not name:
         raise HTTPException(400, "Restaurant, both addresses, and your name are required")
-    # Geocode both addresses (hardened: fallbacks + city-level) for distance-based fee
-    plat, plng, _ = _geocode(pickup_addr)
-    dlat, dlng, _ = _geocode(delivery_addr)
+    # Coords (autocomplete/GPS) win; otherwise geocode (hardened: fallbacks + city-level)
+    def _g(v):
+        try:
+            return float(v) if v not in (None, "") else None
+        except (TypeError, ValueError):
+            return None
+    plat, plng, dlat, dlng = _g(body.get("pickup_lat")), _g(body.get("pickup_lng")), _g(body.get("delivery_lat")), _g(body.get("delivery_lng"))
+    if plat is None:
+        plat, plng, _ = _geocode(pickup_addr)
+    if dlat is None:
+        dlat, dlng, _ = _geocode(delivery_addr)
     # Fee: base + $1.50/mile (same smart pricing as courier)
     base_fee = float(get_setting("delivery_fee") or 3.99)
     miles = driving_miles(plat, plng, dlat, dlng)

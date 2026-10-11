@@ -66,6 +66,8 @@ async function geocode(addr){
   }catch(e){return null;}
 }
 
+let acD=null;
+attachAutocomplete($('daddr'), p=>{acD=p;});
 function updateTotals(){
   $('qfee').textContent='$'+quotedFee.toFixed(2);
   $('qgas').textContent='$'+quotedGas.toFixed(2);
@@ -93,7 +95,9 @@ $('quote').onclick=async()=>{
   $('qnote').textContent='Calculating real road distance…';
   const from=`${rest.address||''} ${rest.city||''} ${rest.state||''}`.trim();
   try{
-    const q=await(await fetch(`/api/pickup/quote?pickup_address=${encodeURIComponent(from)}&delivery_address=${encodeURIComponent(to)}`)).json();
+    let url=`/api/pickup/quote?pickup_address=${encodeURIComponent(from)}&delivery_address=${encodeURIComponent(to)}`;
+    if(acD) url+=`&dlat=${acD.lat}&dlng=${acD.lng}`;
+    const q=await(await fetch(url)).json();
     if(q.detail) throw new Error(q.detail);
     quotedFee=q.fee; quotedGas=q.gas_fee;
     $('qnote').textContent=`${q.miles} road miles from ${rest.name} to you.`;
@@ -176,4 +180,5 @@ async function loadReviews(){
 }
 load();
 </script>
+<script src="/static/autocomplete.js"></script>
 <script src="/static/chat.js"></script></body></html>

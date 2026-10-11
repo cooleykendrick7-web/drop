@@ -145,6 +145,7 @@ async function useMyLocation(inputId, key){
     done=true; clearTimeout(timer);
     const lat=pos.coords.latitude, lng=pos.coords.longitude;
     gps[key]={lat,lng};
+    if(key==='cFrom') ac.cFrom=null; if(key==='bFrom') ac.bFrom=null;
     try{
       const r=await(await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`,{headers:{'User-Agent':'DropApp'}})).json();
       document.getElementById(inputId).value=r.display_name?r.display_name.split(',').slice(0,3).join(','):`${lat.toFixed(5)}, ${lng.toFixed(5)}`;
@@ -190,13 +191,24 @@ document.querySelectorAll('.tipbtn').forEach(b=>{
     b.style.borderColor='#f6e27a'; renderQuote(); };
 });
 
-async function getQuote(from,to,coords){
+async function getQuote(from,to,pCoords,dCoords){
   let url=`/api/rides/quote?pickup_address=${encodeURIComponent(from)}&dropoff_address=${encodeURIComponent(to)}`;
-  if(coords) url+=`&plat=${coords.lat}&plng=${coords.lng}`;
+  if(pCoords) url+=`&plat=${pCoords.lat}&plng=${pCoords.lng}`;
+  if(dCoords) url+=`&dlat=${dCoords.lat}&dlng=${dCoords.lng}`;
   const r=await(await fetch(url)).json();
   if(r.detail) throw new Error(r.detail);
   return r;
 }
+// autocomplete picks give exact coords — most accurate, no re-geocoding
+let ac={cFrom:null,cTo:null,bFrom:null,bTo:null};
+function wireAC(id,key){
+  const el=document.getElementById(id);
+  if(!el) return;
+  attachAutocomplete(el, pick=>{ ac[key]=pick; });
+}
+['c-from|-|cFrom','c-to|-|cTo','b-from|-|bFrom','b-to|-|bTo'].forEach(s=>{
+  const [id,,key]=s.split('|'); wireAC(id,key);
+});
 
 function fareHTML(q, showTip){
   return `<div class="fare-row"><span>Base fare</span><b>$${q.base_fare.toFixed(2)}</b></div>
@@ -215,7 +227,7 @@ $('c-go').onclick=async()=>{
   if(!t){$('c-out').innerHTML='<p class="small">Enter the dropoff address.</p>';return;}
   $('c-out').innerHTML='<p class="small">Calculating…</p>';
   try{
-    const q=await getQuote(f,t,gps.cFrom);
+    const q=await getQuote(f,t,ac.cFrom||gps.cFrom,ac.cTo);
     $('c-out').innerHTML=fareHTML(q,false);
   }catch(e){$('c-out').innerHTML=`<p class="small">Error: ${e.message}</p>`;}
 };
@@ -226,7 +238,7 @@ $('b-quote-btn').onclick=async()=>{
   if(!t){$('b-msg').textContent='Enter the dropoff address.';return;}
   $('b-quote').innerHTML='<p class="small">Calculating…</p>';
   try{
-    lastQuote=await getQuote(f,t,gps.bFrom);
+    lastQuote=await getQuote(f,t,ac.bFrom||gps.bFrom,ac.bTo);
     renderQuote();
     $('b-go').style.display=lastQuote.too_far?'none':'block';
   }catch(e){$('b-msg').textContent='Error: '+e.message;}
@@ -242,7 +254,8 @@ $('b-go').onclick=async()=>{
   const body={
     pickup_address:$('b-from').value.trim(),
     dropoff_address:$('b-to').value.trim(),
-    ...(gps.bFrom?{pickup_lat:gps.bFrom.lat, pickup_lng:gps.bFrom.lng}:{}),
+    ...((ac.bFrom||gps.bFrom)?{pickup_lat:(ac.bFrom||gps.bFrom).lat, pickup_lng:(ac.bFrom||gps.bFrom).lng}:{}),
+    ...(ac.bTo?{dropoff_lat:ac.bTo.lat, dropoff_lng:ac.bTo.lng}:{}),
     customer_name:$('b-name').value.trim(),
     phone:$('b-phone').value.trim(),
     notes:$('b-notes').value.trim(),
@@ -268,5 +281,6 @@ $('b-go').onclick=async()=>{
   }
 };
 </script>
+<script src="/static/autocomplete.js"></script>
 <script src="/static/drop-live.js"></script>
 </body></html>
