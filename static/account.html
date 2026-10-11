@@ -86,12 +86,21 @@ async function load(){
   wireDriverCard();
   $('logout').onclick=async()=>{await fetch('/api/auth/logout',{method:'POST'});location.href='/';};
   $('delacct').onclick=async()=>{
-    if(!confirm('⚠️ Delete your account? This removes your profile and saved cards.')) return;
+    if(!confirm('⚠️ Delete your account? This removes your profile, login, rewards, and saved cards.')) return;
     if(!confirm('Really delete? This cannot be undone.')) return;
-    const phone = localStorage.getItem('drop_phone')||'';
-    const r=await(await fetch(`/api/user/account?phone=${encodeURIComponent(phone)}`,{method:'DELETE'})).json();
-    if(r.ok){ alert('Account deleted.'); localStorage.removeItem('drop_phone'); location.href='/'; }
-    else alert('Failed.');
+    const pw = prompt('Enter your password to confirm deletion:');
+    if(!pw) return;
+    const v=await fetch('/api/auth/verify',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pw})});
+    if(!v.ok){ alert('Wrong password — account NOT deleted.'); return; }
+    const r=await fetch('/api/user/account',{method:'DELETE'});
+    const j=await r.json().catch(()=>({}));
+    if(r.ok && j.ok){
+      alert('Account deleted.');
+      try{localStorage.removeItem('drop_phone');}catch(e){}
+      location.href='/';
+    }
+    else alert('Delete failed: '+(j.detail||'please try again'));
   };
 }
 async function loadCards(){

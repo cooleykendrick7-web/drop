@@ -41,12 +41,12 @@ async function post(path,body){
 }
 $('li-go').onclick=async()=>{
   const {ok,j}=await post('/api/auth/login',{phone:$('li-phone').value,password:$('li-pw').value});
-  if(ok){location.href='/account.html';}
+  if(ok){try{localStorage.setItem('drop_phone',$('li-phone').value.trim());}catch(e){}location.href='/account.html';}
   else $('li-msg').textContent='Error: '+(j.detail||'login failed');
 };
 $('su-go').onclick=async()=>{
   const {ok,j}=await post('/api/auth/signup',{name:$('su-name').value,phone:$('su-phone').value,password:$('su-pw').value});
-  if(ok){location.href='/account.html';}
+  if(ok){try{localStorage.setItem('drop_phone',$('su-phone').value.trim());}catch(e){}location.href='/account.html';}
   else $('su-msg').textContent='Error: '+(j.detail||'signup failed');
 };
 // already logged in? go to account

@@ -1664,13 +1664,24 @@ async def driver_delete_account(req: Request):
 
 
 @app.delete("/api/user/account")
-async def user_delete_account(phone: str = ""):
-    """Customer deletes their own account."""
-    if not phone:
-        raise HTTPException(400, "Phone required")
+async def user_delete_account(req: Request, phone: str = ""):
+    """Customer deletes their own account. Uses the login session —
+    no phone guessing, and removes the real auth account too."""
+    me = get_session_user(req)
+    if me:
+        uid, phone = me["id"], me["phone"]
+    elif phone:
+        uid = 0
+    else:
+        raise HTTPException(401, "Log in to delete your account")
     conn = db()
-    conn.execute("DELETE FROM user_profiles WHERE phone=?", (phone,))
-    conn.execute("DELETE FROM saved_cards WHERE phone=?", (phone,))
+    if uid:
+        conn.execute("DELETE FROM sessions WHERE user_id=?", (uid,))
+        conn.execute("DELETE FROM rewards WHERE user_id=?", (uid,))
+        conn.execute("DELETE FROM users WHERE id=?", (uid,))
+    if phone:
+        conn.execute("DELETE FROM user_profiles WHERE phone=?", (phone,))
+        conn.execute("DELETE FROM saved_cards WHERE phone=?", (phone,))
     conn.commit()
     conn.close()
     return {"ok": True}
@@ -2600,6 +2611,21 @@ async def auth_logout(req: Request, resp: Response):
         conn.commit()
         conn.close()
     resp.delete_cookie("drop_session", path="/")
+    return {"ok": True}
+
+
+@app.post("/api/auth/verify")
+async def auth_verify(req: Request):
+    """Re-check password for sensitive actions (e.g. account deletion)."""
+    body = await req.json()
+    me = get_session_user(req)
+    if not me:
+        raise HTTPException(401, "Not logged in")
+    conn = db()
+    u = conn.execute("SELECT password_hash FROM users WHERE id=?", (me["id"],)).fetchone()
+    conn.close()
+    if not u or not check_pw(body.get("password") or "", u["password_hash"]):
+        raise HTTPException(401, "Wrong password")
     return {"ok": True}
 
 
