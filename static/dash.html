@@ -28,8 +28,8 @@
   </div>
 
   <div class="tab on" id="t-orders">
-    <div class="card"><div class="row"><span><b>📍 Share my location</b><br>
-      <span class="small">While ON, your dot moves on customers' tracking maps.</span></span>
+    <div class="card" id="loccard"><div class="row"><span><b>📍 Share my location</b><br>
+      <span class="small">While ON, customers watch your car move on their tracking map.</span></span>
       <button class="btn small ghost" id="locToggle" style="width:auto;padding:10px 20px">Start</button></div>
       <p class="small" id="locmsg"></p></div>
     <div id="olist"></div>
@@ -166,9 +166,9 @@ async function loadOrders(first){
   const open=orders.filter(o=>!['delivered','cancelled'].includes(o.status));
   const done=orders.filter(o=>['delivered','cancelled'].includes(o.status));
   const card=(o,i)=>{
-    const navUrl=o.rest_lat&&o.cust_lat
-      ? `https://www.google.com/maps/dir/?api=1&origin=${o.rest_lat},${o.rest_lng}&destination=${o.cust_lat},${o.cust_lng}`
-      : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(o.address||'')}`;
+    const restDest=o.rest_lat?`${o.rest_lat},${o.rest_lng}`:encodeURIComponent(o.rest_address||o.restaurant_name||'');
+    const custDest=o.cust_lat?`${o.cust_lat},${o.cust_lng}`:encodeURIComponent(o.address||'');
+    const active=!['delivered','cancelled'].includes(o.status);
     return `
     <div class="card order ${o.id>lastSeen-2&&o.status==='placed'?'new':''}">
       <div class="row"><b>${i>=0?`#${i+1} · `:''}${o.id} · ${o.restaurant_name}</b>
@@ -178,10 +178,13 @@ async function loadOrders(first){
       ${o.items.map(i=>`<div class="row small"><span>${i.qty}× ${i.name}</span><span>$${i.line.toFixed(2)}</span></div>`).join('')}
       <div class="row"><span class="small">Food $${o.food_total.toFixed(2)} + fee $${o.delivery_fee.toFixed(2)}${o.tip?` + tip $${o.tip.toFixed(2)}`:''}${o.discount?` − disc $${o.discount.toFixed(2)}`:''}</span><b>$${o.total.toFixed(2)}</b></div>
       <div class="small">${o.paid?'💰 Paid ✓':'⚠️ NOT PAID'} · ${new Date(o.created_at).toLocaleString()}</div>
+      ${active?`<div style="display:flex;gap:8px;margin-top:10px">
+        <a class="btn small" href="https://www.google.com/maps/dir/?api=1&destination=${restDest}" target="_blank" style="flex:1;text-decoration:none;text-align:center">🧭 To restaurant</a>
+        <a class="btn small" href="https://www.google.com/maps/dir/?api=1&destination=${custDest}" target="_blank" style="flex:1;text-decoration:none;text-align:center">🏠 To customer</a>
+      </div>`:''}
       <div style="margin-top:8px">
         ${NEXT[o.status]?`<button class="btn small" onclick="setStatus(${o.id},'${NEXT[o.status]}')">${NEXTLBL[NEXT[o.status]]}</button>`:''}
-        ${!['delivered','cancelled'].includes(o.status)?`<a class="btn small ghost" href="${navUrl}" target="_blank" style="text-decoration:none;display:inline-block">🗺️ Navigate</a>`:''}
-        ${!['delivered','cancelled'].includes(o.status)?`<button class="btn small ghost" onclick="setStatus(${o.id},'cancelled')">Cancel</button>`:''}
+        ${active?`<button class="btn small ghost" onclick="setStatus(${o.id},'cancelled')">Cancel</button>`:''}
       </div>
     </div>`;};
   $('olist').innerHTML = '<h2>Active ('+open.length+')</h2>'+(open.map((o,i)=>card(o,i)).join('')||'<p class="small">None right now.</p>')
@@ -189,6 +192,10 @@ async function loadOrders(first){
 }
 async function setStatus(id,s){
   await fetch('/api/operator/orders/'+id+'/status',{method:'POST',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({status:s})});
+  if(s==='on_the_way' && !locWatch){
+    // one tap: customer starts seeing Ken drive to them
+    $('locToggle').click();
+  }
   loadOrders();
 }
 async function loadEarn(){
@@ -296,6 +303,7 @@ $('locToggle').onclick=()=>{
   if(!navigator.geolocation){ $('locmsg').textContent='GPS not available on this device.'; return; }
   $('locmsg').textContent='Sharing… keep this page open while you deliver.';
   $('locToggle').textContent='Stop'; $('locToggle').classList.remove('ghost');
+  $('loccard').style.border='2px solid var(--ok)';
   const post=(lat,lng)=>{
     const now=Date.now();
     if(now-lastLocPost<15000) return;  // max once per 15s
@@ -313,6 +321,7 @@ function stopLoc(){
   if(locWatch) navigator.geolocation.clearWatch(locWatch);
   locWatch=null;
   $('locToggle').textContent='Start'; $('locToggle').classList.add('ghost');
+  $('loccard').style.border='';
   $('locmsg').textContent='';
 }
 

@@ -15,6 +15,7 @@
 <div class="card" id="items"></div>
 <h2>Where's my food?</h2>
 <div id="map"></div>
+<div id="driverbanner"></div>
 <div class="steps" id="steps"></div>
 <p class="small" id="note">Live updates every few seconds.</p>
 <div id="cancelwrap" style="margin-top:12px"></div>
@@ -98,6 +99,15 @@ async function poll(){
     return `<div class="step ${cls}"><div class="dot">${icon}</div><div class="t"><b>${s[1]}</b><span>${s[2]}</span></div></div>`;
   }).join('');
   drawMap(o);
+  // live driver banner
+  const db=$('driverbanner');
+  if(o.driver_lat && o.driver_updated && ['picked_up','on_the_way'].includes(o.status)){
+    const age=(Date.now()-new Date(o.driver_updated).getTime())/1000;
+    if(age<600){
+      db.innerHTML=`<div class="card" style="border:2px solid var(--ok);text-align:center">
+        <b>🚗 Ken's on the way!</b><br><span class="small">Watch his car move on the map above.</span></div>`;
+    } else db.innerHTML='';
+  } else db.innerHTML='';
   if(o.status!=='delivered') setTimeout(poll,5000);
   else document.getElementById('note').textContent='Delivered! Thanks for using Drop. 🧡';
 }
