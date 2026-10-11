@@ -75,7 +75,7 @@ async function load(){
     <h2>Order history</h2>
     <div id="hist">${orders.map(o=>`
       <a class="card" href="/track.html?id=${o.id}" style="display:block;text-decoration:none;color:inherit">
-        <div class="row"><b>#${o.id} · ${o.restaurant_name||'Drop'}</b><b>$${o.total.toFixed(2)}</b></div>
+        <div class="row"><b>#${o.id} · ${o.pickup_name||'Drop Ride'}</b><b>$${o.total.toFixed(2)}</b></div>
         <span class="small">${new Date(o.created_at).toLocaleDateString()} · ${o.status.replace(/_/g,' ')}</span>
       </a>`).join('')||'<p class="small">No orders yet — <a href="/">fix that 🧡</a></p>'}</div>
     <h2>💸 Referrals — give $5, get $5</h2>

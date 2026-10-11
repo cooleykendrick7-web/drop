@@ -50,8 +50,7 @@ h1{font-size:1.1rem;letter-spacing:3px;color:var(--acc2);text-transform:uppercas
     <div class="gauge good" id="g-rev"><div class="lbl">Revenue today</div><div class="val">–</div><div class="unit">delivery fees</div></div>
     <div class="gauge info" id="g-active"><div class="lbl">Active orders</div><div class="val">–</div><div class="unit">right now</div></div>
     <div class="gauge" id="g-mail"><div class="lbl">Outreach sent</div><div class="val">–</div><div class="unit">emails today</div><div class="bar"><i id="mailbar" style="width:0%"></i></div></div>
-    <div class="gauge" id="g-rest"><div class="lbl">Restaurants</div><div class="val">–</div><div class="unit">live spots</div></div>
-    <div class="gauge" id="g-city"><div class="lbl">Cities</div><div class="val">–</div><div class="unit">and counting</div></div>
+        <div class="gauge" id="g-city"><div class="lbl">Cities</div><div class="val">–</div><div class="unit">and counting</div></div>
     <div class="gauge" id="g-drv"><div class="lbl">Drivers</div><div class="val">–</div><div class="unit">active</div></div>
     <div class="gauge good" id="g-all"><div class="lbl">All-time revenue</div><div class="val">–</div><div class="unit">delivery fees</div></div>
   </div>
@@ -73,7 +72,7 @@ async function tick(){
     if(s.detail){ $('msg').textContent='Wrong PIN.'; $('login').style.display='block'; $('dash').style.display='none'; return; }
     set('g-orders',s.orders_today); set('g-rev','$'+s.revenue_today.toFixed(0));
     set('g-active',s.active_orders); set('g-mail',s.emails_today);
-    set('g-rest',s.restaurants); set('g-city',s.cities);
+    set('g-city',s.cities);
     set('g-drv',s.drivers); set('g-all','$'+s.total_revenue.toFixed(0));
     $('mailbar').style.width=Math.min(100,s.emails_today/20*100)+'%';
     $('g-active').classList.toggle('warn',s.active_orders>0);

@@ -222,7 +222,7 @@ async function loadOrders(){
              :'<p class="small">No deliveries assigned right now. New orders will appear here.</p>');
   const poolHtml=!IS_OWNER?'':('<h2 style="margin-top:18px">📦 Available deliveries ('+pool.length+')</h2>'+
     (pool.map(o=>`<div class="card order">
-      <div class="row"><b>#${o.id} · ${o.kind==='ride'?'🚗 Ride':o.kind==='courier'?'📦 Courier':'🍔 Food'}</b>
+      <div class="row"><b>#${o.id} · ${o.kind==='ride'?'🚗 Ride':'📦 Courier'}</b>
         <span class="badge">${o.status_label}</span></div>
       <p><b>Pick up:</b> ${o.pickup_label}<br><span class="small">📍 ${o.pickup_addr||''}</span></p>
       <p><b>Deliver to:</b> ${o.customer_name}<br><span class="small">🏠 ${o.address}</span></p>
@@ -285,7 +285,7 @@ function orderCard(o){
     const restDest=o.plat?`${o.plat},${o.plng}`:encodeURIComponent(o.pickup_addr||'');
     const custDest=o.cust_lat?`${o.cust_lat},${o.cust_lng}`:encodeURIComponent(o.address||'');
     return `<div class="card order">
-      <div class="row"><b>#${o.id} · ${o.kind==='courier'?'📦 Courier':'🍔 Food'}</b>
+      <div class="row"><b>#${o.id} · ${o.kind==='courier'?'📦 Courier':'🚗 Ride'}</b>
         <span class="badge">${o.status_label}</span></div>
       <p><b>Pick up:</b> ${o.pickup_label}<br><span class="small">📍 ${o.pickup_addr||''}</span></p>
       ${o.kind==='courier'?`<p><b>Items:</b> ${o.items.map(i=>i.name).join(', ')}</p>`:o.items.map(i=>`<div class="row small"><span>${i.qty}× ${i.name}</span></div>`).join('')}

@@ -1,6 +1,6 @@
 <!DOCTYPE html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Invest in Drop — Bismarck's Delivery Company</title>
+<title>Invest in Drop — Bismarck's Rideshare</title>
 <link rel="icon" href="/static/logo-mark.jpg">
 <link rel="stylesheet" href="/static/styles.css">
 <style>.statgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:16px 0}
@@ -14,37 +14,37 @@
 <div class="hero" style="text-align:center;padding:32px 16px">
   <img class="logo-full" src="/static/logo.jpg" alt="Drop" style="width:min(180px,50vw);border-radius:20px">
   <h1 style="margin:12px 0 4px">Invest in <span style="color:var(--acc)">Drop</span></h1>
-  <p class="sub">Bismarck's own delivery company — food today, everything local tomorrow.<br>
-  Pick up · Deliver · Done.</p>
+  <p class="sub">Bismarck & Mandan's own rideshare company.<br>
+  Your ride, your way — upfront pricing, no surge games.</p>
 </div>
 
 <div class="card">
   <h2>The opportunity</h2>
-  <p>National delivery apps take up to <b>30% from restaurants</b> and treat drivers as disposable. Drop is built different:</p>
-  <p class="small">🧡 <b>Local-first:</b> built in Bismarck, for Bismarck — real relationships with local businesses.<br>
-  📦 <b>Drop More:</b> expanding beyond food into auto parts, clothing, supplies, and documents — recurring B2B courier revenue.<br>
-  🚗 <b>Droppers:</b> our own driver team with real support, keeping 100% of tips.<br>
-  🤖 <b>AI-powered:</b> self-updating menus, live GPS tracking, automated marketing.<br>
-  💰 <b>Lean:</b> no corporate overhead — every dollar goes into growth.</p>
+  <p>National rideshare apps take up to <b>30% from drivers</b> and surge-price riders when they need a ride most. Drop is built different:</p>
+  <p class="small">🧡 <b>Local-first:</b> built in Bismarck, for Bismarck — real relationships with local riders and drivers.<br>
+  🚗 <b>Drop Rides:</b> upfront fares, live GPS tracking, rated drivers — the ride experience done right.<br>
+  💰 <b>Driver-friendly:</b> drivers keep 70% of every fare plus 100% of tips.<br>
+  🤖 <b>AI-powered:</b> automated dispatch, live tracking, smart marketing.<br>
+  📈 <b>Lean:</b> no corporate overhead — every dollar goes into growth.</p>
 </div>
 
 <div class="card">
   <h2>By the numbers</h2>
   <div class="statgrid">
-    <div class="stat"><b id="s-rest">–</b><span class="small">Restaurants</span></div>
-    <div class="stat"><b id="s-biz">–</b><span class="small">Drop More businesses</span></div>
-    <div class="stat"><b id="s-orders">–</b><span class="small">Orders delivered</span></div>
-    <div class="stat"><b>$3.99</b><span class="small">Flat delivery fee</span></div>
+    <div class="stat"><b id="s-drivers">–</b><span class="small">Active drivers</span></div>
+    <div class="stat"><b id="s-rides">–</b><span class="small">Rides completed</span></div>
+    <div class="stat"><b>$4.99</b><span class="small">Base fare</span></div>
+    <div class="stat"><b>$2.00</b><span class="small">Per mile</span></div>
   </div>
   <p class="small">Live numbers, pulled straight from the platform.</p>
 </div>
 
 <div class="card">
   <h2>Where investment goes</h2>
-  <p class="small">🚗 <b>Driver team</b> — recruiting and onboarding Droppers across Bismarck<br>
-  📣 <b>Marketing</b> — AI-driven local advertising to win customers from the national apps<br>
-  🏪 <b>Business partnerships</b> — signing local stores to Drop More courier contracts<br>
-  💻 <b>Technology</b> — mobile apps, smarter dispatch, more automation</p>
+  <p class="small">🚗 <b>Driver team</b> — recruiting and onboarding Drop drivers across Bismarck & Mandan<br>
+  📣 <b>Marketing</b> — AI-driven local advertising to win riders from the national apps<br>
+  💻 <b>Technology</b> — mobile apps, smarter dispatch, more automation<br>
+  🗺️ <b>Expansion</b> — new cities across North Dakota</p>
 </div>
 
 <div class="card invform">
@@ -69,13 +69,10 @@
 const $=id=>document.getElementById(id);
 (async()=>{
   try{
-    const r=await (await fetch('/api/restaurants')).json();
-    $('s-rest').textContent=r.length;
-    const b=await (await fetch('/api/businesses')).json();
-    $('s-biz').textContent=b.businesses.length;
-    // orders count is operator-only; show a growing placeholder
-    $('s-orders').textContent='Growing';
-  }catch(e){}
+    const s=await (await fetch('/api/public/stats')).json();
+    $('s-drivers').textContent=s.drivers||'Growing';
+    $('s-rides').textContent=s.rides||'Growing';
+  }catch(e){$('s-drivers').textContent='Growing';$('s-rides').textContent='Growing';}
 })();
 $('i-submit').onclick=async()=>{
   const body={name:$('i-name').value.trim(),email:$('i-email').value.trim(),

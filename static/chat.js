@@ -22,25 +22,25 @@
   })();
   const FAQ = [
     {k:["how does","how it work","how do i","what is drop"],
-     a:"Easy: <b>1)</b> order your food directly from the restaurant, <b>2)</b> request a pickup here, <b>3)</b> we grab it and drop it at your door. You only pay Drop the pickup + delivery fee."},
+     a:"Easy: <b>1)</b> enter your pickup and dropoff, <b>2)</b> see your exact fare upfront, <b>3)</b> pay and track your driver live. No surge pricing, ever."},
     {k:["fee","cost","delivery charge","how much","price of delivery"],
-     a:"You pay a <b>pickup + delivery fee</b> (from $3.99, based on distance) plus a small % for our gas fund — no surge pricing, no hidden fees. You see the full total before you pay."},
+     a:"You pay a <b>ride fare</b> (from $4.99 base + $2.00/mile, based on real driving distance) plus a small % for our gas fund — no surge pricing, no hidden fees. You see the full total before you pay."},
     {k:["how long","fast","time","when will","arrive","fresher","fresh"],
-     a:"Your driver heads out as soon as your order is confirmed — most orders arrive in <b>30–45 minutes</b>, straight from the restaurant to your door."},
+     a:"Your driver heads to you as soon as your ride is confirmed — most pickups happen in <b>5-15 minutes</b>, and you can watch your driver arrive live on the map."},
     {k:["where","deliver","area","bismarck","zone"],
-     a:"We deliver all across <b>Bismarck, ND</b>. Put in your address at checkout and your driver will get it to you."},
+     a:"We drive all across <b>Bismarck & Mandan, ND</b>. Put in your pickup and dropoff and your driver will get you there."},
     {k:["track","where is my","status","order status"],
-     a:"You can follow your order live on the tracking page — it updates every few seconds from confirmed to delivered. Your tracking link was shown right after checkout."},
+     a:"You can follow your ride live on the tracking page — it updates every few seconds from confirmed to arrived. Your tracking link was shown right after booking."},
     {k:["pay","payment","card","secure","stripe","safe"],
      a:"Checkout is handled securely by <b>Stripe</b> — we never see or store your card number."},
     {k:["who","driver","ken"],
-     a:"Your driver is <b>a local</b>, not a random gig driver — one person handling your food from pickup to doorstep."},
+     a:"Your driver is <b>a local</b>, not a random gig driver — background-checked, with a clean inspected car."},
     {k:["hour","open","close","when"],
-     a:"Spots show <b>OPEN</b> or <b>CLOSED</b> right on the list. Order your food from the spot first, then request a pickup here."},
+     a:"We are open when drivers are on the road - check the homepage for live status."},
     {k:["refund","wrong","cold","missing","late","problem","issue","complaint","bad"],
-     a:"Sorry about that — tap <b>Message us</b> below, include your order number if you have it, and we'll make it right."},
+     a:"Sorry about that — tap <b>Message us</b> below, include your ride number if you have it, and we'll make it right."},
     {k:["account","sign up","log in","login"],
-     a:"No account needed — order your food from the restaurant, request a pickup, pay, and track it. Simple."},
+     a:"No account needed — enter your trip, pay, and track your driver. Simple."},
     {k:["contact","email","phone number","call you","reach you","talk to someone","human"],
      a:"You can reach us anytime at <b>wearedropservicesllc@gmail.com</b> or <b>(262) 977-7869</b> — or tap <b>Message us</b> and we'll get back to you."},
   ];
@@ -66,11 +66,11 @@
       window.DROP_QUEUE = q;
       let html;
       if(q.reason === 'open' || q.accepting){
-        html = `<div id="queuebar" style="text-align:center;padding:8px 12px;font-size:.82rem;font-weight:600;background:rgba(0,200,100,.12);color:#4ade80;border-bottom:1px solid var(--line)">🟢 Taking orders · about ${q.estimated_mins} min right now${q.active>0?` (${q.active} ahead of you)`:''}</div>`;
+        html = `<div id="queuebar" style="text-align:center;padding:8px 12px;font-size:.82rem;font-weight:600;background:rgba(0,200,100,.12);color:#4ade80;border-bottom:1px solid var(--line)">🟢 Taking rides · about ${q.estimated_mins} min right now${q.active>0?` (${q.active} ahead of you)`:''}</div>`;
       }else if(q.reason === 'closed'){
         html = `<div id="queuebar" style="text-align:center;padding:10px 12px;font-size:.85rem;font-weight:700;background:rgba(90,110,180,.14);color:#93a4ff;border-bottom:1px solid var(--line)">🌙 Closed right now — back open ${q.hours_label||'soon'}!</div>`;
       }else if(q.reason === 'paused'){
-        html = `<div id="queuebar" style="text-align:center;padding:10px 12px;font-size:.85rem;font-weight:700;background:rgba(255,180,60,.14);color:#ffb43c;border-bottom:1px solid var(--line)">⏸️ Orders paused for a bit — check back soon!</div>`;
+        html = `<div id="queuebar" style="text-align:center;padding:10px 12px;font-size:.85rem;font-weight:700;background:rgba(255,180,60,.14);color:#ffb43c;border-bottom:1px solid var(--line)">⏸️ Rides paused for a bit — check back soon!</div>`;
       }else{
         html = `<div id="queuebar" style="text-align:center;padding:10px 12px;font-size:.85rem;font-weight:700;background:rgba(255,80,80,.14);color:#ff8080;border-bottom:1px solid var(--line)">🔴 At capacity right now — check back soon!</div>`;
       }
@@ -96,7 +96,7 @@
         <div id="dc-form" style="display:none">
           <input id="dc-name" placeholder="Your name">
           <input id="dc-phone" placeholder="Phone (optional)" inputmode="tel">
-          <input id="dc-order" placeholder="Order # (if you have one)" inputmode="numeric">
+          <input id="dc-order" placeholder="Ride # (if you have one)" inputmode="numeric">
           <textarea id="dc-msg" rows="3" placeholder="What's going on?"></textarea>
           <button class="btn" id="dc-send">Send message</button>
         </div>
@@ -123,7 +123,7 @@
       setTimeout(()=>bot(answer(q)), 350);
     }
 
-    const QUICKS = ["Delivery fee?","How fast?","Track my order","Problem with order","Message us"];
+    const QUICKS = ["Ride fare?","How fast?","Track my ride","Problem with ride","Message us"];
     quick.innerHTML = '';
     QUICKS.forEach(q=>{
       const b = el(`<button>${q}</button>`);
@@ -147,7 +147,7 @@
         const saved = JSON.parse(localStorage.getItem('dropticket') || 'null');
         if(saved && saved.id){ openThread(saved.id, saved.phone); return; }
       }catch(e){}
-      bot("Hey! I'm <b>Ken</b> 👋 Your Drop assistant. Ask me about delivery, timing, or tracking — or tap <b>Message us</b> if something needs a human.");
+      bot("Hey! I'm <b>Ken</b> 👋 Your Drop assistant. Ask me about fares, timing, or tracking — or tap <b>Message us</b> if something needs a human.");
     };
     document.getElementById('dc-x').onclick = ()=>{
       document.getElementById('dc-panel').style.display = 'none';

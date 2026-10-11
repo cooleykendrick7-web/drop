@@ -31,13 +31,12 @@
 const oid = new URLSearchParams(location.search).get('id');
 const FLOW_RIDE=[['placed','Ride requested','Looking for your driver'],['confirmed','Driver confirmed','Your driver is on the way to you'],['picked_up','Picked up','You\'re in the car'],['on_the_way','On the way','Enjoy the ride'],['delivered','Arrived','Thanks for riding with Drop!']];
 const FLOW_COURIER=[['placed','Request received','Your pickup request was received'],['confirmed','Confirmed','Your driver is heading to the pickup'],['picked_up','Picked up','Your driver has your items'],['on_the_way','On the way','Your driver is on the way to you'],['delivered','Delivered','Enjoy!']];
-let FLOW=FLOW_FOOD;
+let FLOW=FLOW_RIDE;
 let map=null, driverMarker=null;
 const emojiIcon=e=>L.divIcon({className:'leaflet-divicon',html:e,iconSize:[30,30],iconAnchor:[15,15]});
 function drawMap(o){
   const pts=[];
-  if(o.restaurant_lat) pts.push(['rest',o.restaurant_lat,o.restaurant_lng]);
-  if(o.cust_lat) pts.push(['cust',o.cust_lat,o.cust_lng]);
+    if(o.cust_lat) pts.push(['cust',o.cust_lat,o.cust_lng]);
   if(!pts.length) return;
   document.getElementById('map').style.display='block';
   if(!map){
@@ -45,17 +44,13 @@ function drawMap(o){
     L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
       {attribution:'© OpenStreetMap © CARTO',maxZoom:19}).addTo(map);
   }
-  if(o.restaurant_lat && !map._restM){
-    map._restM=L.marker([o.restaurant_lat,o.restaurant_lng],{icon:emojiIcon(o.kind==='courier'?'📦':'🚗')})
-      .addTo(map).bindPopup('<b>'+o.restaurant+'</b><br>'+(o.restaurant_address||''));
-  }
+    }
   if(o.cust_lat && !map._custM){
     map._custM=L.marker([o.cust_lat,o.cust_lng],{icon:emojiIcon('🏠')})
       .addTo(map).bindPopup('<b>Your door</b><br>'+(o.address||''));
   }
   const bounds=[];
-  if(o.restaurant_lat) bounds.push([o.restaurant_lat,o.restaurant_lng]);
-  if(o.cust_lat) bounds.push([o.cust_lat,o.cust_lng]);
+    if(o.cust_lat) bounds.push([o.cust_lat,o.cust_lng]);
   if(o.driver_lat && o.driver_updated){
     const age=(Date.now()-new Date(o.driver_updated).getTime())/1000;
     if(age<600){  // driver's dot only if shared in the last 10 min
@@ -75,7 +70,7 @@ async function poll(){
   if(o.id===undefined){document.body.innerHTML='<p>Order not found.</p>';return;}
   
   document.getElementById('oid').textContent='#'+o.id;
-  document.getElementById('rname').textContent=o.restaurant+' · '+(o.paid?'Paid ✓':'Payment pending');
+  document.getElementById('rname').textContent=(o.pickup_name||'Drop Ride')+' · '+(o.paid?'Paid ✓':'Payment pending');
   document.getElementById('items').innerHTML =
     o.items.map(i=>`<div class="row"><span>${i.qty}× ${i.name}</span><span>$${i.line.toFixed(2)}</span></div>`).join('')+
     `<div class="row"><span>Delivery fee</span><span>$${o.delivery_fee.toFixed(2)}</span></div>

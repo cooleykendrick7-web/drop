@@ -388,7 +388,7 @@ async function loadOrders(first){
       <p><b>${o.customer_name}</b> · <a href="tel:${o.phone}">${o.phone}</a><br>
       📍 ${o.address}${o.notes?`<br>📝 ${o.notes}`:''}</p>
       ${o.items.map(i=>`<div class="row small"><span>${i.qty}× ${i.name}</span><span>$${i.line.toFixed(2)}</span></div>`).join('')}
-      <div class="row"><span class="small">Food $${o.food_total.toFixed(2)} + fee $${o.delivery_fee.toFixed(2)}${o.tip?` + tip $${o.tip.toFixed(2)}`:''}${o.discount?` − disc $${o.discount.toFixed(2)}`:''}</span><b>$${o.total.toFixed(2)}</b></div>
+      <div class="row"><span class="small">Fare $${(o.total-(o.tip||0)-(o.discount||0)).toFixed(2)}${o.tip?` + tip $${o.tip.toFixed(2)}`:''}</span><b>$${o.total.toFixed(2)}</b></div>
       <div class="small">${o.paid?'💰 Paid ✓':'⚠️ NOT PAID'} · ${o.driver_name?`🚗 ${o.driver_name}`:'🚗 Ken'} · ${new Date(o.created_at).toLocaleString()}</div>
       ${active?`<div style="display:flex;gap:8px;margin-top:10px">
         <a class="btn small" href="https://www.google.com/maps/dir/?api=1&destination=${restDest}" target="_blank" style="flex:1;text-decoration:none;text-align:center">🧭 To pickup</a>
