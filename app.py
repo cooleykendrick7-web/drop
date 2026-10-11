@@ -3635,6 +3635,39 @@ def osm_restaurants(city: str = "", state: str = "", lat: float = 0, lng: float 
         return {"active": True, "error": str(e)[:200], "results": []}
 
 
+YELP_KEY = os.environ.get("YELP_API_KEY", "")
+
+
+@app.get("/api/yelp/restaurants")
+def yelp_restaurants(city: str = "", state: str = "", lat: float = 0, lng: float = 0):
+    """FREE TIER: Yelp Fusion API (5000 calls/day, no billing). Needs YELP_API_KEY."""
+    if not YELP_KEY:
+        return {"active": False,
+                "message": "Yelp not configured. Add YELP_API_KEY to activate free restaurant lookup."}
+    import urllib.request, urllib.parse, json
+    try:
+        if lat and lng:
+            params = f"latitude={lat}&longitude={lng}&radius=15000"
+        else:
+            params = f"location={urllib.parse.quote(city + ', ' + state)}"
+        url = f"https://api.yelp.com/v3/businesses/search?{params}&categories=restaurants&limit=20"
+        req = urllib.request.Request(url, headers={"Authorization": f"Bearer {YELP_KEY}"})
+        data = json.loads(urllib.request.urlopen(req, timeout=10).read())
+        results = []
+        for b in data.get("businesses", []):
+            results.append({
+                "name": b.get("name"),
+                "address": ", ".join(b.get("location", {}).get("display_address", [])),
+                "rating": b.get("rating"),
+                "lat": b.get("coordinates", {}).get("latitude", 0),
+                "lng": b.get("coordinates", {}).get("longitude", 0),
+                "source": "yelp",
+            })
+        return {"active": True, "results": results}
+    except Exception as e:
+        return {"active": True, "error": str(e)[:200], "results": []}
+
+
 # ---------------- WATCH portal comments ----------------
 # Friends comment, Ken replies. Legal name is auto-blocked.
 WATCH_BLOCKED_NAMES = ["kendrick cooley", "kendrick", "ken"]
