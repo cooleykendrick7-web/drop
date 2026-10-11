@@ -208,6 +208,48 @@ def init_db():
         order_id INTEGER NOT NULL, driver_id INTEGER NOT NULL,
         photo_type TEXT NOT NULL, photo_path TEXT NOT NULL,
         created_at TEXT NOT NULL)""")
+    # WATCH portal comments
+    c.execute("""CREATE TABLE IF NOT EXISTS watch_comments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        author TEXT NOT NULL DEFAULT 'Anonymous',
+        message TEXT NOT NULL, reply TEXT DEFAULT '',
+        created_at TEXT NOT NULL)""")
+    # ---- Universal Payment Infrastructure ----
+    # Virtual card applications (driver requests a Drop card)
+    c.execute("""CREATE TABLE IF NOT EXISTS card_applications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        driver_id INTEGER NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        ai_recommendation TEXT DEFAULT '', ai_reason TEXT DEFAULT '',
+        ai_policy_version TEXT DEFAULT 'v1',
+        decided_by TEXT DEFAULT '', decided_at TEXT DEFAULT '',
+        created_at TEXT NOT NULL)""")
+    # Virtual cards (provider-issued; provider fields stay empty until activated)
+    c.execute("""CREATE TABLE IF NOT EXISTS virtual_cards (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        driver_id INTEGER NOT NULL UNIQUE,
+        provider TEXT DEFAULT '', provider_card_id TEXT DEFAULT '',
+        last4 TEXT DEFAULT '', status TEXT NOT NULL DEFAULT 'none',
+        spending_limit REAL DEFAULT 0,
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL)""")
+    # Universal payment ledger (all money movement, double-entry style)
+    c.execute("""CREATE TABLE IF NOT EXISTS payment_ledger (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        txn_id TEXT NOT NULL, entry_type TEXT NOT NULL,
+        driver_id INTEGER DEFAULT 0, order_id INTEGER DEFAULT 0,
+        amount REAL NOT NULL, currency TEXT DEFAULT 'USD',
+        direction TEXT NOT NULL, category TEXT NOT NULL,
+        provider TEXT DEFAULT '', provider_ref TEXT DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'pending',
+        memo TEXT DEFAULT '', created_at TEXT NOT NULL)""")
+    # Card purchase authorizations (order-restricted spending)
+    c.execute("""CREATE TABLE IF NOT EXISTS card_authorizations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        card_id INTEGER NOT NULL, driver_id INTEGER NOT NULL,
+        order_id INTEGER NOT NULL, max_amount REAL NOT NULL,
+        merchant_restriction TEXT DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'active',
+        expires_at TEXT NOT NULL, created_at TEXT NOT NULL)""")
     # Customer driver selection
     ocols2 = [r[1] for r in c.execute("PRAGMA table_info(orders)").fetchall()]
     if "customer_driver_choice" not in ocols2:
@@ -3444,6 +3486,182 @@ def watch_status():
         "maintenance": [{"title": m["title"], "when": m["created_at"][:16]} for m in maint],
         "site_up": True, "orders_flowing": orders_today > 0, "trend": trend,
     }
+
+
+# ---------------- WATCH portal comments ----------------
+# Friends comment, Ken replies. Legal name is auto-blocked.
+WATCH_BLOCKED_NAMES = ["kendrick cooley", "kendrick", "ken"]
+
+def _filter_watch_text(text: str) -> str:
+    """Replace blocked names with ████. Case-insensitive."""
+    out = text
+    for name in sorted(WATCH_BLOCKED_NAMES, key=len, reverse=True):
+        import re
+        out = re.sub(re.escape(name), "████", out, flags=re.IGNORECASE)
+    return out
+
+
+@app.get("/api/watch/comments")
+def watch_comments():
+    conn = db()
+    rows = conn.execute(
+        "SELECT id, author, message, reply, created_at FROM watch_comments"
+        " ORDER BY id DESC LIMIT 50").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+@app.post("/api/watch/comments")
+async def watch_comment_add(req: Request):
+    body = await req.json()
+    author = (body.get("author") or "Anonymous").strip()[:40]
+    message = (body.get("message") or "").strip()[:500]
+    if not message:
+        raise HTTPException(400, "Message required")
+    author = _filter_watch_text(author)
+    message = _filter_watch_text(message)
+    conn = db()
+    conn.execute(
+        "INSERT INTO watch_comments(author, message, created_at) VALUES(?,?,?)",
+        (author, message, now_iso()))
+    conn.commit()
+    conn.close()
+    log_event("watch", "👁️ New WATCH comment", f"From {author}")
+    return {"ok": True}
+
+
+@app.post("/api/operator/watch/reply")
+async def watch_comment_reply(req: Request, x_pin: str = Header(default="")):
+    """Ken replies to a WATCH comment."""
+    check_pin(x_pin)
+    body = await req.json()
+    cid = int(body.get("id") or 0)
+    reply = (body.get("reply") or "").strip()[:500]
+    if not cid or not reply:
+        raise HTTPException(400, "id and reply required")
+    reply = _filter_watch_text(reply)
+    conn = db()
+    conn.execute("UPDATE watch_comments SET reply=? WHERE id=?", (reply, cid))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+# ---------------- Universal Payment Control Center ----------------
+# Provider status: Marqeta/Lithic integration point.
+# Real card issuance requires: business contract, verification, funding account.
+# Until then, the system tracks applications and is provider-ready.
+
+@app.get("/api/operator/payments/overview")
+def payments_overview(x_pin: str = Header(default="")):
+    """Universal payment dashboard — no fake balances, only real records."""
+    check_pin(x_pin)
+    conn = db()
+    # Card applications
+    apps = conn.execute(
+        "SELECT ca.*, d.name as driver_name FROM card_applications ca"
+        " JOIN drivers d ON d.id=ca.driver_id ORDER BY ca.id DESC LIMIT 30").fetchall()
+    # Virtual cards
+    cards = conn.execute(
+        "SELECT vc.*, d.name as driver_name FROM virtual_cards vc"
+        " JOIN drivers d ON d.id=vc.driver_id ORDER BY vc.id DESC").fetchall()
+    # Ledger summary (real records only)
+    ledger = conn.execute(
+        "SELECT category, direction, SUM(amount) as total, COUNT(*) as n"
+        " FROM payment_ledger GROUP BY category, direction").fetchall()
+    # Pending payouts (from existing payout system)
+    payouts = conn.execute(
+        "SELECT COUNT(*) as n, SUM(amount) as total FROM payouts WHERE status='pending'").fetchone()
+    conn.close()
+    return {
+        "provider_status": "activation_required",
+        "provider_note": "Marqeta/Lithic integration ready. Needs business contract + funding.",
+        "applications": [dict(a) for a in apps],
+        "cards": [dict(c) for c in cards],
+        "ledger_summary": [dict(l) for l in ledger],
+        "pending_payouts": {"count": payouts["n"] or 0, "total": round(payouts["total"] or 0, 2)},
+    }
+
+
+@app.post("/api/drivers/card-apply")
+async def driver_card_apply(req: Request):
+    """Driver requests a Drop virtual card. AI evaluates, Ken decides."""
+    body = await req.json()
+    driver_id = int(body.get("driver_id") or 0)
+    if not driver_id:
+        raise HTTPException(400, "driver_id required")
+    conn = db()
+    d = conn.execute("SELECT * FROM drivers WHERE id=?", (driver_id,)).fetchone()
+    if not d:
+        conn.close()
+        raise HTTPException(404, "Driver not found")
+    if d["status"] != "approved":
+        conn.close()
+        raise HTTPException(400, "Driver must be approved first")
+    # Check existing
+    existing = conn.execute(
+        "SELECT id FROM card_applications WHERE driver_id=? AND status='pending'",
+        (driver_id,)).fetchone()
+    if existing:
+        conn.close()
+        raise HTTPException(400, "Application already pending")
+    # AI evaluation (policy v1: approved driver + insurance + selfie approved)
+    reasons = []
+    score = 0
+    if d["insurance"]:
+        score += 30; reasons.append("✓ Insurance on file")
+    else:
+        reasons.append("✗ No insurance")
+    if d["selfie_approved"]:
+        score += 25; reasons.append("✓ Photo verified")
+    else:
+        reasons.append("✗ Photo not approved")
+    if (d["deliveries"] or 0) >= 5:
+        score += 25; reasons.append(f"✓ {d['deliveries']} deliveries completed")
+    else:
+        reasons.append(f"✗ Only {d['deliveries'] or 0} deliveries (need 5+)")
+    if (d["rating"] or 5.0) >= 4.5:
+        score += 20; reasons.append(f"✓ Rating {d['rating']:.1f}")
+    else:
+        reasons.append(f"✗ Rating {d['rating'] or 0:.1f} below 4.5")
+    rec = "approve" if score >= 80 else "review" if score >= 50 else "reject"
+    conn.execute(
+        "INSERT INTO card_applications(driver_id, ai_recommendation, ai_reason, created_at)"
+        " VALUES(?,?,?,?)",
+        (driver_id, rec, "; ".join(reasons), now_iso()))
+    conn.commit()
+    conn.close()
+    log_event("payment", f"💳 Card application from driver #{driver_id}",
+              f"AI: {rec} ({score}/100)")
+    return {"ok": True, "ai_recommendation": rec, "score": score,
+            "message": "Application submitted — Ken will review"}
+
+
+@app.post("/api/operator/cards/{aid}/decide")
+async def card_application_decide(aid: int, req: Request, x_pin: str = Header(default="")):
+    """Ken approves/rejects a card application. Does NOT issue a real card."""
+    check_pin(x_pin)
+    body = await req.json()
+    approve = bool(body.get("approve"))
+    conn = db()
+    app = conn.execute("SELECT * FROM card_applications WHERE id=?", (aid,)).fetchone()
+    if not app:
+        conn.close()
+        raise HTTPException(404, "Application not found")
+    status = "approved" if approve else "rejected"
+    conn.execute(
+        "UPDATE card_applications SET status=?, decided_by='ken', decided_at=? WHERE id=?",
+        (status, now_iso(), aid))
+    if approve:
+        # Create card record (provider fields empty until Marqeta/Lithic activated)
+        conn.execute(
+            "INSERT OR IGNORE INTO virtual_cards(driver_id, status, created_at, updated_at)"
+            " VALUES(?, 'pending_provider', ?, ?)",
+            (app["driver_id"], now_iso(), now_iso()))
+    conn.commit()
+    conn.close()
+    audit("operator", f"card_app_{status}", "card_application", aid, "")
+    return {"ok": True, "note": "Card record created. Real issuance needs provider activation."}
 
 
 # ---------------- Restaurant partner applications ----------------

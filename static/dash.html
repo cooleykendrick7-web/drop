@@ -25,6 +25,7 @@
     <button data-t="out">📧 Outreach <span id="outbadge"></span></button>
     <button data-t="live">⚡ Live</button>
     <button data-t="bot">🤖 AI Bot</button>
+    <button data-t="pay">💳 Payments</button>
     <button data-t="more">⋯ More</button>
   </div>
   <div class="tabs sub" id="moretabs" style="display:none;flex-wrap:wrap;background:#141419">
@@ -198,6 +199,22 @@
     </div>
   </div>
 
+  <div class="tab" id="t-pay">
+    <div class="card" style="border-left:4px solid #f39c12">
+      <h3 style="margin-top:0">💳 Universal Payment Control Center</h3>
+      <p class="small" id="providernote"></p>
+      <div id="payoverview"></div>
+    </div>
+    <div class="card">
+      <h3>📝 Card Applications</h3>
+      <div id="cardapps"></div>
+    </div>
+    <div class="card">
+      <h3>💳 Virtual Cards</h3>
+      <div id="virtcards"></div>
+    </div>
+  </div>
+
   <div class="tab" id="t-audit">
     <div class="card"><b>📋 Audit trail</b>
       <p class="small">Every admin decision, recorded. Nothing happens in the dark.</p></div>
@@ -274,7 +291,35 @@ document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
   b.classList.add('on'); $('t-'+b.dataset.t).classList.add('on');
   if(b.dataset.t==='home') loadHome();
-  if(b.dataset.t==='earn') loadEarn(); if(b.dataset.t==='menu') loadMenu(); if(b.dataset.t==='set') loadSet(); if(b.dataset.t==='sup') loadTix(); if(b.dataset.t==='promo') loadPromos(); if(b.dataset.t==='stats') loadStats(); if(b.dataset.t==='upd') loadProposals(); if(b.dataset.t==='drv') loadDrivers(); if(b.dataset.t==='biz') loadBiz(); if(b.dataset.t==='inv') loadInv(); if(b.dataset.t==='money') loadMoney(); if(b.dataset.t==='deals') loadDeals(); if(b.dataset.t==='audit') loadAudit(); if(b.dataset.t==='out') loadOutreach(); if(b.dataset.t==='live') loadLive(); if(b.dataset.t==='bot'){ loadBot(); loadIdeas(); }
+  if(b.dataset.t==='earn') loadEarn(); if(b.dataset.t==='menu') loadMenu(); if(b.dataset.t==='set') loadSet(); if(b.dataset.t==='sup') loadTix(); if(b.dataset.t==='promo') loadPromos(); if(b.dataset.t==='stats') loadStats(); if(b.dataset.t==='upd') loadProposals(); if(b.dataset.t==='drv') loadDrivers(); if(b.dataset.t==='biz') loadBiz(); if(b.dataset.t==='inv') loadInv(); if(b.dataset.t==='money') loadMoney(); if(b.dataset.t==='deals') loadDeals(); if(b.dataset.t==='audit') loadAudit(); if(b.dataset.t==='out') loadOutreach(); if(b.dataset.t==='live') loadLive(); if(b.dataset.t==='pay') loadPay(); if(b.dataset.t==='bot'){ loadBot(); loadIdeas(); }
+
+/* ---- Payment Control Center ---- */
+async function loadPay(){
+  const d=await(await fetch('/api/operator/payments/overview',{headers:H()})).json();
+  $('providernote').innerHTML=`⚠️ <b>Provider status:</b> ${d.provider_note}`;
+  $('payoverview').innerHTML=`
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0">
+      <div class="card" style="margin:0;text-align:center"><div style="font-size:1.4rem;font-weight:800">${d.pending_payouts.count}</div><div class="small">Pending payouts ($${d.pending_payouts.total})</div></div>
+      <div class="card" style="margin:0;text-align:center"><div style="font-size:1.4rem;font-weight:800">${d.cards.length}</div><div class="small">Virtual cards</div></div>
+    </div>`;
+  $('cardapps').innerHTML=d.applications.map(a=>`
+    <div class="card" style="margin:8px 0">
+      <b>${a.driver_name}</b> <span class="small">AI: ${a.ai_recommendation}</span><br>
+      <span class="small">${a.ai_reason}</span><br>
+      ${a.status==='pending'?`<button class="btn small" onclick="decideCard(${a.id},1)">Approve</button>
+      <button class="btn small ghost" onclick="decideCard(${a.id},0)">Reject</button>`
+      :`<span class="small">Status: ${a.status}</span>`}
+    </div>`).join('')||'<p class="small">No applications.</p>';
+  $('virtcards').innerHTML=d.cards.map(c=>`
+    <div class="card" style="margin:8px 0">
+      <b>${c.driver_name}</b> — ${c.last4?'•••• '+c.last4:'No card issued'}<br>
+      <span class="small">Status: ${c.status} | Provider: ${c.provider||'Not activated'}</span>
+    </div>`).join('')||'<p class="small">No cards yet.</p>';
+}
+async function decideCard(aid, approve){
+  await fetch(`/api/operator/cards/${aid}/decide`,{method:'POST',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({approve:!!approve})});
+  loadPay();
+}
 });
 
 /* ---- Home dashboard ---- */

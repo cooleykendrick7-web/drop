@@ -45,6 +45,16 @@
     <h3>📊 Platform Health</h3>
     <div id="healthdetail"></div>
   </div>
+  <div class="card">
+    <h3>💬 Shout-outs</h3>
+    <p class="small">Say something nice — the boss reads these.</p>
+    <div class="row" style="gap:6px;margin-bottom:8px">
+      <input id="cauthor" placeholder="Your name" style="max-width:130px">
+      <input id="cmsg" placeholder="Say something…" style="flex:1">
+      <button class="btn small" id="csend" style="width:auto">Send</button>
+    </div>
+    <div id="comments"></div>
+  </div>
 </div>
 
 <script>
@@ -81,8 +91,31 @@ async function load(){
       🟢 Orders flowing: <b>${d.orders_flowing?'Yes':'No'}</b><br>
       🟢 AI monitoring: <b>Active</b> — checks every Sunday<br>
       📈 Trend: <b>${d.trend}</b></p>`;
+    loadComments();
   }catch(e){
     $('health').textContent='unreachable';
   }
 }
+async function loadComments(){
+  try{
+    const c=await(await fetch('/api/watch/comments')).json();
+    $('comments').innerHTML=c.map(x=>`
+      <div style="padding:8px 0;border-bottom:1px solid #222">
+        <b>${(x.author||'Anonymous').replace(/</g,'&lt;')}</b>
+        <span class="small" style="opacity:.5">${(x.created_at||'').slice(0,16)}</span><br>
+        <span>${(x.message||'').replace(/</g,'&lt;')}</span>
+        ${x.reply?`<br><span style="color:var(--acc)">👑 Boss: ${(x.reply||'').replace(/</g,'&lt;')}</span>`:''}
+      </div>`).join('')||'<p class="small">No comments yet — be the first!</p>';
+  }catch(e){}
+}
+$('csend').onclick=async()=>{
+  const a=$('cauthor').value.trim()||'Anonymous';
+  const m=$('cmsg').value.trim();
+  if(!m){alert('Type a message first');return;}
+  const r=await(await fetch('/api/watch/comments',{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({author:a,message:m})})).json();
+  if(r.ok){$('cmsg').value='';loadComments();}
+  else alert('Could not post');
+};
 </script></body></html>
