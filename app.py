@@ -3534,6 +3534,54 @@ async def city_request(req: Request):
     return {"ok": True}
 
 
+# ---------------- Google Places integration ----------------
+# Pulls REAL restaurants for ANY city via Google Places API.
+# REQUIRES: Google Cloud API key with Places API enabled + billing.
+# Set GOOGLE_PLACES_KEY in Render environment variables to activate.
+# Without a key, the endpoint returns {"active": False}.
+
+import os
+GOOGLE_PLACES_KEY = os.environ.get("GOOGLE_PLACES_KEY", "")
+
+
+@app.get("/api/places/search")
+def places_search(city: str = "", state: str = "", lat: float = 0, lng: float = 0):
+    """Search real restaurants via Google Places. Needs API key."""
+    if not GOOGLE_PLACES_KEY:
+        return {"active": False,
+                "message": "Google Places not configured. Add GOOGLE_PLACES_KEY to activate live restaurant lookup."}
+    import urllib.request, urllib.parse, json
+    try:
+        if lat and lng:
+            loc = f"{lat},{lng}"
+        else:
+            # Geocode the city first
+            geo_url = ("https://maps.googleapis.com/maps/api/geocode/json?"
+                       f"address={urllib.parse.quote(city + ',' + state)}&key={GOOGLE_PLACES_KEY}")
+            geo = json.loads(urllib.request.urlopen(geo_url, timeout=10).read())
+            if not geo.get("results"):
+                return {"active": True, "results": []}
+            loc_data = geo["results"][0]["geometry"]["location"]
+            loc = f"{loc_data['lat']},{loc_data['lng']}"
+        # Search nearby restaurants
+        places_url = ("https://maps.googleapis.com/maps/api/place/nearbysearch/json?"
+                      f"location={loc}&radius=15000&type=restaurant&key={GOOGLE_PLACES_KEY}")
+        data = json.loads(urllib.request.urlopen(places_url, timeout=10).read())
+        results = []
+        for p in data.get("results", [])[:20]:
+            results.append({
+                "name": p.get("name"),
+                "address": p.get("vicinity"),
+                "rating": p.get("rating"),
+                "lat": p["geometry"]["location"]["lat"],
+                "lng": p["geometry"]["location"]["lng"],
+                "place_id": p.get("place_id"),
+            })
+        return {"active": True, "results": results}
+    except Exception as e:
+        return {"active": True, "error": str(e)[:200], "results": []}
+
+
 # ---------------- WATCH portal comments ----------------
 # Friends comment, Ken replies. Legal name is auto-blocked.
 WATCH_BLOCKED_NAMES = ["kendrick cooley", "kendrick", "ken"]

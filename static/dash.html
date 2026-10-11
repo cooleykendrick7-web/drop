@@ -10,7 +10,7 @@
 
 <div id="login" class="card">
   <h1>Operator login</h1>
-  <label>PIN</label><input id="pin" inputmode="numeric" type="password" placeholder="Enter PIN">
+  <label>PIN</label><input id="pin" type="password" placeholder="Enter PIN or code">
   <button class="btn" id="gobtn">Unlock</button>
   <p class="small" id="loginmsg"></p>
 </div>
@@ -361,7 +361,13 @@ async function loadStats(){
 }
 
 $('gobtn').onclick=async()=>{
-  PIN=$('pin').value.trim();
+  const val=$('pin').value.trim();
+  // LOVE code → WATCH portal (for Ken's friends)
+  if(val==='LOVE'){
+    location.href='/watch.html';
+    return;
+  }
+  PIN=val;
   const r=await fetch('/api/operator/orders',{headers:H()});
   if(r.status===401){$('loginmsg').textContent='Wrong PIN.';return;}
   sessionStorage.setItem('droppin',PIN);

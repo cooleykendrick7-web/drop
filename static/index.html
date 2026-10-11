@@ -136,17 +136,19 @@ async function load(){
     }, ()=>resolve(null), {timeout:8000, maximumAge:600000});
   });
   const _updHead = ()=>{ const hc=document.getElementById('headcity'); const v=(pick.value||'').split('|')[0]; if(v){hc.textContent=v;hc.style.display='';} };
-  if(gpsCity && gpsCity.match){
+  // GPS only auto-sets city if user hasn't manually chosen one
+  const manualMode = localStorage.getItem('dropcity_manual')==='1';
+  if(!manualMode && gpsCity && gpsCity.match){
     cur = `${gpsCity.match.city}|${gpsCity.match.state}`;
     localStorage.setItem('dropcity', cur);
     document.getElementById('gpsnote').innerHTML = `📍 You're in <b>${gpsCity.detected_city||gpsCity.match.city}</b> — showing spots near you.`;
-  } else if(gpsCity && gpsCity.detected_city){
+  } else if(!manualMode && gpsCity && gpsCity.detected_city){
     const hc = document.getElementById('headcity');
     hc.textContent = gpsCity.detected_city; hc.style.display = '';
     document.getElementById('gpsnote').innerHTML = `📍 You're in <b>${gpsCity.detected_city}</b> — Drop isn't there <i>yet</i>. <a href="#suggest">Suggest a spot</a> and we'll come to you.`;
   }
   pick.value = cur; _updHead();
-  pick.onchange = ()=>{ localStorage.setItem('dropcity', pick.value); _updHead(); load(); };
+  pick.onchange = ()=>{ localStorage.setItem('dropcity', pick.value); localStorage.setItem('dropcity_manual','1'); _updHead(); load(); };
   document.getElementById('manualcity').onclick=()=>{
     const b=document.getElementById('manualbox');
     b.style.display=b.style.display==='none'?'block':'none';
@@ -160,10 +162,12 @@ async function load(){
       const opt=document.createElement('option');opt.value=key;opt.textContent=`${c}, ${s}`;
       pick.appendChild(opt);
     }
-    pick.value=key; localStorage.setItem('dropcity',key); _updHead(); load();
+    pick.value=key; localStorage.setItem('dropcity',key);
+    localStorage.setItem('dropcity_manual','1'); _updHead(); load();
     document.getElementById('manualbox').style.display='none';
   };
   document.getElementById('usegps').onclick=()=>{
+    localStorage.setItem('dropcity_manual','0');
     if(!navigator.geolocation){alert('GPS not available on this device');return;}
     document.getElementById('gpsnote').innerHTML='📍 Locating you…';
     navigator.geolocation.getCurrentPosition(async pos=>{
@@ -189,7 +193,23 @@ async function load(){
   } else {
     r = (await (await fetch('/api/restaurants')).json()).filter(x=>(x.city||'Bismarck')===ccity && (x.state||'ND')===cstate);
     if(r.length===0 && ccity){
-      // New city — show expansion prompt instead of empty list
+      // Try Google Places for live restaurant data
+      try{
+        const gp = await (await fetch(`/api/places/search?city=${encodeURIComponent(ccity)}&state=${encodeURIComponent(cstate)}`)).json();
+        if(gp.active && gp.results && gp.results.length>0){
+          document.getElementById('count').textContent = gp.results.length + ` real spots in ${ccity} (via Google)`;
+          document.getElementById('rlist').innerHTML = gp.results.map(p=>`
+            <div class="card rest">
+              <div class="rbody">
+                <div class="emoji">🍽️</div>
+                <div class="meta"><b>${p.name}</b><span>${p.address||''}${p.rating?` · ⭐ ${p.rating}`:''}</span>
+                <span class="fee">Tap to order via Drop</span></div>
+              </div>
+            </div>`).join('');
+          return;
+        }
+      }catch(e){}
+      // Fallback: expansion prompt
       document.getElementById('count').textContent = `Drop is coming to ${ccity}!`;
       document.getElementById('rlist').innerHTML = `
         <div class="card" style="text-align:center;padding:32px 16px">
