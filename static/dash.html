@@ -18,6 +18,7 @@
 <div id="app" style="display:none">
   <div class="tabs">
     <button class="on" data-t="orders">Orders</button>
+    <button data-t="money">💰 Money</button>
     <button data-t="drv">Drivers <span id="drvbadge"></span></button>
     <button data-t="biz">Drop More</button>
     <button data-t="earn">Earnings</button>
@@ -36,6 +37,33 @@
       <button class="btn small ghost" id="locToggle" style="width:auto;padding:10px 20px">Start</button></div>
       <p class="small" id="locmsg"></p></div>
     <div id="olist"></div>
+  </div>
+
+  <div class="tab" id="t-money">
+    <div class="card"><h2 style="margin:0">💰 Company money</h2>
+      <p class="small" id="finwarn" style="color:#f66"></p>
+      <div class="statgrid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0">
+        <div class="stat"><b id="f-rev">–</b><span class="small">Gross revenue</span></div>
+        <div class="stat"><b id="f-profit" style="color:#4ade80">–</b><span class="small">Net profit (<span id="f-margin">–</span>)</span></div>
+        <div class="stat"><b id="f-driver">–</b><span class="small">Driver pay owed</span></div>
+        <div class="stat"><b id="f-tips">–</b><span class="small">Tips owed (100% to drivers)</span></div>
+        <div class="stat"><b id="f-stripe">–</b><span class="small">Stripe fees</span></div>
+        <div class="stat"><b id="f-payout">–</b><span class="small">Payouts requested</span></div>
+      </div>
+      <div id="f-alerts"></div></div>
+    <div class="card"><h3>⚙️ Pricing rules</h3>
+      <p class="small">Smart pricing: fee = base + (miles × per-mile). Driver pay = base + (miles × per-mile). You set the rules — the system follows them.</p>
+      <div class="row"><div style="flex:1"><label class="small">Base fee $</label><input id="fs-base" inputmode="decimal"></div>
+      <div style="flex:1"><label class="small">Per mile $</label><input id="fs-mile" inputmode="decimal"></div></div>
+      <div class="row"><div style="flex:1"><label class="small">Driver base $</label><input id="fs-dbase" inputmode="decimal"></div>
+      <div style="flex:1"><label class="small">Driver per mile $</label><input id="fs-dmile" inputmode="decimal"></div></div>
+      <div class="row"><div style="flex:1"><label class="small">Min profit per order $</label><input id="fs-minp" inputmode="decimal"></div>
+      <div style="flex:1"><label class="small">&nbsp;</label><button class="btn small" id="fs-save">Save rules</button></div></div>
+      <p class="small" id="fs-msg"></p></div>
+    <div class="card"><h3>💸 Payout requests</h3><div id="payoutlist"><p class="small">Loading…</p></div></div>
+    <div class="card"><h3>🔗 Stripe Connect</h3><div id="connectbox"><p class="small">Loading…</p></div></div>
+    <h3>Per-order breakdown</h3>
+    <div id="finorders"></div>
   </div>
 
   <div class="tab" id="t-drv">
@@ -155,7 +183,7 @@ document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
   b.classList.add('on'); $('t-'+b.dataset.t).classList.add('on');
-  if(b.dataset.t==='earn') loadEarn(); if(b.dataset.t==='menu') loadMenu(); if(b.dataset.t==='set') loadSet(); if(b.dataset.t==='sup') loadTix(); if(b.dataset.t==='promo') loadPromos(); if(b.dataset.t==='stats') loadStats(); if(b.dataset.t==='upd') loadProposals(); if(b.dataset.t==='drv') loadDrivers(); if(b.dataset.t==='biz') loadBiz(); if(b.dataset.t==='inv') loadInv();
+  if(b.dataset.t==='earn') loadEarn(); if(b.dataset.t==='menu') loadMenu(); if(b.dataset.t==='set') loadSet(); if(b.dataset.t==='sup') loadTix(); if(b.dataset.t==='promo') loadPromos(); if(b.dataset.t==='stats') loadStats(); if(b.dataset.t==='upd') loadProposals(); if(b.dataset.t==='drv') loadDrivers(); if(b.dataset.t==='biz') loadBiz(); if(b.dataset.t==='inv') loadInv(); if(b.dataset.t==='money') loadMoney();
 });
 
 async function loadStats(){
@@ -515,5 +543,65 @@ async function loadInv(){
       <p class="small">✉️ <a href="mailto:${esc(x.email)}">${esc(x.email)}</a>${x.phone?` · 📞 <a href="tel:${esc(x.phone)}">${esc(x.phone)}</a>`:''} · ${x.created_at.slice(0,10)}</p>
       ${x.message?`<p class="small">“${esc(x.message)}”</p>`:''}</div>`).join('')
     ||'<p class="small">No investor interest yet.</p>';
+}
+/* --- Money dashboard --- */
+async function loadMoney(){
+  const f=await (await fetch('/api/operator/financials',{headers:H()})).json();
+  $('f-rev').textContent='$'+f.gross_revenue.toFixed(2);
+  $('f-profit').textContent='$'+f.net_profit.toFixed(2);
+  $('f-profit').style.color=f.net_profit>=0?'#4ade80':'#f66';
+  $('f-margin').textContent=f.profit_margin+'% margin';
+  $('f-driver').textContent='$'+f.driver_pay_owed.toFixed(2);
+  $('f-tips').textContent='$'+f.tips_owed.toFixed(2);
+  $('f-stripe').textContent='$'+f.stripe_fees.toFixed(2);
+  $('f-payout').textContent=f.pending_payout_requests+' ($'+f.pending_payout_amount.toFixed(2)+')';
+  $('f-alerts').innerHTML=f.alerts.map(a=>`<p class="small" style="color:#fbbf24">⚠️ ${a}</p>`).join('')
+    ||'<p class="small" style="color:#4ade80">✅ All orders meet your minimum profit.</p>';
+  $('finwarn').textContent=f.net_profit<0?'🔴 You are losing money overall — check pricing rules below.':'';
+  // pricing form
+  $('fs-base').value=f.pricing.base_fee; $('fs-mile').value=f.pricing.per_mile;
+  $('fs-dbase').value=f.pricing.driver_base; $('fs-dmile').value=f.pricing.driver_per_mile;
+  $('fs-minp').value=f.pricing.min_profit;
+  // per-order table
+  $('finorders').innerHTML=f.per_order.map(o=>`
+    <div class="card" style="${o.below_min?'border-color:#f66':''}">
+      <div class="row"><b>#${o.id} ${o.kind==='courier'?'📦':'🍔'}</b>
+        <b style="color:${o.profit>=0?'#4ade80':'#f66'}">$${o.profit.toFixed(2)} profit</b></div>
+      <p class="small">Total $${o.total.toFixed(2)} · driver $${o.driver_pay.toFixed(2)} + tip $${o.tip.toFixed(2)} · Stripe ~$${o.stripe_fee.toFixed(2)}</p>
+    </div>`).join('')||'<p class="small">No paid orders yet.</p>';
+  loadPayouts(); loadConnect();
+}
+$('fs-save').onclick=async()=>{
+  const body={price_base_fee:parseFloat($('fs-base').value)||3.99,
+    price_per_mile:parseFloat($('fs-mile').value)||1.5,
+    driver_base_pay:parseFloat($('fs-dbase').value)||3,
+    driver_per_mile:parseFloat($('fs-dmile').value)||1,
+    min_profit_per_order:parseFloat($('fs-minp').value)||1};
+  await fetch('/api/operator/financial-settings',{method:'POST',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify(body)});
+  $('fs-msg').textContent='✅ Pricing rules saved.'; loadMoney();
+};
+async function loadPayouts(){
+  const p=await (await fetch('/api/operator/payouts',{headers:H()})).json();
+  const req=p.filter(x=>x.status==='requested');
+  $('payoutlist').innerHTML=(req.map(x=>`
+    <div class="card"><div class="row"><b>${x.driver_name}: $${x.amount.toFixed(2)}</b>
+      <span class="badge">REQUESTED</span></div>
+      <p class="small">${x.created_at.slice(0,16).replace('T',' ')} · Send via bank/Cash App, then tap:</p>
+      <button class="btn small" onclick="markPaid(${x.id})">✅ Mark paid</button></div>`).join('')
+    ||'<p class="small">No payout requests right now.</p>')
+    + (p.filter(x=>x.status==='paid').length?`<p class="small">✅ ${p.filter(x=>x.status==='paid').length} payouts completed.</p>`:'');
+}
+async function markPaid(id){
+  if(!confirm('Confirm you sent this money to the driver?'))return;
+  await fetch('/api/operator/payouts/'+id+'/paid',{method:'POST',headers:H()});
+  loadPayouts(); loadMoney();
+}
+async function loadConnect(){
+  const c=await (await fetch('/api/operator/connect/status',{headers:H()})).json();
+  $('connectbox').innerHTML=(c.enabled
+    ?'<p class="small" style="color:#4ade80">✅ Stripe Connect is active — payouts can go automatic.</p>'
+    :'<p class="small">⏳ <b>Manual mode:</b> you send driver payouts yourself, then tap "Mark paid".</p>')
+    + c.steps.map(s=>`<p class="small">${s.done?'✅':'⬜'} ${s.label}</p>`).join('')
+    + `<p class="small">${c.note}</p>`;
 }
 </script></body></html>

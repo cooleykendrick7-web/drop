@@ -31,9 +31,21 @@
   <div class="tab on" id="t-del"><div id="olist"><p class="small">Loading…</p></div></div>
 
   <div class="tab" id="t-earn">
-    <div class="card"><h2 style="margin:0">Your earnings</h2>
-      <div class="total" id="etotal">$0.00</div>
-      <p class="small" id="ecount"></p></div>
+    <div class="card"><h2 style="margin:0">💼 Driver wallet</h2>
+      <div class="statgrid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0">
+        <div class="stat"><b id="w-avail">$0.00</b><span class="small">Available</span></div>
+        <div class="stat"><b id="w-pend">$0.00</b><span class="small">Pending</span></div>
+        <div class="stat"><b id="w-paid">$0.00</b><span class="small">Paid out</span></div>
+        <div class="stat"><b id="w-req">$0.00</b><span class="small">Requested</span></div>
+      </div>
+      <p class="small">Pending = deliveries not finished yet. Only <b>available</b> money can be cashed out.</p>
+      <div class="row"><input id="w-amt" inputmode="decimal" placeholder="Amount $" style="flex:1;margin-right:6px">
+      <button class="btn small" id="w-cashout" style="width:auto">💸 Cash out</button></div>
+      <p class="small" id="w-msg"></p></div>
+    <h3>Per-delivery earnings</h3>
+    <div id="whist"></div>
+    <h3>Payout history</h3>
+    <div id="wpay"></div>
   </div>
 
   <div class="tab" id="t-me">
@@ -103,10 +115,31 @@ async function setStatus(id,s){
   loadOrders();
 }
 async function loadEarn(){
-  const e=await (await fetch('/api/drivers/earnings')).json();
-  $('etotal').textContent='$'+e.total.toFixed(2);
-  $('ecount').textContent=e.deliveries+' deliveries · $'+e.fees.toFixed(2)+' fees + $'+e.tips.toFixed(2)+' tips';
+  const w=await (await fetch('/api/drivers/wallet')).json();
+  $('w-avail').textContent='$'+w.available.toFixed(2);
+  $('w-pend').textContent='$'+w.pending.toFixed(2);
+  $('w-paid').textContent='$'+w.paid_out.toFixed(2);
+  $('w-req').textContent='$'+w.requested.toFixed(2);
+  $('whist').innerHTML=w.history.map(h=>`
+    <div class="card"><div class="row"><b>Order #${h.order_id}</b><b>$${h.total.toFixed(2)}</b></div>
+      <p class="small">Base $${h.base.toFixed(2)} + tip $${h.tip.toFixed(2)} (tips are 100% yours)</p></div>`).join('')
+    ||'<p class="small">No completed deliveries yet.</p>';
+  $('wpay').innerHTML=w.payouts.map(p=>`
+    <div class="card"><div class="row"><b>$${p.amount.toFixed(2)}</b>
+      <span class="badge ${p.status==='paid'?'open':''}">${p.status.toUpperCase()}</span></div>
+      <p class="small">${p.created_at.slice(0,16).replace('T',' ')}</p></div>`).join('')
+    ||'<p class="small">No payouts yet.</p>';
 }
+$('w-cashout').onclick=async()=>{
+  const amt=parseFloat($('w-amt').value);
+  if(!amt||amt<=0){$('w-msg').textContent='Enter an amount.';return;}
+  if(!confirm(`Cash out $${amt.toFixed(2)}? Your manager will send it and mark it paid.`))return;
+  const r=await fetch('/api/drivers/payout-request',{method:'POST',
+    headers:{'Content-Type':'application/json'},body:JSON.stringify({amount:amt})});
+  const j=await r.json();
+  $('w-msg').textContent=r.ok?'✅ Request sent! You\'ll get it soon.':'Error: '+(j.detail||'failed');
+  $('w-amt').value=''; loadEarn();
+};
 async function loadMe(){
   const m=await (await fetch('/api/drivers/me')).json();
   $('mname').textContent=m.name;
