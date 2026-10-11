@@ -2661,44 +2661,20 @@ def op_outreach_list(x_pin: str = Header(default=""), status: str = ""):
 
 @app.post("/api/operator/outreach/{eid}/send")
 async def op_outreach_send(eid: int, req: Request, x_pin: str = Header(default="")):
-    """Ken approved → send the email via the Drop business Gmail account."""
+    """Ken approved → marks the email ready to send.
+    A scheduled job on the operator's assistant side picks it up within ~15 minutes
+    and sends it from the Drop business Gmail, then marks it sent."""
     check_pin(x_pin)
     conn = db()
     e = conn.execute("SELECT * FROM outreach_emails WHERE id=?", (eid,)).fetchone()
-    conn.close()
     if not e or e["status"] != "draft":
+        conn.close()
         raise HTTPException(400, "Email not found or already sent")
-    import subprocess as sp
-    import json as _j
-    # find the Drop business Gmail account
-    try:
-        accts = sp.run(["hatch_gws_cli", "gmail", "accounts"],
-                       capture_output=True, text=True, timeout=30)
-        accounts = _j.loads(accts.stdout).get("accounts", [])
-        biz = next((a for a in accounts
-                    if "wearedropservicesllc" in a.get("display_name", "").lower()), None)
-        if not biz:
-            raise HTTPException(400,
-                "Drop business Gmail (wearedropservicesllc@gmail.com) is not linked yet. "
-                "Link it under Gmail accounts, then try again.")
-        acct_id = biz["account_id"]
-    except HTTPException:
-        raise
-    except Exception as ex:
-        raise HTTPException(500, f"Could not list Gmail accounts: {str(ex)[:100]}")
-    result = sp.run(
-        ["hatch_gws_cli", "gmail", "+send", "--account", acct_id,
-         "--to", e["to_email"], "--subject", e["subject"], "--body", e["body"]],
-        capture_output=True, text=True, timeout=90)
-    if result.returncode != 0:
-        raise HTTPException(500, f"Gmail send failed: {result.stderr[:200]}")
-    conn = db()
-    conn.execute("UPDATE outreach_emails SET status='sent', sent_at=? WHERE id=?",
-                 (now_iso(), eid))
+    conn.execute("UPDATE outreach_emails SET status='approved' WHERE id=?", (eid,))
     conn.commit()
     conn.close()
-    audit("operator", "outreach_sent", "outreach", eid, f"to {e['to_email']}")
-    return {"ok": True}
+    audit("operator", "outreach_approved", "outreach", eid, f"to {e['to_email']}")
+    return {"ok": True, "note": "Approved — will send from wearedropservicesllc@gmail.com within ~15 minutes."}
 
 
 @app.post("/api/operator/outreach/{eid}/discard")
@@ -2709,6 +2685,19 @@ def op_outreach_discard(eid: int, x_pin: str = Header(default="")):
     conn.commit()
     conn.close()
     audit("operator", "outreach_discarded", "outreach", eid, "")
+    return {"ok": True}
+
+
+@app.post("/api/operator/outreach/{eid}/sent")
+def op_outreach_sent(eid: int, x_pin: str = Header(default="")):
+    """Internal: the outreach sender job marks an email sent after Gmail confirms."""
+    check_pin(x_pin)
+    conn = db()
+    conn.execute("UPDATE outreach_emails SET status='sent', sent_at=? WHERE id=?",
+                 (now_iso(), eid))
+    conn.commit()
+    conn.close()
+    audit("system", "outreach_sent", "outreach", eid, "")
     return {"ok": True}
 
 
