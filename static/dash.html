@@ -29,6 +29,7 @@
     <button data-t="sup">Support <span id="tixbadge"></span></button>
     <button data-t="stats">Stats</button>
     <button data-t="inv">Investors <span id="invbadge"></span></button>
+    <button data-t="out">📧 Outreach <span id="outbadge"></span></button>
     <button data-t="audit">Audit</button>
     <button data-t="set">Settings</button>
   </div>
@@ -150,6 +151,19 @@
     <div id="auditlist"></div>
   </div>
 
+  <div class="tab" id="t-out">
+    <div class="card"><b>📧 AI outreach</b>
+      <p class="small">AI drafts partnership emails. <b>You approve every one</b> before it sends. Nothing goes out automatically.</p></div>
+    <div class="card"><h3>Draft a new outreach email</h3>
+      <input id="o-email" placeholder="Business email" inputmode="email">
+      <input id="o-biz" placeholder="Business name">
+      <div class="row"><input id="o-contact" placeholder="Contact name (optional)" style="flex:1;margin-right:6px">
+      <input id="o-type" placeholder="Type (e.g. auto parts)" style="flex:1"></div>
+      <button class="btn" id="o-draft">✨ AI draft email</button>
+      <p class="small" id="o-msg"></p></div>
+    <div id="outlist"></div>
+  </div>
+
   <div class="tab" id="t-set">
     <div class="card"><h3>🟢 Accepting orders</h3>
       <div class="row"><span class="small">Turn off when you're slammed — the site tells customers to check back.</span>
@@ -198,7 +212,7 @@ document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
   b.classList.add('on'); $('t-'+b.dataset.t).classList.add('on');
-  if(b.dataset.t==='earn') loadEarn(); if(b.dataset.t==='menu') loadMenu(); if(b.dataset.t==='set') loadSet(); if(b.dataset.t==='sup') loadTix(); if(b.dataset.t==='promo') loadPromos(); if(b.dataset.t==='stats') loadStats(); if(b.dataset.t==='upd') loadProposals(); if(b.dataset.t==='drv') loadDrivers(); if(b.dataset.t==='biz') loadBiz(); if(b.dataset.t==='inv') loadInv(); if(b.dataset.t==='money') loadMoney(); if(b.dataset.t==='deals') loadDeals(); if(b.dataset.t==='audit') loadAudit();
+  if(b.dataset.t==='earn') loadEarn(); if(b.dataset.t==='menu') loadMenu(); if(b.dataset.t==='set') loadSet(); if(b.dataset.t==='sup') loadTix(); if(b.dataset.t==='promo') loadPromos(); if(b.dataset.t==='stats') loadStats(); if(b.dataset.t==='upd') loadProposals(); if(b.dataset.t==='drv') loadDrivers(); if(b.dataset.t==='biz') loadBiz(); if(b.dataset.t==='inv') loadInv(); if(b.dataset.t==='money') loadMoney(); if(b.dataset.t==='deals') loadDeals(); if(b.dataset.t==='audit') loadAudit(); if(b.dataset.t==='out') loadOutreach();
 });
 
 async function loadStats(){
@@ -514,6 +528,7 @@ async function loadDrivers(){
       <span class="badge open">⭐ ${rate}% · ${x.deliveries} deliveries</span></div>
       <p class="small">📞 ${esc(x.phone)} · 🚗 ${esc(x.vehicle_year)} ${esc(x.vehicle_make)} ${esc(x.vehicle_model)}</p>
       <div class="row"><button class="btn small" onclick="driverProfile(${x.id})">📊 AI Performance</button>
+      <button class="btn small" onclick="sendBoost(${x.id})">💪 Send boost</button>
       <button class="btn small ghost" onclick="drvAct(${x.id},'suspend')">⏸ Suspend</button></div>
       <div id="dprof-${x.id}" style="display:none;margin-top:8px"></div></div>`;
   }).join('')||'<p class="small">No active drivers yet.</p>';
@@ -523,6 +538,14 @@ async function drvAct(id,act){
   if(act==='suspend'&&!confirm('Suspend this driver?'))return;
   await fetch(`/api/operator/drivers/${id}/${act}`,{method:'POST',headers:H()});
   loadDrivers();
+}
+async function sendBoost(id){
+  const msg=prompt('Send a motivational message to this driver (or leave blank for an AI-generated one):');
+  if(msg===null)return;
+  const r=await fetch(`/api/operator/drivers/${id}/boost`,{method:'POST',
+    headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({message:msg})});
+  const j=await r.json();
+  alert(r.ok?'💪 Boost sent: "'+j.message.slice(0,80)+'..."':'Failed to send.');
 }
 
 /* --- Drop More businesses --- */
@@ -695,6 +718,44 @@ async function driverProfile(id){
     <p class="small"><b>AI recommendation:</b> ${p.recommendation}</p>
     ${p.evidence.map(e=>`<p class="small">• ${e}</p>`).join('')}
     <p class="small" style="opacity:.7">${p.disclaimer}</p></div>`;
+}
+
+/* --- AI outreach --- */
+async function loadOutreach(){
+  const list=await (await fetch('/api/operator/outreach',{headers:H()})).json();
+  const drafts=list.filter(x=>x.status==='draft');
+  $('outbadge').textContent=drafts.length?`(${drafts.length})`:'';
+  const esc=s=>(s||'').replace(/</g,'&lt;');
+  $('outlist').innerHTML=list.map(e=>`
+    <div class="card"><div class="row"><b>${esc(e.business_name)}</b>
+      <span class="badge ${e.status==='sent'?'open':''}">${e.status.toUpperCase()}</span></div>
+      <p class="small">To: ${esc(e.to_email)}<br><b>${esc(e.subject)}</b></p>
+      <p class="small" style="white-space:pre-wrap;background:#141419;padding:10px;border-radius:8px">${esc(e.body)}</p>
+      ${e.status==='draft'?`<div class="row"><button class="btn small" onclick="outSend(${e.id})">📨 Approve & send</button>
+        <button class="btn small ghost" onclick="outDiscard(${e.id})">Discard</button></div>`:''}
+    </div>`).join('')||'<p class="small">No outreach emails yet.</p>';
+}
+$('o-draft').onclick=async()=>{
+  const body={to_email:$('o-email').value.trim(),business_name:$('o-biz').value.trim(),
+    contact_name:$('o-contact').value.trim(),business_type:$('o-type').value.trim()};
+  if(!body.to_email.includes('@')||!body.business_name){$('o-msg').textContent='Email and business name required.';return;}
+  $('o-msg').textContent='Drafting…';
+  const r=await fetch('/api/operator/outreach/draft',{method:'POST',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const j=await r.json();
+  $('o-msg').textContent=r.ok?'✅ Draft ready below — review, then approve & send.':'Error: '+(j.detail||'failed');
+  if(r.ok){$('o-email').value=$('o-biz').value=$('o-contact').value=$('o-type').value='';}
+  loadOutreach();
+};
+async function outSend(id){
+  if(!confirm('Send this email? It will go out from the Drop Gmail account.'))return;
+  const r=await fetch(`/api/operator/outreach/${id}/send`,{method:'POST',headers:H()});
+  const j=await r.json();
+  if(!r.ok)alert('Error: '+(j.detail||'failed'));
+  loadOutreach();
+}
+async function outDiscard(id){
+  await fetch(`/api/operator/outreach/${id}/discard`,{method:'POST',headers:H()});
+  loadOutreach();
 }
 
 /* --- Audit trail --- */

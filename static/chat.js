@@ -1,5 +1,25 @@
-/* Drop support chat — floating widget with instant answers + message-to-us */
+/* Drop support chat — floating widget. Ken is the AI assistant's name. */
 (function(){
+  // Seasonal themes — Drop dresses up for the holidays 🎃🎄
+  (function season(){
+    const m=new Date().getMonth(), d=new Date().getDate();
+    let emoji='', theme='';
+    if(m===9&&(d>=25)||m===9){emoji='🎃';theme='halloween';}
+    else if(m===11){emoji='🎄';theme='christmas';}
+    else if(m===6&&d===4){emoji='🎆';theme='july4';}
+    else if(m===1&&d===14){emoji='💘';theme='valentine';}
+    if(emoji){
+      document.title=emoji+' '+document.title;
+      const st=document.createElement('style');
+      st.textContent=theme==='halloween'
+        ?':root{--acc:#ff7518 !important}'
+        :theme==='christmas'
+        ?':root{--acc:#22c55e !important}'
+        :theme==='valentine'
+        ?':root{--acc:#ec4899 !important}':':root{--acc:#3b82f6 !important}';
+      document.head.appendChild(st);
+    }
+  })();
   const FAQ = [
     {k:["fee","cost","delivery charge","how much","price of delivery"],
      a:"Delivery is a flat <b>$3.99</b> — no surge pricing, no hidden fees. You see the full total before you pay."},
@@ -60,7 +80,7 @@
     const root = el(`<div id="dropchat">
       <button id="dc-btn" aria-label="Chat with us">💬</button>
       <div id="dc-panel" style="display:none">
-        <div id="dc-head"><img src="/static/logo-mark.jpg" alt=""><div><b>Drop Support</b><span>Typically replies fast</span></div><button id="dc-x">✕</button></div>
+        <div id="dc-head"><img src="/static/logo-mark.jpg" alt=""><div><b>Ken</b><span>Drop AI assistant · typically replies fast</span></div><button id="dc-x">✕</button></div>
         <div id="dc-msgs"></div>
         <div id="dc-quick"></div>
         <div id="dc-form" style="display:none">
@@ -117,7 +137,7 @@
         const saved = JSON.parse(localStorage.getItem('dropticket') || 'null');
         if(saved && saved.id){ openThread(saved.id, saved.phone); return; }
       }catch(e){}
-      bot("Hey! I'm the Drop assistant 👋 Ask me about delivery, timing, or tracking — or tap <b>Message us</b> if something needs a human.");
+      bot("Hey! I'm <b>Ken</b> 👋 Your Drop assistant. Ask me about delivery, timing, or tracking — or tap <b>Message us</b> if something needs a human.");
     };
     document.getElementById('dc-x').onclick = ()=>{
       document.getElementById('dc-panel').style.display = 'none';

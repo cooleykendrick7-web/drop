@@ -48,6 +48,17 @@
   <textarea id="d-exp" rows="2" placeholder="Any delivery or driving experience?"></textarea>
   <div class="chk"><input type="checkbox" id="d-bg">
     <span class="small">I consent to a background check and confirm I'm 18 or older with a valid license and insured vehicle. *</span></div>
+  <div class="card" style="background:#141419;margin:12px 0">
+    <h3>📋 Driver agreement — read carefully</h3>
+    <p class="small">By applying to drive for DROP MORE, you confirm and agree:<br><br>
+    🚗 <b>Your vehicle, your responsibility.</b> You maintain your own valid driver's license, vehicle registration, and insurance at all times.<br><br>
+    🛡️ <b>Insurance required.</b> You must carry insurance that covers delivery driving. Personal auto policies often EXCLUDE delivery work — check with your insurer. You cannot drive for DROP MORE without valid coverage.<br><br>
+    ⚠️ <b>Assumption of risk.</b> Delivery driving involves road risks. You accept responsibility for your own safety, your vehicle, and any injury or damage that occurs while driving. DROP MORE is not liable for accidents, injuries, vehicle damage, or tickets incurred during deliveries.<br><br>
+    📦 <b>Cargo care.</b> Handle every order with care. Report accidents, damage, or incidents immediately through the driver portal.<br><br>
+    ✅ <b>Safe driving.</b> Follow all traffic laws. Our system monitors driving speed via GPS — repeated speeding will lead to removal.</p>
+    <div class="chk"><input type="checkbox" id="d-agree">
+      <span class="small"><b>I have read and accept the driver agreement above. *</b></span></div>
+  </div>
   <button class="btn" id="d-submit">Submit application →</button>
   <p class="small" id="d-msg"></p>
   <p class="small">What happens next: our team reviews every application personally. If approved, you'll get access to your own <b>Dropper portal</b> with your deliveries, GPS navigation, earnings, and support chat.</p>
@@ -66,6 +77,7 @@ $('d-submit').onclick=async()=>{
   if(!body.name||!body.phone||body.password.length<6){$('d-msg').textContent='Name, phone, and a 6+ character password are required.';return;}
   if(!body.license_number||!body.license_state){$('d-msg').textContent="Please add your driver's license info.";return;}
   if(!body.background_consent){$('d-msg').textContent='Background check consent is required.';return;}
+  if(!$('d-agree').checked){$('d-msg').textContent='You must accept the driver agreement.';return;}
   $('d-msg').textContent='Submitting…';
   const r=await fetch('/api/drivers/apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   const j=await r.json();

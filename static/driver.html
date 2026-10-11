@@ -24,11 +24,21 @@
 
   <div class="tabs">
     <button class="on" data-t="del">Deliveries</button>
+    <button data-t="msg">Inbox <span id="msgbadge"></span></button>
     <button data-t="earn">Earnings</button>
     <button data-t="me">Profile</button>
   </div>
 
   <div class="tab on" id="t-del"><div id="olist"><p class="small">Loading…</p></div></div>
+
+  <div class="tab" id="t-msg">
+    <div class="card"><h3>📬 Messages</h3><div id="msglist"><p class="small">Loading…</p></div></div>
+    <div class="card"><h3>🔔 Push notifications</h3>
+      <p class="small">Enter your ntfy topic to get instant alerts for new deliveries, messages, and safety warnings.</p>
+      <div class="row"><input id="ntfy" placeholder="your-secret-topic" style="flex:1;margin-right:6px">
+      <button class="btn small" id="ntfysave" style="width:auto">Save</button></div>
+      <p class="small" id="ntfymsg"></p></div>
+  </div>
 
   <div class="tab" id="t-earn">
     <div class="card"><h2 style="margin:0">💼 Driver wallet</h2>
@@ -67,7 +77,7 @@ document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
   b.classList.add('on'); $('t-'+b.dataset.t).classList.add('on');
-  if(b.dataset.t==='earn') loadEarn(); if(b.dataset.t==='me') loadMe();
+  if(b.dataset.t==='earn') loadEarn(); if(b.dataset.t==='me') loadMe(); if(b.dataset.t==='msg') loadMsgs();
 });
 
 $('gobtn').onclick=async()=>{
@@ -145,7 +155,24 @@ async function loadMe(){
   $('mname').textContent=m.name;
   $('mstats').innerHTML=`⭐ On-time rate: <b>${m.on_time_rate}%</b> · ${m.deliveries} deliveries`;
   $('mvehicle').textContent=`${m.vehicle_year} ${m.vehicle_make} ${m.vehicle_model} ${m.vehicle_color}`.trim();
+  if(m.ntfy_topic) $('ntfy').value=m.ntfy_topic;
 }
+async function loadMsgs(){
+  const msgs=await (await fetch('/api/drivers/messages')).json();
+  $('msgbadge').textContent='';
+  const icons={boost:'💪',warning:'⚠️',info:'ℹ️',delay_check:'⏰'};
+  $('msglist').innerHTML=msgs.map(m=>`
+    <div class="card"><div class="row"><b>${icons[m.kind]||'💬'} ${m.title.replace(/</g,'&lt;')}</b>
+      <span class="small">${m.created_at.slice(0,16).replace('T',' ')}</span></div>
+      <p class="small">${m.body.replace(/</g,'&lt;')}</p></div>`).join('')
+    ||'<p class="small">No messages yet.</p>';
+}
+$('ntfysave').onclick=async()=>{
+  const t=$('ntfy').value.trim();
+  await fetch('/api/drivers/ntfy',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({topic:t})});
+  $('ntfymsg').textContent=t?'✅ Saved! You\'ll get push alerts.':'Cleared.';
+};
 
 // GPS sharing
 let locWatch=null, lastPost=0;
