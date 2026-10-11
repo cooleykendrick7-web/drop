@@ -1,121 +1,117 @@
 <!DOCTYPE html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Drop WATCH — Live Status</title>
+<title>Drop — Live Watch</title>
 <link rel="icon" href="/static/logo-mark.jpg">
 <link rel="stylesheet" href="/static/styles.css">
 <style>
-.watch-hero{text-align:center;padding:32px 16px;background:linear-gradient(135deg,#1a1a2e,#16213e);border-radius:16px;margin:16px}
-.status-dot{width:14px;height:14px;border-radius:50%;display:inline-block;margin-right:8px}
-.status-good{background:#2ecc71;box-shadow:0 0 12px #2ecc71}
-.status-warn{background:#f39c12;box-shadow:0 0 12px #f39c12}
-.status-bad{background:#e74c3c;box-shadow:0 0 12px #e74c3c}
-.metric-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:12px 0}
-.metric{background:#1c1c23;border-radius:12px;padding:16px;text-align:center}
-.metric .num{font-size:1.6rem;font-weight:800;color:var(--acc)}
-.upgrade{border-left:4px solid #3498db;padding:10px;margin:8px 0;background:#1c1c23;border-radius:0 12px 12px 0}
+.statgrid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin:12px 0}
+.stat{background:#1c1c22;border-radius:12px;padding:14px;text-align:center}
+.stat b{font-size:1.4rem;display:block}
+.chatbox{max-height:300px;overflow-y:auto;margin:10px 0}
+.chatmsg{padding:8px 12px;border-radius:12px;margin:6px 0;max-width:85%}
+.chatmsg.watcher{background:#1c1c22;align-self:flex-start}
+.chatmsg.owner{background:var(--acc);color:#fff;align-self:flex-end;margin-left:auto}
+#chatwrap{display:flex;flex-direction:column}
 </style>
 </head><body>
 <header class="topbar"><a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg" alt="Drop"><b>Drop</b><span class="tag">watch</span></a></header>
 
-<div id="login" class="card" style="max-width:400px;margin:40px auto;text-align:center">
-  <h2>👁️ Drop WATCH</h2>
-  <p class="small">Enter the watch code to see live status.</p>
-  <input id="code" type="password" placeholder="Code" style="text-align:center;font-size:1.2rem;letter-spacing:4px">
-  <button class="btn" id="gobtn" style="margin-top:12px">Enter</button>
-  <p class="small" id="err" style="color:#ff6b6b"></p>
+<div id="login" class="card" style="max-width:400px;margin:40px auto">
+  <h2>👀 Live Watch</h2>
+  <p class="small">Enter the watch code to see Drop's live status.</p>
+  <label>Watch code</label>
+  <input id="pin" inputmode="numeric" placeholder="••••" maxlength="8">
+  <button class="btn" id="gobtn">Watch live</button>
+  <p class="small" id="loginmsg"></p>
 </div>
 
-<div id="watchapp" style="display:none">
-  <div class="watch-hero">
-    <h1 style="margin:0">👁️ Drop is <span id="health">…</span></h1>
-    <p class="small" id="updated"></p>
-  </div>
-  <div class="metric-grid" id="metrics"></div>
+<div id="app" style="display:none;max-width:640px;margin:0 auto;padding:0 16px">
+  <h1>👀 Drop Live <span id="openbadge"></span></h1>
+  <p class="small">Read-only — you're watching, not driving. Updates every 15 seconds.</p>
+
+  <div class="statgrid" id="stats"></div>
+
+  <h2>📦 Active orders</h2>
+  <div id="orders"></div>
+
+  <h2>🚗 Drivers</h2>
+  <div id="drivers"></div>
+
+  <h2>⚡ Recent activity</h2>
+  <div id="activity"></div>
+
+  <h2>💬 Message the owner</h2>
   <div class="card">
-    <h3>🤖 AI Upgrades in Progress</h3>
-    <p class="small">What the AI is building for Drop right now.</p>
-    <div id="upgrades"></div>
-  </div>
-  <div class="card">
-    <h3>🔧 Self-Maintenance</h3>
-    <p class="small">What the AI checked and fixed recently.</p>
-    <div id="maintenance"></div>
-  </div>
-  <div class="card">
-    <h3>📊 Platform Health</h3>
-    <div id="healthdetail"></div>
-  </div>
-  <div class="card">
-    <h3>💬 Shout-outs</h3>
-    <p class="small">Say something nice — the boss reads these.</p>
-    <div class="row" style="gap:6px;margin-bottom:8px">
-      <input id="cauthor" placeholder="Your name" style="max-width:130px">
-      <input id="cmsg" placeholder="Say something…" style="flex:1">
-      <button class="btn small" id="csend" style="width:auto">Send</button>
+    <div id="chatwrap"><div class="chatbox" id="chatbox"></div></div>
+    <div class="row" style="margin-top:8px">
+      <input id="chatmsg" placeholder="Type a message…" style="flex:1;margin-right:8px">
+      <button class="btn small" id="chatsend" style="width:auto">Send</button>
     </div>
-    <div id="comments"></div>
   </div>
+  <p class="small" style="text-align:center;opacity:.6;margin:20px 0">👀 Watch mode — you can see but not change anything.</p>
 </div>
 
 <script>
 const $=id=>document.getElementById(id);
-$('gobtn').onclick=()=>{
-  if($('code').value.trim()==='LOVE'){
-    $('login').style.display='none';$('watchapp').style.display='block';
-    load();
-    setInterval(load, 60000);
-  } else { $('err').textContent='Wrong code.'; }
-};
-$('code').addEventListener('keydown',e=>{if(e.key==='Enter')$('gobtn').click();});
+let PIN=sessionStorage.getItem('watchpin')||'';
+const H=()=>({'x-pin':PIN});
 
-async function load(){
-  try{
-    const d=await(await fetch('/api/watch/status')).json();
-    $('health').innerHTML=`<span class="status-dot ${d.health==='good'?'status-good':d.health==='warn'?'status-warn':'status-bad'}"></span>${d.health_label}`;
-    $('updated').textContent='Updated '+new Date().toLocaleString();
-    $('metrics').innerHTML=[
-      ['🏪','Restaurants',d.restaurants],['🌍','Cities',d.cities],
-      ['📦','Orders today',d.orders_today],['🛵','Active deliveries',d.active],
-    ].map(([e,l,v])=>`<div class="metric"><div style="font-size:1.5rem">${e}</div><div class="num">${v}</div><div class="small">${l}</div></div>`).join('');
-    $('upgrades').innerHTML=d.upgrades.map(u=>`
-      <div class="upgrade"><b>${u.title.replace(/</g,'&lt;')}</b>
-      <span class="small" style="margin-left:8px">${u.status}</span></div>`).join('')
-      ||'<p class="small">No upgrades in progress right now.</p>';
-    $('maintenance').innerHTML=d.maintenance.map(m=>`
-      <div style="padding:6px 0;border-bottom:1px solid #222">
-      <span class="small">${m.title.replace(/</g,'&lt;')}</span><br>
-      <span class="small" style="opacity:.6">${m.when}</span></div>`).join('')
-      ||'<p class="small">All systems nominal.</p>';
-    $('healthdetail').innerHTML=`
-      <p class="small">🟢 Website: <b>${d.site_up?'Online':'Offline'}</b><br>
-      🟢 Orders flowing: <b>${d.orders_flowing?'Yes':'No'}</b><br>
-      🟢 AI monitoring: <b>Active</b> — checks every Sunday<br>
-      📈 Trend: <b>${d.trend}</b></p>`;
-    loadComments();
-  }catch(e){
-    $('health').textContent='unreachable';
-  }
-}
-async function loadComments(){
-  try{
-    const c=await(await fetch('/api/watch/comments')).json();
-    $('comments').innerHTML=c.map(x=>`
-      <div style="padding:8px 0;border-bottom:1px solid #222">
-        <b>${(x.author||'Anonymous').replace(/</g,'&lt;')}</b>
-        <span class="small" style="opacity:.5">${(x.created_at||'').slice(0,16)}</span><br>
-        <span>${(x.message||'').replace(/</g,'&lt;')}</span>
-        ${x.reply?`<br><span style="color:var(--acc)">👑 Boss: ${(x.reply||'').replace(/</g,'&lt;')}</span>`:''}
-      </div>`).join('')||'<p class="small">No comments yet — be the first!</p>';
-  }catch(e){}
-}
-$('csend').onclick=async()=>{
-  const a=$('cauthor').value.trim()||'Anonymous';
-  const m=$('cmsg').value.trim();
-  if(!m){alert('Type a message first');return;}
-  const r=await(await fetch('/api/watch/comments',{method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({author:a,message:m})})).json();
-  if(r.ok){$('cmsg').value='';loadComments();}
-  else alert('Could not post');
+$('gobtn').onclick=async()=>{
+  PIN=$('pin').value.trim();
+  const r=await fetch('/api/watcher/login',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({pin:PIN})});
+  if(r.ok){sessionStorage.setItem('watchpin',PIN);showApp();}
+  else $('loginmsg').textContent='Invalid code.';
 };
-</script></body></html>
+if(PIN)showApp();
+
+function showApp(){
+  $('login').style.display='none';$('app').style.display='block';
+  load(); setInterval(load,15000);
+  loadChat(); setInterval(loadChat,10000);
+}
+async function load(){
+  const r=await fetch('/api/watcher/live',{headers:H()});
+  if(r.status===401){sessionStorage.removeItem('watchpin');location.reload();return;}
+  const j=await r.json();
+  $('openbadge').innerHTML=j.open?'<span class="badge open">🟢 Open</span>':'<span class="badge closed">🔴 Closed</span>';
+  const s=j.orders_by_status;
+  const active=Object.entries(s).filter(([k])=>!['delivered','cancelled'].includes(k))
+    .reduce((a,[,v])=>a+v,0);
+  $('stats').innerHTML=`
+    <div class="stat"><b>${active}</b><span class="small">Active orders</span></div>
+    <div class="stat"><b>${s.delivered||0}</b><span class="small">Delivered</span></div>
+    <div class="stat"><b>${j.drivers.filter(d=>d.online).length}/${j.drivers.length}</b><span class="small">Drivers online</span></div>`;
+  $('orders').innerHTML=j.active_orders.map(o=>`
+    <div class="card"><div class="row"><b>#${o.id} · ${o.kind==='courier'?'📦':'🍔'} ${o.restaurant_name||o.pickup_name||''}</b>
+      <span class="badge">${(o.status||'').replace(/_/g,' ')}</span></div>
+      <p class="small">${o.customer_name||''} ${o.driver_name?'· 🚗 '+o.driver_name.replace(/</g,'&lt;'):''}</p></div>`
+    ).join('')||'<p class="small">No active orders right now.</p>';
+  $('drivers').innerHTML=j.drivers.map(d=>`
+    <div class="row" style="padding:6px 0;border-bottom:1px solid #222">
+      <span>${d.online?'🟢':'⚪'}</span><b class="small">${d.name.replace(/</g,'&lt;')}</b>
+      <span class="small" style="opacity:.6;margin-left:auto">${d.online?'Online':'Offline'}</span>
+    </div>`).join('')||'<p class="small">No drivers yet.</p>';
+  $('activity').innerHTML=j.activity.map(a=>`
+    <div class="small" style="padding:4px 0;border-bottom:1px solid #1a1a1a">
+      ${a.title.replace(/</g,'&lt;')} <span style="opacity:.5">· ${a.created_at.slice(5,16).replace('T',' ')}</span>
+    </div>`).join('')||'<p class="small">Nothing yet.</p>';
+}
+async function loadChat(){
+  const j=await (await fetch('/api/watcher/messages',{headers:H()})).json();
+  const box=$('chatbox');
+  box.innerHTML=j.map(m=>`
+    <div class="chatmsg ${m.sender}"><b class="small">${m.sender==='owner'?'👑 Owner':'👀 Watcher'}</b><br>${m.message.replace(/</g,'&lt;')}</div>`
+    ).join('');
+  box.scrollTop=box.scrollHeight;
+}
+$('chatsend').onclick=async()=>{
+  const msg=$('chatmsg').value.trim();
+  if(!msg)return;
+  await fetch('/api/watcher/messages',{method:'POST',headers:{...H(),'Content-Type':'application/json'},
+    body:JSON.stringify({message:msg})});
+  $('chatmsg').value=''; loadChat();
+};
+$('chatmsg').addEventListener('keydown',e=>{if(e.key==='Enter')$('chatsend').click();});
+</script>
+<script src="/static/chat.js"></script></body></html>

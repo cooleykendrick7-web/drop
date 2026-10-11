@@ -419,6 +419,13 @@ def init_db():
         token TEXT PRIMARY KEY,
         driver_id INTEGER NOT NULL REFERENCES drivers(id) ON DELETE CASCADE,
         expires_at TEXT NOT NULL)""")
+    # watcher messages (transplanted from parallel session 2026-10-11) — PIN 5683 watchers chat with Ken
+    c.execute("""CREATE TABLE IF NOT EXISTS watcher_msgs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sender TEXT NOT NULL DEFAULT 'watcher',
+        message TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        seen_by_owner INTEGER DEFAULT 0)""")
     # driver documents (transplanted from parallel session 2026-10-11) — ID front/back, insurance, selfie, car photo
     c.execute("""CREATE TABLE IF NOT EXISTS driver_docs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -7549,6 +7556,147 @@ async def driver_stats(req: Request):
 # ---------------- Referrals, scheduled orders, reviews, blasts ----------------
 import random as _rand
 import string as _str
+
+
+# ---------------- Watcher mode (PIN 5683, transplanted from parallel session 2026-10-11) ----------------
+WATCHER_PIN = "5683"
+
+
+def check_watcher_pin(pin):
+    if pin != WATCHER_PIN:
+        raise HTTPException(401, "Invalid watcher PIN")
+
+
+@app.get("/api/operator/watcher-messages")
+def op_watcher_msgs(x_pin: str = Header(default="")):
+    """Ken reads watcher messages on his board."""
+    check_pin(x_pin)
+    conn = db()
+    rows = conn.execute("SELECT id, sender, message, created_at, seen_by_owner"
+                        " FROM watcher_msgs ORDER BY id DESC LIMIT 50").fetchall()
+    out = [dict(r) for r in rows][::-1]
+    unseen = sum(1 for r in out if not r["seen_by_owner"] and r["sender"] == "watcher")
+    conn.close()
+    return {"messages": out, "unseen": unseen}
+
+@app.get("/api/watcher/live")
+def watcher_live(x_pin: str = Header(default="")):
+    """Read-only live status for watchers. NO financial data, NO actions."""
+    check_watcher_pin(x_pin)
+    conn = db()
+    # order counts by status (no dollar amounts)
+    oc = conn.execute(
+        "SELECT status, COUNT(*) as n FROM orders GROUP BY status").fetchall()
+    orders_by_status = {r["status"]: r["n"] for r in oc}
+    # active orders (no customer phone, no totals)
+    active = conn.execute(
+        """SELECT o.id, o.status, o.kind, o.customer_name,
+                  o.restaurant_name, o.pickup_name, o.created_at, o.updated_at,
+                  d.name as driver_name
+           FROM orders o LEFT JOIN drivers d ON d.id=o.driver_id
+           WHERE o.status NOT IN ('delivered','cancelled')
+           ORDER BY o.id DESC LIMIT 20""").fetchall()
+    # drivers online (no earnings, no pay)
+    dr = conn.execute(
+        "SELECT name, is_online, last_gps_at FROM drivers WHERE status='approved'").fetchall()
+    # recent activity (public-safe events only)
+    act = conn.execute(
+        "SELECT kind, title, created_at FROM activity_log"
+        " WHERE kind IN ('order','driver','schedule','gift')"
+        " ORDER BY id DESC LIMIT 15").fetchall()
+    # business hours / open status
+    cfg = {}
+    try:
+        oh, _ = get_hours()
+        cfg = {"open": oh}
+    except Exception:
+        pass
+    conn.close()
+    return {
+        "orders_by_status": orders_by_status,
+        "active_orders": [dict(r) for r in active],
+        "drivers": [{"name": r["name"],
+                     "online": bool(r["is_online"]),
+                     "last_seen": r["last_gps_at"]} for r in dr],
+        "activity": [dict(r) for r in act],
+        "open": cfg.get("open", True),
+    }
+
+@app.get("/api/watcher/messages")
+def watcher_get_msgs(x_pin: str = Header(default="")):
+    """Watchers read the chat thread."""
+    check_watcher_pin(x_pin)
+    conn = db()
+    rows = conn.execute("SELECT id, sender, message, created_at FROM watcher_msgs"
+                        " ORDER BY id DESC LIMIT 50").fetchall()
+    out = [dict(r) for r in rows][::-1]
+    conn.close()
+    return out
+
+@app.post("/api/operator/watcher-messages")
+async def op_watcher_reply(req: Request, x_pin: str = Header(default="")):
+    """Ken replies to watchers."""
+    check_pin(x_pin)
+    body = await req.json()
+    msg = (body.get("message") or "").strip()[:500]
+    if not msg:
+        raise HTTPException(400, "Message required")
+    conn = db()
+    conn.execute("INSERT INTO watcher_msgs(sender, message, created_at, seen_by_owner)"
+                 " VALUES('owner',?,?,1)", (msg, now_iso()))
+    conn.execute("UPDATE watcher_msgs SET seen_by_owner=1 WHERE sender='watcher'")
+    conn.commit()
+    conn.close()
+    audit("operator", "watcher_reply", "watcher", 0, msg[:60])
+    return {"ok": True}
+
+
+# ---------------- Driver documents, available pickups, acceptance ----------------
+import os as _os
+
+DOCS_DIR = "/data/driver_docs"
+_os.makedirs(DOCS_DIR, exist_ok=True)
+
+ALLOWED_DOCS = {"id_front": "Photo ID (front)", "id_back": "Photo ID (back)",
+                "insurance": "Insurance policy", "selfie": "Selfie",
+                "car": "Vehicle photo"}
+
+@app.post("/api/watcher/login")
+async def watcher_login(req: Request):
+    body = await req.json()
+    pin = str(body.get("pin") or "").strip()
+    if pin == WATCHER_PIN:
+        return {"ok": True}
+    raise HTTPException(401, "Invalid PIN")
+
+@app.post("/api/watcher/messages")
+async def watcher_send_msg(req: Request, x_pin: str = Header(default="")):
+    """Watcher sends a message to Ken."""
+    check_watcher_pin(x_pin)
+    body = await req.json()
+    msg = (body.get("message") or "").strip()[:500]
+    if not msg:
+        raise HTTPException(400, "Message required")
+    conn = db()
+    conn.execute("INSERT INTO watcher_msgs(sender, message, created_at)"
+                 " VALUES('watcher',?,?)", (msg, now_iso()))
+    conn.commit()
+    conn.close()
+    log_event("watcher", "👀 Watcher message", msg[:60])
+    # notify Ken
+    try:
+        import urllib.request, urllib.parse, threading
+        topic = get_setting("ntfy_topic").strip()
+        if topic:
+            rq = urllib.request.Request(
+                f"https://ntfy.sh/{urllib.parse.quote(topic)}",
+                data=f"👀 Watcher: {msg}".encode(),
+                headers={"Title": "Watcher message"}, method="POST")
+            threading.Thread(target=lambda: urllib.request.urlopen(rq, timeout=5).read(),
+                             daemon=True).start()
+    except Exception:
+        pass
+    return {"ok": True}
 
 @app.get("/api/rides/quote")
 def rides_quote(pickup_address: str = "", dropoff_address: str = "",

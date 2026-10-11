@@ -182,6 +182,9 @@
         <button class="btn small" id="blastgo" style="width:auto">📢 Send blast</button>
         <span class="small" id="blaststatus"></span></div>
       <div id="blasthist" style="margin-top:8px"></div></div>
+    <div class="card"><b>👀 Watcher chat <span id="watchbadge"></span></b>
+      <p class="small">Messages from people with the watch code (5683). They can see but not touch.</p>
+      <div id="watchchat" style="max-height:250px;overflow-y:auto;margin:8px 0"></div>
     <div class="card"><b>🤖 AI suggestions</b>
       <p class="small">What needs your attention right now, based on live data.</p>
       <div id="sugglist"><p class="small">Loading…</p></div></div>
@@ -962,6 +965,27 @@ async function outDiscard(id){
 
 /* --- Live activity + AI suggestions --- */
 let liveTimer=null, driverMap=null, driverMarkers={};
+async function loadWatchChat(){
+  const j=await (await fetch('/api/operator/watcher-messages',{headers:H()})).json();
+  $('watchbadge').textContent=j.unseen?`(${j.unseen} new)`:'';
+  const box=$('watchchat');
+  box.innerHTML=j.messages.map(m=>`
+    <div style="padding:6px 10px;border-radius:10px;margin:4px 0;max-width:90%;
+      ${m.sender==='owner'?'background:var(--acc);color:#fff;margin-left:auto':'background:#1c1c22'}">
+      <b class="small">${m.sender==='owner'?'👑 You':'👀 Watcher'}</b><br>
+      <span class="small">${m.message.replace(/</g,'&lt;')}</span></div>`).join('')
+    ||'<p class="small">No watcher messages yet.</p>';
+  box.scrollTop=box.scrollHeight;
+}
+document.addEventListener('click',async e=>{
+  if(e.target&&e.target.id==='watchsend'){
+    const msg=$('watchreply').value.trim();
+    if(!msg)return;
+    await fetch('/api/operator/watcher-messages',{method:'POST',
+      headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({message:msg})});
+    $('watchreply').value=''; loadWatchChat();
+  }
+});
 async function loadLive(){
   // suggestions
   const s=await (await fetch('/api/operator/suggestions',{headers:H()})).json();
@@ -975,8 +999,9 @@ async function loadLive(){
   await loadActivity();
   await loadDriverMap();
   await loadBlastHist();
+  await loadWatchChat();
   if(liveTimer)clearInterval(liveTimer);
-  liveTimer=setInterval(()=>{loadActivity();loadDriverMap();},15000);
+  liveTimer=setInterval(()=>{loadActivity();loadDriverMap();loadWatchChat();},15000);
 }
 async function loadBlastHist(){
   const b=await (await fetch('/api/operator/blasts',{headers:H()})).json();
