@@ -66,7 +66,39 @@
         <span class="small"><b>I have read and accept the Drop Rides waiver. Drop is not liable for my vehicle or my safety. *</b></span></div>
     </div>
   </div>
-  <div class="card" style="background:#141419;margin:12px 0">
+  <h3>📄 Required documents</h3>
+  <p class="small"><b>All 5 documents are required.</b> Applications with missing documents may be denied.</p>
+  <div id="docuploads">
+    <div class="card" style="margin:8px 0">
+      <label>🪪 Photo ID — front *</label>
+      <input type="file" id="doc-id_front" accept="image/*,.pdf">
+      <p class="small" id="docstat-id_front"></p>
+    </div>
+    <div class="card" style="margin:8px 0">
+      <label>🪪 Photo ID — back *</label>
+      <input type="file" id="doc-id_back" accept="image/*,.pdf">
+      <p class="small" id="docstat-id_back"></p>
+    </div>
+    <div class="card" style="margin:8px 0">
+      <label>🛡️ Insurance policy *</label>
+      <input type="file" id="doc-insurance" accept="image/*,.pdf">
+      <p class="small">Your declarations page or insurance card showing active coverage.</p>
+      <p class="small" id="docstat-insurance"></p>
+    </div>
+    <div class="card" style="margin:8px 0">
+      <label>🤳 Selfie *</label>
+      <input type="file" id="doc-selfie" accept="image/*" capture="user">
+      <p class="small">A clear photo of your face — must match your photo ID.</p>
+      <p class="small" id="docstat-selfie"></p>
+    </div>
+    <div class="card" style="margin:8px 0">
+      <label>🚗 Your car *</label>
+      <input type="file" id="doc-car" accept="image/*" capture="environment">
+      <p class="small">A photo of the vehicle you'll deliver with.</p>
+      <p class="small" id="docstat-car"></p>
+    </div>
+  </div>
+    <div class="card" style="background:#141419;margin:12px 0">
     <h3>📋 Driver agreement — read carefully</h3>
     <p class="small">By applying to drive for DROP MORE, you confirm and agree:<br><br>
     🚗 <b>Your vehicle, your responsibility.</b> You maintain your own valid driver's license, vehicle registration, and insurance at all times.<br><br>
@@ -87,6 +119,23 @@ const $=id=>document.getElementById(id);
 $('d-rides').onchange=()=>{ $('rides-extra').style.display=$('d-rides').checked?'block':'none'; };
 // preselect when coming from the rides page
 if(new URLSearchParams(location.search).get('rides')==='1'){ $('d-rides').checked=true; $('rides-extra').style.display='block'; }
+const DOC_TYPES=['id_front','id_back','insurance','selfie','car'];
+async function uploadDoc(docType, phone){
+  const input=$('doc-'+docType);
+  const stat=$('docstat-'+docType);
+  const file=input.files[0];
+  if(!file){stat.textContent='';return true;}
+  stat.textContent='Uploading…';
+  const fd=new FormData();
+  fd.append('doc_type',docType);
+  fd.append('phone',phone);
+  fd.append('file',file);
+  const r=await fetch('/api/drivers/docs/upload',{method:'POST',body:fd});
+  const j=await r.json();
+  if(r.ok){stat.textContent='✅ Uploaded';stat.style.color='#4ade80';return true;}
+  stat.textContent='❌ '+(j.detail||'upload failed');stat.style.color='#f66';
+  return false;
+}
 $('d-submit').onclick=async()=>{
   const body={name:$('d-name').value.trim(),phone:$('d-phone').value.trim(),
     email:$('d-email').value.trim(),password:$('d-pass').value,
@@ -103,11 +152,21 @@ $('d-submit').onclick=async()=>{
   if(!body.background_consent){$('d-msg').textContent='Background check consent is required.';return;}
   if(!$('d-agree').checked){$('d-msg').textContent='You must accept the driver agreement.';return;}
   if(body.wants_rides&&!body.rides_waiver){$('d-msg').textContent='You must accept the Drop Rides waiver.';return;}
+  const missing=DOC_TYPES.filter(t=>!$('doc-'+t).files[0]);
+  if(missing.length){
+    $('d-msg').textContent=`⚠️ Missing ${missing.length} document${missing.length>1?'s':''} — all 5 are required. Applications with missing documents may be denied.`;
+    if(!confirm('You\'re missing documents. Submit anyway? (You may be denied)'))return;
+  }
   $('d-msg').textContent='Submitting…';
   const r=await fetch('/api/drivers/apply',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   const j=await r.json();
   if(r.ok){
-    let extra='';
+    $('d-msg').textContent='Uploading documents…';
+    let okCount=0;
+    for(const t of DOC_TYPES){
+      if($('doc-'+t).files[0] && await uploadDoc(t, body.phone))okCount++;
+    }
+    let extra=`<p class="small">📄 ${okCount}/5 documents uploaded</p>`;
     if(body.wants_rides){
       extra=`<div class="card" style="margin-top:12px;background:#0d0d10;border:1px solid #d4af37">
         <h3 style="color:#d4af37">📸 Drop Rides: upload your photos</h3>

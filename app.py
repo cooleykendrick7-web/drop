@@ -419,6 +419,22 @@ def init_db():
         token TEXT PRIMARY KEY,
         driver_id INTEGER NOT NULL REFERENCES drivers(id) ON DELETE CASCADE,
         expires_at TEXT NOT NULL)""")
+    # driver documents (transplanted from parallel session 2026-10-11) — ID front/back, insurance, selfie, car photo
+    c.execute("""CREATE TABLE IF NOT EXISTS driver_docs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        driver_id INTEGER NOT NULL,
+        doc_type TEXT NOT NULL,
+        filename TEXT NOT NULL,
+        uploaded_at TEXT NOT NULL)""")
+    # driver acceptance tracking (transplanted from parallel session 2026-10-11)
+    dcols = [r[1] for r in c.execute("PRAGMA table_info(drivers)").fetchall()]
+    for _col, _ddl in (("accepted", "INTEGER DEFAULT 0"),
+                       ("declined", "INTEGER DEFAULT 0"),
+                       ("is_online", "INTEGER DEFAULT 0"),
+                       ("today_earned", "REAL DEFAULT 0"),
+                       ("today_date", "TEXT DEFAULT ''")):
+        if _col not in dcols:
+            c.execute(f"ALTER TABLE drivers ADD COLUMN {_col} {_ddl}")
     # Drop Investors: inbound investor interest (added 2026-10-11)
     c.execute("""CREATE TABLE IF NOT EXISTS investor_leads (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -7247,6 +7263,292 @@ def places_autocomplete(q: str = ""):
     _ac_cache[q.lower()] = (suggestions, now)
     return {"suggestions": suggestions}
 
+
+
+# ---------------- Driver documents (transplanted from parallel session 2026-10-11) ----------------
+import os as _os
+
+DOCS_DIR = "/data/driver_docs"
+_os.makedirs(DOCS_DIR, exist_ok=True)
+
+ALLOWED_DOCS = {"id_front": "Photo ID (front)", "id_back": "Photo ID (back)",
+                "insurance": "Insurance policy", "selfie": "Selfie",
+                "car": "Vehicle photo"}
+
+
+# ---- transplanted from parallel session: POST /api/drivers/location ----
+@app.post("/api/drivers/location")
+async def driver_location(req: Request):
+    """A dropper's phone posts GPS — updates orders + detects speeding."""
+    d = get_driver(req)
+    if not d:
+        raise HTTPException(401, "Not logged in")
+    body = await req.json()
+    try:
+        lat = float(body.get("lat"))
+        lng = float(body.get("lng"))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "lat/lng required")
+    now = now_iso()
+    conn = db()
+    prev = conn.execute("SELECT last_lat, last_lng, last_gps_at FROM drivers WHERE id=?",
+                        (d["id"],)).fetchone()
+    speed_mph = 0
+    if prev and prev["last_lat"] and prev["last_gps_at"]:
+        try:
+            from datetime import datetime
+            dt = (datetime.fromisoformat(now) - datetime.fromisoformat(prev["last_gps_at"])).total_seconds()
+            if dt > 5:
+                dist = haversine_miles(prev["last_lat"], prev["last_lng"], lat, lng)
+                speed_mph = round(dist / (dt / 3600), 1)
+        except Exception:
+            pass
+    conn.execute("UPDATE drivers SET last_lat=?, last_lng=?, last_gps_at=? WHERE id=?",
+                 (lat, lng, now, d["id"]))
+    conn.execute("""UPDATE orders SET driver_lat=?, driver_lng=?, driver_updated=?
+                    WHERE driver_id=? AND status IN ('confirmed','picked_up','on_the_way')""",
+                 (lat, lng, now, d["id"]))
+    conn.commit()
+    conn.close()
+    if speed_mph > 80:
+        conn = db()
+        conn.execute("UPDATE drivers SET speed_warnings=speed_warnings+1 WHERE id=?", (d["id"],))
+        conn.commit()
+        conn.close()
+        driver_inbox_add(d["id"], "warning", "⚠️ Slow down",
+            f"Our system clocked you at {speed_mph} mph. Please slow down — "
+            f"safety first. Arriving safely matters more than arriving fast.")
+        audit("system", "speed_warning", "driver", d["id"], f"{speed_mph} mph")
+        log_event("warning", f"⚠️ Speed warning sent to driver #{d['id']}",
+                  f"Clocked at {speed_mph} mph")
+    # delay detection: on_the_way for too long?
+    conn = db()
+    slow = conn.execute(
+        """SELECT id, updated_at FROM orders WHERE driver_id=? AND status='on_the_way'
+           AND updated_at < datetime('now', '-45 minutes')""", (d["id"],)).fetchall()
+    for s in slow:
+        # only nudge once per order
+        already = conn.execute(
+            "SELECT id FROM driver_messages WHERE driver_id=? AND kind='delay_check'"
+            " AND body LIKE ?", (d["id"], f"%#{s['id']}%")).fetchone()
+        if not already:
+            driver_inbox_add(d["id"], "delay_check", "⏰ Taking a while?",
+                f"Order #{s['id']} has been on the way for a while. "
+                f"Is everything OK? Reply here if you need help — traffic, wrong address, anything.")
+    conn.close()
+    return {"ok": True}
+
+# ---- transplanted from parallel session: POST /api/drivers/docs/upload ----
+@app.post("/api/drivers/docs/upload")
+async def driver_doc_upload(req: Request):
+    """Driver uploads a document (ID front/back, insurance, selfie, car).
+    Works during application (no login yet, uses phone) or logged in."""
+    form = await req.form()
+    doc_type = (form.get("doc_type") or "").strip()
+    if doc_type not in ALLOWED_DOCS:
+        raise HTTPException(400, "Invalid document type")
+    f = form.get("file")
+    if not f or not hasattr(f, "filename") or not f.filename:
+        raise HTTPException(400, "No file uploaded")
+    # validate image
+    ext = f.filename.rsplit(".", 1)[-1].lower() if "." in f.filename else ""
+    if ext not in ("jpg", "jpeg", "png", "webp", "heic", "pdf"):
+        raise HTTPException(400, "Only images or PDF allowed")
+    # identify the driver: logged in, or phone from form (during application)
+    me = get_driver(req)
+    driver_id = me["id"] if me else 0
+    phone = ""
+    if not driver_id:
+        phone = "".join(ch for ch in str(form.get("phone") or "") if ch.isdigit())[-10:]
+        if not phone:
+            raise HTTPException(400, "Log in or provide your phone number")
+    # save file
+    import time as _time
+    safe_name = f"d{driver_id or phone}_{doc_type}_{int(_time.time())}.{ext}"
+    path = _os.path.join(DOCS_DIR, safe_name)
+    content = await f.read()
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(400, "File too large (max 10MB)")
+    with open(path, "wb") as out:
+        out.write(content)
+    conn = db()
+    if driver_id:
+        did = driver_id
+    else:
+        row = conn.execute("SELECT id FROM drivers WHERE phone LIKE ?",
+                           (f"%{phone}%",)).fetchone()
+        if not row:
+            conn.close()
+            raise HTTPException(400, "No application found for that phone — apply first, then upload")
+        did = row["id"]
+    # replace existing doc of same type
+    old = conn.execute("SELECT filename FROM driver_docs WHERE driver_id=? AND doc_type=?",
+                       (did, doc_type)).fetchone()
+    if old:
+        try:
+            _os.remove(_os.path.join(DOCS_DIR, old["filename"]))
+        except Exception:
+            pass
+        conn.execute("DELETE FROM driver_docs WHERE driver_id=? AND doc_type=?",
+                     (did, doc_type))
+    conn.execute("INSERT INTO driver_docs(driver_id, doc_type, filename, uploaded_at)"
+                 " VALUES(?,?,?,?)", (did, doc_type, safe_name, now_iso()))
+    conn.commit()
+    conn.close()
+    return {"ok": True, "doc_type": doc_type}
+
+# ---- transplanted from parallel session: GET /api/operator/drivers/{did}/docs ----
+@app.get("/api/operator/drivers/{did}/docs")
+def op_driver_docs(did: int, x_pin: str = Header(default="")):
+    """Ken views a driver's uploaded documents."""
+    check_pin(x_pin)
+    conn = db()
+    rows = conn.execute("SELECT doc_type, filename, uploaded_at FROM driver_docs"
+                        " WHERE driver_id=? ORDER BY doc_type", (did,)).fetchall()
+    conn.close()
+    docs = [{"type": r["doc_type"], "label": ALLOWED_DOCS.get(r["doc_type"], r["doc_type"]),
+             "url": f"/api/operator/drivers/docs/{r['filename']}",
+             "uploaded_at": r["uploaded_at"]} for r in rows]
+    missing = [k for k in ALLOWED_DOCS if k not in {r["doc_type"] for r in rows}]
+    return {"docs": docs,
+            "missing": [{"type": k, "label": v} for k, v in ALLOWED_DOCS.items() if k in missing],
+            "complete": len(missing) == 0}
+
+# ---- transplanted from parallel session: GET /api/operator/drivers/docs/{filename} ----
+@app.get("/api/operator/drivers/docs/{filename}")
+def op_driver_doc_file(filename: str, x_pin: str = Header(default="")):
+    """Serve a driver document (PIN-gated)."""
+    check_pin(x_pin)
+    # prevent path traversal
+    safe = _os.path.basename(filename)
+    path = _os.path.join(DOCS_DIR, safe)
+    if not _os.path.isfile(path):
+        raise HTTPException(404, "Not found")
+    from fastapi.responses import FileResponse
+    return FileResponse(path)
+
+# ---- transplanted from parallel session: GET /api/drivers/available ----
+@app.get("/api/drivers/available")
+async def driver_available(req: Request):
+    """Unassigned deliveries the driver can accept or decline."""
+    me = get_driver(req)
+    if not me:
+        raise HTTPException(401, "Log in first")
+    conn = db()
+    # make sure declines table exists
+    conn.execute("""CREATE TABLE IF NOT EXISTS driver_declines (
+        driver_id INTEGER, order_id INTEGER, created_at TEXT,
+        PRIMARY KEY(driver_id, order_id))""")
+    rows = conn.execute(
+        """SELECT o.id, o.kind, o.pickup_name, o.pickup_address, o.address,
+                  o.customer_name, o.total, o.delivery_fee, o.tip, o.created_at,
+                  r.name as restaurant_name
+           FROM orders o LEFT JOIN restaurants r ON r.id=o.restaurant_id
+           WHERE o.driver_id IS NULL AND o.status IN ('placed','confirmed','scheduled')
+           AND o.id NOT IN (SELECT order_id FROM driver_declines WHERE driver_id=?)
+           ORDER BY o.id DESC LIMIT 20""", (me["id"],)).fetchall()
+    out = [dict(r) for r in rows]
+    conn.close()
+    return out
+
+# ---- transplanted from parallel session: POST /api/drivers/orders/{oid}/accept ----
+@app.post("/api/drivers/orders/{oid}/accept")
+async def driver_accept(oid: int, req: Request):
+    """Driver accepts an available delivery."""
+    me = get_driver(req)
+    if not me:
+        raise HTTPException(401, "Log in first")
+    conn = db()
+    o = conn.execute("SELECT id, driver_id, status FROM orders WHERE id=?", (oid,)).fetchone()
+    if not o or o["driver_id"]:
+        conn.close()
+        raise HTTPException(400, "Already taken")
+    if o["status"] not in ("placed", "confirmed", "scheduled"):
+        conn.close()
+        raise HTTPException(400, "Not available")
+    conn.execute("UPDATE orders SET driver_id=? WHERE id=?", (me["id"], oid))
+    conn.execute("UPDATE drivers SET accepted=accepted+1 WHERE id=?", (me["id"],))
+    conn.commit()
+    conn.close()
+    log_event("driver", f"🚗 Driver {me['name']} accepted order #{oid}", "")
+    # notify Ken
+    try:
+        import urllib.request, urllib.parse, threading
+        topic = get_setting("ntfy_topic").strip()
+        if topic:
+            msg = f"🚗 {me['name']} accepted order #{oid}"
+            rq = urllib.request.Request(
+                f"https://ntfy.sh/{urllib.parse.quote(topic)}",
+                data=msg.encode(), headers={"Title": "Driver accepted"}, method="POST")
+            threading.Thread(target=lambda: urllib.request.urlopen(rq, timeout=5).read(),
+                             daemon=True).start()
+    except Exception:
+        pass
+    return {"ok": True}
+
+# ---- transplanted from parallel session: POST /api/drivers/orders/{oid}/decline ----
+@app.post("/api/drivers/orders/{oid}/decline")
+async def driver_decline(oid: int, req: Request):
+    """Driver declines — hurts acceptance rate."""
+    me = get_driver(req)
+    if not me:
+        raise HTTPException(401, "Log in first")
+    conn = db()
+    conn.execute("UPDATE drivers SET declined=declined+1 WHERE id=?", (me["id"],))
+    # track which orders they declined (so it doesn't show again)
+    conn.execute("""CREATE TABLE IF NOT EXISTS driver_declines (
+        driver_id INTEGER, order_id INTEGER, created_at TEXT,
+        PRIMARY KEY(driver_id, order_id))""")
+    conn.execute("INSERT OR IGNORE INTO driver_declines VALUES(?,?,?)",
+                 (me["id"], oid, now_iso()))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+# ---- transplanted from parallel session: POST /api/drivers/status ----
+@app.post("/api/drivers/status")
+async def driver_status(req: Request):
+    """Driver toggles online/offline."""
+    me = get_driver(req)
+    if not me:
+        raise HTTPException(401, "Log in first")
+    body = await req.json()
+    online = 1 if body.get("online") else 0
+    conn = db()
+    conn.execute("UPDATE drivers SET is_online=? WHERE id=?", (online, me["id"]))
+    conn.commit()
+    conn.close()
+    return {"ok": True, "online": bool(online)}
+
+# ---- transplanted from parallel session: GET /api/drivers/stats ----
+@app.get("/api/drivers/stats")
+async def driver_stats(req: Request):
+    """Driver's acceptance rate, daily earnings, status."""
+    me = get_driver(req)
+    if not me:
+        raise HTTPException(401, "Log in first")
+    conn = db()
+    d = conn.execute("SELECT accepted, declined, is_online, deliveries, on_time_rate"
+                     " FROM drivers WHERE id=?", (me["id"],)).fetchone()
+    # today's earnings
+    today = now_iso()[:10]
+    earn = conn.execute(
+        """SELECT COALESCE(SUM(driver_pay),0) as pay, COALESCE(SUM(tip),0) as tips,
+                  COUNT(*) as n FROM orders
+           WHERE driver_id=? AND status='delivered'
+           AND substr(updated_at,1,10)=?""", (me["id"], today)).fetchone()
+    conn.close()
+    total = (d["accepted"] or 0) + (d["declined"] or 0)
+    rate = round(100 * (d["accepted"] or 0) / total) if total else 100
+    return {"acceptance_rate": rate, "accepted": d["accepted"] or 0,
+            "declined": d["declined"] or 0, "is_online": bool(d["is_online"]),
+            "today_earned": round((earn["pay"] or 0) + (earn["tips"] or 0), 2),
+            "today_deliveries": earn["n"] or 0}
+
+
+# ---------------- Referrals, scheduled orders, reviews, blasts ----------------
+import random as _rand
+import string as _str
 
 @app.get("/api/rides/quote")
 def rides_quote(pickup_address: str = "", dropoff_address: str = "",

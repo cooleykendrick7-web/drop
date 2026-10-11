@@ -22,16 +22,29 @@
     <button class="btn small ghost" id="locToggle" style="width:auto;padding:10px 20px">Start</button></div>
     <p class="small" id="locmsg"></p></div>
 
+  <div class="card"><div class="row">
+    <div><b id="online-lbl">⚪ Offline</b><br>
+      <span class="small">Go online to see available pickups</span></div>
+    <button class="btn small" id="onlineToggle" style="width:auto">Go online</button>
+  </div></div>
+
+  <div class="card"><div class="row" style="gap:12px">
+    <div style="flex:1;text-align:center"><b id="st-acc" style="font-size:1.3rem">–</b><br><span class="small">Acceptance</span></div>
+    <div style="flex:1;text-align:center"><b id="st-today" style="font-size:1.3rem">–</b><br><span class="small">Today</span></div>
+    <div style="flex:1;text-align:center"><b id="st-del" style="font-size:1.3rem">–</b><br><span class="small">Deliveries today</span></div>
+  </div>
+  <p class="small" style="opacity:.7">Declining pickups lowers your acceptance rate. Low rates may limit future offers.</p></div>
+
   <div class="tabs">
-    <button class="on" data-t="del">Deliveries</button>
+    <button class="on" data-t="avail">Available</button>
+    <button data-t="del">My deliveries</button>
     <button data-t="msg">Inbox <span id="msgbadge"></span></button>
     <button data-t="earn">Earnings</button>
-    <button data-t="news">📢 News</button>
-    <button data-t="help">🆘 Help</button>
     <button data-t="me">Profile</button>
   </div>
 
-  <div class="tab on" id="t-del"><div id="olist"><p class="small">Loading…</p></div></div>
+  <div class="tab on" id="t-avail"><div id="alist"><p class="small">Go online to see available pickups.</p></div></div>
+  <div class="tab" id="t-del"><div id="olist"><p class="small">Loading…</p></div></div>
 
   <div class="tab" id="t-msg">
     <div class="card"><h3>📬 Messages</h3><div id="msglist"><p class="small">Loading…</p></div></div>
@@ -60,44 +73,11 @@
     <div id="wpay"></div>
   </div>
 
-  <div class="tab" id="t-news">
-    <div class="card"><h3>📢 Driver Broadcasts</h3><p class="small">Updates from Drop HQ — new features, bonuses, important news.</p><div id="newslist"><p class="small">Loading…</p></div></div>
-  </div>
-
-  <div class="tab" id="t-help">
-    <div class="card"><h3>🎯 My Goals</h3>
-      <div class="row"><span>Today: <b id="goal-today">$0</b> / <b id="goal-daily-t">$100</b></span></div>
-      <div style="background:#222;border-radius:10px;height:12px;margin:8px 0"><div id="goal-daily-bar" style="background:#2ecc71;height:100%;border-radius:10px;width:0%"></div></div>
-      <div class="row"><span>This week: <b id="goal-week">$0</b> / <b id="goal-weekly-t">$500</b></span></div>
-      <div style="background:#222;border-radius:10px;height:12px;margin:8px 0"><div id="goal-weekly-bar" style="background:#3498db;height:100%;border-radius:10px;width:0%"></div></div>
-      <div class="row"><input id="goal-d" type="number" placeholder="Daily $" style="flex:1;margin-right:6px"><input id="goal-w" type="number" placeholder="Weekly $" style="flex:1;margin-right:6px"><button class="btn small" id="goal-save" style="width:auto">Set</button></div>
-    </div>
-    <div class="card"><h3>🆘 File a complaint</h3>
-      <p class="small">Something wrong? Tell us. AI will categorize it and suggest a fix to management.</p>
-      <label>Subject</label><input id="comp-subject" placeholder="What's the issue?">
-      <label>Details</label><textarea id="comp-msg" rows="3" placeholder="Describe what happened…" style="width:100%"></textarea>
-      <button class="btn" id="comp-send" style="margin-top:8px">Submit complaint</button>
-      <p class="small" id="comp-msg-status"></p></div>
-    <div class="card"><h3>My complaints</h3><div id="complist"><p class="small">Loading…</p></div></div>
-  </div>
-
   <div class="tab" id="t-me">
     <div class="card"><h2 style="margin:0" id="mname"></h2>
       <p class="small" id="mstats"></p>
       <p class="small" id="mvehicle"></p>
       <button class="btn small ghost" id="logout">Log out</button></div>
-    <div class="card"><h3>📸 Profile Photos</h3>
-      <p class="small">Customers see your selfie and car. AI checks quality, Ken approves.</p>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-        <div><p class="small"><b>Selfie</b> <span id="selfiestatus"></span></p>
-          <img id="selfieprev" style="width:100%;border-radius:8px;display:none">
-          <input type="file" id="selfiefile" accept="image/*" style="font-size:.8rem">
-          <button class="btn small" id="selfiebtn" style="margin-top:6px">Upload selfie</button></div>
-        <div><p class="small"><b>Car</b> <span id="carstatus"></span></p>
-          <img id="carprev" style="width:100%;border-radius:8px;display:none">
-          <input type="file" id="carfile" accept="image/*" style="font-size:.8rem">
-          <button class="btn small" id="carbtn" style="margin-top:6px">Upload car</button></div>
-      </div></div>
     <div class="card"><h3>Need help?</h3>
       <p class="small">Message Drop support anytime from the 💬 chat bubble — we typically reply fast.</p></div>
   </div>
@@ -112,8 +92,59 @@ document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
   b.classList.add('on'); $('t-'+b.dataset.t).classList.add('on');
-  if(b.dataset.t==='earn') loadEarn(); if(b.dataset.t==='me') loadMe(); if(b.dataset.t==='msg') loadMsgs();
+  if(b.dataset.t==='earn') loadEarn(); if(b.dataset.t==='me') loadMe();
+  if(b.dataset.t==='msg') loadMsgs(); if(b.dataset.t==='avail') loadAvail();
 });
+
+// online/offline + stats
+let isOnline=false;
+$('onlineToggle').onclick=async()=>{
+  const r=await fetch('/api/drivers/status',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({online:!isOnline})});
+  const j=await r.json();
+  isOnline=j.online;
+  $('online-lbl').textContent=isOnline?'🟢 Online':'⚪ Offline';
+  $('onlineToggle').textContent=isOnline?'Go offline':'Go online';
+  if(isOnline)loadAvail();
+};
+async function loadStats(){
+  const s=await (await fetch('/api/drivers/stats')).json();
+  isOnline=s.is_online;
+  $('online-lbl').textContent=isOnline?'🟢 Online':'⚪ Offline';
+  $('onlineToggle').textContent=isOnline?'Go offline':'Go online';
+  $('st-acc').textContent=s.acceptance_rate+'%';
+  $('st-acc').style.color=s.acceptance_rate>=80?'#4ade80':s.acceptance_rate>=50?'#fbbf24':'#f66';
+  $('st-today').textContent='$'+s.today_earned.toFixed(2);
+  $('st-del').textContent=s.today_deliveries;
+  if(isOnline)loadAvail();
+}
+async function loadAvail(){
+  if(!isOnline){$('alist').innerHTML='<p class="small">Go online to see available pickups.</p>';return;}
+  const a=await (await fetch('/api/drivers/available')).json();
+  $('alist').innerHTML='<h2>Available pickups ('+a.length+')</h2>'+(a.map(o=>`
+    <div class="card order">
+      <div class="row"><b>#${o.id} · ${o.kind==='courier'?'📦 Pickup':'🍔 Food'}</b>
+        <b>$${((o.delivery_fee||0)+(o.tip||0)).toFixed(2)}</b></div>
+      <p><b>Pick up:</b> ${o.kind==='courier'?(o.pickup_name||''):o.restaurant_name||''}<br>
+        <span class="small">📍 ${o.kind==='courier'?(o.pickup_address||''):''}</span></p>
+      <p><b>Drop at:</b> ${o.customer_name}<br><span class="small">🏠 ${o.address||''}</span></p>
+      <p class="small">Fee $${(o.delivery_fee||0).toFixed(2)} + tip $${(o.tip||0).toFixed(2)}</p>
+      <div style="display:flex;gap:8px">
+        <button class="btn small" style="flex:1" onclick="acceptOrder(${o.id})">✅ Accept</button>
+        <button class="btn small ghost" style="flex:1" onclick="declineOrder(${o.id})">❌ Decline</button>
+      </div>
+    </div>`).join('')||'<p class="small">No pickups available right now. Stay online!</p>');
+}
+async function acceptOrder(id){
+  const r=await fetch('/api/drivers/orders/'+id+'/accept',{method:'POST'});
+  if(r.ok){loadAvail();loadOrders();loadStats();}
+  else alert('Someone else grabbed it!');
+}
+async function declineOrder(id){
+  if(!confirm('Decline this pickup? It will lower your acceptance rate.'))return;
+  await fetch('/api/drivers/orders/'+id+'/decline',{method:'POST'});
+  loadAvail();loadStats();
+}
 
 $('gobtn').onclick=async()=>{
   const r=await fetch('/api/drivers/login',{method:'POST',headers:{'Content-Type':'application/json'},
@@ -122,26 +153,8 @@ $('gobtn').onclick=async()=>{
   if(!r.ok){$('loginmsg').textContent=j.detail||'Login failed.';return;}
   $('login').style.display='none';$('app').style.display='block';
   $('dname').textContent='· '+j.name;
-  DID=j.id||j.driver_id||0;
-  loadOrders(); loadNews();
+  loadStats(); loadOrders();
 };
-// Photo uploads
-async function uploadPhoto(type){
-  const inp=$(type+'file'); const f=inp.files[0];
-  if(!f){alert('Pick a photo first');return;}
-  const fd=new FormData();
-  fd.append('driver_id', ME.id); fd.append('type', type==='selfiefile'?'selfie':'car'); fd.append('file', f);
-  const btn=$(type==='selfiefile'?'selfiebtn':'carbtn');
-  btn.disabled=true; btn.textContent='Uploading…';
-  try{
-    const r=await(await fetch('/api/drivers/photo',{method:'POST',body:fd})).json();
-    if(r.ok){alert('Photo uploaded! Ken will review it.');location.reload();}
-    else alert(r.detail||'Upload failed');
-  }catch(e){alert('Upload failed');}
-  btn.disabled=false; btn.textContent='Upload';
-}
-$('selfiebtn').onclick=()=>uploadPhoto('selfiefile');
-$('carbtn').onclick=()=>uploadPhoto('carfile');
 $('logout').onclick=async()=>{
   await fetch('/api/drivers/logout',{method:'POST'});
   location.reload();
@@ -249,63 +262,5 @@ $('locToggle').onclick=()=>{
 };
 
 setInterval(()=>{ if($('app').style.display!=='none') loadOrders(); },10000);
-
-// Broadcasts
-async function loadNews(){
-  const b=await(await fetch('/api/drivers/broadcasts')).json();
-  $('newslist').innerHTML=b.map(x=>`
-    <div class="card" style="margin:8px 0"><b>📢 ${x.title.replace(/</g,'&lt;')}</b>
-    <p class="small">${x.message.replace(/</g,'&lt;')}</p>
-    <span class="small">${x.created_at.slice(0,10)}</span></div>`).join('')
-    ||'<p class="small">No announcements yet.</p>';
-}
-
-// Goals
-let DID=0;
-async function loadGoals(){
-  if(!DID) return;
-  const g=await(await fetch(`/api/drivers/goals?driver_id=${DID}`)).json();
-  $('goal-today').textContent='$'+g.today_earned.toFixed(2);
-  $('goal-daily-t').textContent='$'+g.daily_target.toFixed(2);
-  $('goal-week').textContent='$'+g.week_earned.toFixed(2);
-  $('goal-weekly-t').textContent='$'+g.weekly_target.toFixed(2);
-  $('goal-daily-bar').style.width=Math.min(100,g.today_earned/g.daily_target*100)+'%';
-  $('goal-weekly-bar').style.width=Math.min(100,g.week_earned/g.weekly_target*100)+'%';
-}
-document.getElementById('goal-save').onclick=async()=>{
-  const d=parseFloat(document.getElementById('goal-d').value)||100;
-  const w=parseFloat(document.getElementById('goal-w').value)||500;
-  await fetch('/api/drivers/goals',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({driver_id:DID,daily_target:d,weekly_target:w})});
-  loadGoals();
-};
-
-// Complaints
-document.getElementById('comp-send').onclick=async()=>{
-  const s=document.getElementById('comp-subject').value.trim();
-  const m=document.getElementById('comp-msg').value.trim();
-  if(!s||!m){document.getElementById('comp-msg-status').textContent='Fill in both fields.';return;}
-  const r=await(await fetch('/api/drivers/complaint',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({driver_id:DID,subject:s,message:m})})).json();
-  document.getElementById('comp-msg-status').textContent=r.ok?`✅ Submitted (${r.ai_category}). We'll review it.`:'Failed.';
-  document.getElementById('comp-subject').value='';document.getElementById('comp-msg').value='';
-  loadComplaints();
-};
-async function loadComplaints(){
-  if(!DID) return;
-  const c=await(await fetch(`/api/drivers/complaints?driver_id=${DID}`)).json();
-  $('complist').innerHTML=c.map(x=>`
-    <div class="card" style="margin:8px 0"><b>${x.subject.replace(/</g,'&lt;')}</b> <span class="badge">${x.status}</span>
-    <p class="small">${x.ai_summary}</p>
-    ${x.ken_response?`<p class="small" style="color:#2ecc71"><b>Response:</b> ${x.ken_response.replace(/</g,'&lt;')}</p>`:'<p class="small">Awaiting review…</p>'}</div>`).join('')
-    ||'<p class="small">No complaints filed.</p>';
-}
-// Load news/goals when tabs clicked
-document.querySelectorAll('.tabs button').forEach(b=>{
-  b.addEventListener('click',()=>{
-    if(b.dataset.t==='news') loadNews();
-    if(b.dataset.t==='help'){ loadGoals(); loadComplaints(); }
-  });
-});
 </script>
 <script src="/static/chat.js"></script></body></html>

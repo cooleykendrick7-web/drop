@@ -670,6 +670,10 @@ async function loadDrivers(){
         <div class="row"><button class="btn small" onclick="drvRides(${x.id},'approve')">🚗 Approve for rides</button>
         <button class="btn small ghost" onclick="drvRides(${x.id},'decline')">Decline rides</button></div>
       </div>`:''}
+      <div class="row" style="margin-bottom:8px">
+        <button class="btn small ghost" style="width:auto" onclick="viewDocs(${x.id},'docview-${x.id}')">📄 View documents</button>
+      </div>
+      <div id="docview-${x.id}" style="display:none"></div>
       <div class="row"><button class="btn small" onclick="drvAct(${x.id},'approve')">✅ Approve</button>
       <button class="btn small ghost" onclick="drvAct(${x.id},'deny')">❌ Deny</button></div>
     </div>`).join('')||'<p class="small">No pending applications.</p>';
@@ -680,11 +684,47 @@ async function loadDrivers(){
       <p class="small">📞 ${esc(x.phone)} · 🚗 ${esc(x.vehicle_year)} ${esc(x.vehicle_make)} ${esc(x.vehicle_model)}
       ${x.rides_approved?'<b style="color:#d4af37">· 🚗 RIDES ✓</b>':(x.wants_rides?'· <b>🚗 wants rides</b>':'')}</p>
       ${(!x.rides_approved&&x.wants_rides)?`<button class="btn small" onclick="drvRides(${x.id},'approve')">🚗 Approve for rides</button>`:''}
-      <div class="row"><button class="btn small" onclick="driverProfile(${x.id})">📊 AI Performance</button>
+      <div class="row">
+        <button class="btn small ghost" style="width:auto" onclick="viewDocs(${x.id},'adocview-${x.id}')">📄 Documents</button>
+        <button class="btn small" onclick="driverProfile(${x.id})">📊 AI Performance</button>
       <button class="btn small" onclick="sendBoost(${x.id})">💪 Send boost</button>
       <button class="btn small ghost" onclick="drvAct(${x.id},'suspend')">⏸ Suspend</button></div>
+      <div id="adocview-${x.id}" style="display:none;margin-top:8px"></div>
       <div id="dprof-${x.id}" style="display:none;margin-top:8px"></div></div>`;
   }).join('')||'<p class="small">No active drivers yet.</p>';
+}
+async function viewDocs(id, elId){
+  const el=document.getElementById(elId);
+  if(el.style.display!=='none'){el.style.display='none';return;}
+  el.style.display='block';
+  el.innerHTML='<p class="small">Loading documents…</p>';
+  const d=await (await fetch(`/api/operator/drivers/${id}/docs`,{headers:H()})).json();
+  el.innerHTML=`
+    <div style="border:1px solid var(--line);border-radius:10px;padding:10px;margin:8px 0">
+      <b class="small">📄 Documents ${d.complete?'✅ complete':'⚠️ incomplete'}</b>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+        ${d.docs.map(x=>`
+          <div style="border:1px solid #333;border-radius:8px;padding:8px;text-align:center;cursor:pointer"
+               onclick="openDoc('${x.url}')">
+            <div style="font-size:1.5rem">${x.type==='selfie'?'🤳':x.type==='car'?'🚗':x.type==='insurance'?'🛡️':'🪪'}</div>
+            <div class="small"><b>${x.label}</b></div>
+            <div class="small" style="opacity:.6">Tap to view</div>
+          </div>`).join('')}
+        ${d.missing.map(x=>`
+          <div style="border:1px dashed #f66;border-radius:8px;padding:8px;text-align:center;opacity:.7">
+            <div style="font-size:1.5rem">❌</div>
+            <div class="small"><b>${x.label}</b></div>
+            <div class="small" style="color:#f66">Missing</div>
+          </div>`).join('')}
+      </div>
+      ${!d.complete?'<p class="small" style="color:#fbbf24">⚠️ Missing documents — applicant may be denied per policy.</p>':''}
+    </div>`;
+}
+async function openDoc(url){
+  const r=await fetch(url,{headers:H()});
+  if(!r.ok){alert('Could not load document');return;}
+  const blob=await r.blob();
+  window.open(URL.createObjectURL(blob),'_blank');
 }
 async function drvAct(id,act){
   if(act==='deny'&&!confirm('Deny this application?'))return;
