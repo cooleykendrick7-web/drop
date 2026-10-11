@@ -359,8 +359,39 @@ async function loadTix(){
       <span class="badge ${x.status==='open'?'open':'closed'}">${x.status.toUpperCase()}</span></div>
       <p class="small">📞 ${x.phone.replace(/</g,'&lt;')||'—'} · Order #${x.order_id||'—'} · ${x.created_at.slice(0,16).replace('T',' ')}</p>
       <p>${x.message.replace(/</g,'&lt;')}</p>
-      ${x.status==='open'?`<button class="btn small" onclick="resolveTix(${x.id})">✓ Mark resolved</button>`:''}
+      <div><button class="btn small" onclick="openTicket(${x.id})">💬 Open chat</button>
+      ${x.status==='open'?`<button class="btn small ghost" onclick="resolveTix(${x.id})">✓ Mark resolved</button>`:''}</div>
+      <div id="thread-${x.id}" style="display:none;margin-top:10px"></div>
     </div>`).join('') || '<p>No support messages yet.</p>';
+}
+async function openTicket(id, force){
+  const box=$('thread-'+id);
+  const showing=box.style.display!=='none';
+  if(showing && !force){ box.style.display='none'; return; }
+  box.style.display='block';
+  const th=await (await fetch('/api/operator/tickets/'+id+'/thread',{headers:H()})).json();
+  box.innerHTML = th.messages.map(m=>`
+    <div class="row" style="align-items:flex-start">
+      <span class="badge ${m.sender==='operator'?'open':''}" style="min-width:70px;text-align:center">${m.sender==='operator'?'YOU':'CUSTOMER'}</span>
+      <span class="small" style="flex:1">${m.message.replace(/</g,'&lt;')}</span>
+    </div>`).join('')
+    + `<div class="row" style="margin-top:8px"><input id="trep-${id}" placeholder="Write a reply…" style="flex:1;margin-right:6px">
+      <button class="btn small" onclick="sendTicketReply(${id})">Send</button></div>
+      <div class="row" style="margin-top:6px"><button class="btn small ghost" onclick="aiSuggest(${id})">✨ AI assist — draft a reply</button></div>`;
+}
+async function sendTicketReply(id,msg){
+  const v = msg!==undefined ? msg : $('trep-'+id).value.trim();
+  if(!v) return;
+  await fetch('/api/operator/tickets/'+id+'/reply',{method:'POST',headers:{...H(),'Content-Type':'application/json'},
+    body:JSON.stringify({message:v})});
+  openTicket(id, true);  // refresh thread
+}
+async function aiSuggest(id){
+  const j=await (await fetch('/api/operator/tickets/'+id+'/suggest',{method:'POST',headers:H()})).json();
+  if(j.draft){
+    $('trep-'+id).value=j.draft;
+    $('trep-'+id).focus();
+  }
 }
 async function resolveTix(id){
   await fetch('/api/operator/tickets/'+id+'/resolve',{method:'POST',headers:H()});
