@@ -115,11 +115,6 @@ def init_db():
     c.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('min_order', '10.00')")
     c.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('accepting_orders', '1')")
     c.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('mins_per_delivery', '18')")
-    c.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('max_queue', '8')")
-    c.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('owner_pin', '')")
-    ocols = [r[1] for r in c.execute("PRAGMA table_info(orders)").fetchall()]
-    if "claimed_by_owner" not in ocols:
-        c.execute("ALTER TABLE orders ADD COLUMN claimed_by_owner INTEGER DEFAULT 0")
     # customer accounts + rewards (added 2026-10-09)
     c.execute("""CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -196,152 +191,7 @@ def init_db():
         status TEXT NOT NULL DEFAULT 'pending',
         deliveries INTEGER NOT NULL DEFAULT 0,
         on_time INTEGER NOT NULL DEFAULT 0,
-        selfie_photo TEXT DEFAULT '', car_photo TEXT DEFAULT '',
-        selfie_approved INTEGER DEFAULT 0, car_approved INTEGER DEFAULT 0,
-        rating REAL DEFAULT 5.0, rating_count INTEGER DEFAULT 0,
         created_at TEXT NOT NULL)""")
-    # Idempotent: add photo columns to existing drivers tables
-    dcols = [r[1] for r in c.execute("PRAGMA table_info(drivers)").fetchall()]
-    for _col, _ddl in (("selfie_photo", "TEXT DEFAULT ''"), ("car_photo", "TEXT DEFAULT ''"),
-                       ("selfie_approved", "INTEGER DEFAULT 0"), ("car_approved", "INTEGER DEFAULT 0"),
-                       ("rating", "REAL DEFAULT 5.0"), ("rating_count", "INTEGER DEFAULT 0"),
-                       ("stripe_account_id", "TEXT DEFAULT ''"),
-                       ("login_pin", "TEXT DEFAULT ''"),
-                       ("ntfy_topic", "TEXT DEFAULT ''")):
-        if _col not in dcols:
-            c.execute(f"ALTER TABLE drivers ADD COLUMN {_col} {_ddl}")
-    # Delivery photo proof (pickup + dropoff, DoorDash-style)
-    c.execute("""CREATE TABLE IF NOT EXISTS delivery_photos (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        order_id INTEGER NOT NULL, driver_id INTEGER NOT NULL,
-        photo_type TEXT NOT NULL, photo_path TEXT NOT NULL,
-        created_at TEXT NOT NULL)""")
-    # Driver <-> customer chat per order
-    c.execute("""CREATE TABLE IF NOT EXISTS order_messages (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        order_id INTEGER NOT NULL, sender TEXT NOT NULL,
-        body TEXT NOT NULL, created_at TEXT NOT NULL)""")
-    # Driver food purchase receipts (pay at restaurant, get reimbursed)
-    c.execute("""CREATE TABLE IF NOT EXISTS food_receipts (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        order_id INTEGER NOT NULL, driver_id INTEGER NOT NULL,
-        amount REAL NOT NULL, photo_path TEXT NOT NULL,
-        status TEXT NOT NULL DEFAULT 'pending',
-        ai_check TEXT DEFAULT '', decided_by TEXT DEFAULT '',
-        created_at TEXT NOT NULL)""")
-    # Driver disputes/appeals (theft accusations, suspensions)
-    c.execute("""CREATE TABLE IF NOT EXISTS driver_disputes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        driver_id INTEGER NOT NULL, order_id INTEGER DEFAULT 0,
-        issue_type TEXT NOT NULL, description TEXT NOT NULL,
-        status TEXT NOT NULL DEFAULT 'open',
-        driver_appeal TEXT DEFAULT '',
-        resolution TEXT DEFAULT '', decided_by TEXT DEFAULT '',
-        created_at TEXT NOT NULL, resolved_at TEXT DEFAULT '')""")
-    # Business accounts (Drop More B2B)
-    c.execute("""CREATE TABLE IF NOT EXISTS business_accounts (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        business_name TEXT NOT NULL, contact_name TEXT NOT NULL,
-        email TEXT NOT NULL UNIQUE, phone TEXT NOT NULL,
-        password_hash TEXT NOT NULL,
-        address TEXT DEFAULT '', city TEXT DEFAULT '', state TEXT DEFAULT '',
-        total_orders INTEGER DEFAULT 0, total_spent REAL DEFAULT 0,
-        discount_tier TEXT DEFAULT 'standard',
-        created_at TEXT NOT NULL)""")
-    # Driver ratings (start at 100%, customers rate down/up)
-    c.execute("""CREATE TABLE IF NOT EXISTS driver_ratings (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        driver_id INTEGER NOT NULL, order_id INTEGER NOT NULL,
-        rating INTEGER NOT NULL, comment TEXT DEFAULT '',
-        customer_name TEXT DEFAULT '',
-        created_at TEXT NOT NULL)""")
-    # User profiles (customers)
-    c.execute("""CREATE TABLE IF NOT EXISTS user_profiles (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        phone TEXT UNIQUE NOT NULL, name TEXT DEFAULT '',
-        email TEXT DEFAULT '', photo TEXT DEFAULT '',
-        password_hash TEXT DEFAULT '',
-        created_at TEXT NOT NULL)""")
-    # Saved payment methods (last4 + brand only, never full numbers)
-    c.execute("""CREATE TABLE IF NOT EXISTS saved_cards (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        phone TEXT NOT NULL, last4 TEXT NOT NULL,
-        brand TEXT DEFAULT '', exp_month TEXT DEFAULT '', exp_year TEXT DEFAULT '',
-        stripe_pm_id TEXT DEFAULT '',
-        created_at TEXT NOT NULL)""")
-    # Live restaurant cache (from OpenStreetMap, 24h TTL)
-    c.execute("""CREATE TABLE IF NOT EXISTS live_cache (
-        key TEXT PRIMARY KEY, data TEXT NOT NULL, cached_at TEXT NOT NULL)""")
-    # Driver broadcasts (Ken's announcements to all drivers)
-    c.execute("""CREATE TABLE IF NOT EXISTS driver_broadcasts (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        title TEXT NOT NULL, message TEXT NOT NULL,
-        created_at TEXT NOT NULL)""")
-    # Driver complaints (AI triages, suggests solutions to Ken)
-    c.execute("""CREATE TABLE IF NOT EXISTS driver_complaints (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        driver_id INTEGER NOT NULL, subject TEXT NOT NULL,
-        message TEXT NOT NULL, ai_summary TEXT DEFAULT '',
-        ai_suggestion TEXT DEFAULT '', status TEXT DEFAULT 'open',
-        ken_response TEXT DEFAULT '',
-        created_at TEXT NOT NULL)""")
-    # Driver earnings goals
-    c.execute("""CREATE TABLE IF NOT EXISTS driver_goals (
-        driver_id INTEGER PRIMARY KEY,
-        daily_target REAL DEFAULT 100, weekly_target REAL DEFAULT 500,
-        updated_at TEXT NOT NULL)""")
-    # WATCH portal comments
-    c.execute("""CREATE TABLE IF NOT EXISTS watch_comments (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        author TEXT NOT NULL DEFAULT 'Anonymous',
-        message TEXT NOT NULL, reply TEXT DEFAULT '',
-        created_at TEXT NOT NULL)""")
-    # City expansion requests
-    c.execute("""CREATE TABLE IF NOT EXISTS city_requests (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        city TEXT NOT NULL, state TEXT NOT NULL,
-        status TEXT NOT NULL DEFAULT 'requested',
-        created_at TEXT NOT NULL)""")
-    # ---- Universal Payment Infrastructure ----
-    # Virtual card applications (driver requests a Drop card)
-    c.execute("""CREATE TABLE IF NOT EXISTS card_applications (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        driver_id INTEGER NOT NULL,
-        status TEXT NOT NULL DEFAULT 'pending',
-        ai_recommendation TEXT DEFAULT '', ai_reason TEXT DEFAULT '',
-        ai_policy_version TEXT DEFAULT 'v1',
-        decided_by TEXT DEFAULT '', decided_at TEXT DEFAULT '',
-        created_at TEXT NOT NULL)""")
-    # Virtual cards (provider-issued; provider fields stay empty until activated)
-    c.execute("""CREATE TABLE IF NOT EXISTS virtual_cards (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        driver_id INTEGER NOT NULL UNIQUE,
-        provider TEXT DEFAULT '', provider_card_id TEXT DEFAULT '',
-        last4 TEXT DEFAULT '', status TEXT NOT NULL DEFAULT 'none',
-        spending_limit REAL DEFAULT 0,
-        created_at TEXT NOT NULL, updated_at TEXT NOT NULL)""")
-    # Universal payment ledger (all money movement, double-entry style)
-    c.execute("""CREATE TABLE IF NOT EXISTS payment_ledger (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        txn_id TEXT NOT NULL, entry_type TEXT NOT NULL,
-        driver_id INTEGER DEFAULT 0, order_id INTEGER DEFAULT 0,
-        amount REAL NOT NULL, currency TEXT DEFAULT 'USD',
-        direction TEXT NOT NULL, category TEXT NOT NULL,
-        provider TEXT DEFAULT '', provider_ref TEXT DEFAULT '',
-        status TEXT NOT NULL DEFAULT 'pending',
-        memo TEXT DEFAULT '', created_at TEXT NOT NULL)""")
-    # Card purchase authorizations (order-restricted spending)
-    c.execute("""CREATE TABLE IF NOT EXISTS card_authorizations (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        card_id INTEGER NOT NULL, driver_id INTEGER NOT NULL,
-        order_id INTEGER NOT NULL, max_amount REAL NOT NULL,
-        merchant_restriction TEXT DEFAULT '',
-        status TEXT NOT NULL DEFAULT 'active',
-        expires_at TEXT NOT NULL, created_at TEXT NOT NULL)""")
-    # Customer driver selection
-    ocols2 = [r[1] for r in c.execute("PRAGMA table_info(orders)").fetchall()]
-    if "customer_driver_choice" not in ocols2:
-        c.execute("ALTER TABLE orders ADD COLUMN customer_driver_choice INTEGER DEFAULT 0")
     c.execute("""CREATE TABLE IF NOT EXISTS driver_sessions (
         token TEXT PRIMARY KEY,
         driver_id INTEGER NOT NULL REFERENCES drivers(id) ON DELETE CASCADE,
@@ -391,48 +241,23 @@ def init_db():
         title TEXT NOT NULL DEFAULT '',
         detail TEXT DEFAULT '',
         created_at TEXT NOT NULL)""")
-    # multi-city: where each restaurant lives (added 2026-10-11)
-    _rcols = [r[1] for r in c.execute("PRAGMA table_info(restaurants)").fetchall()]
-    for _col, _ddl in (("city", "TEXT DEFAULT 'Bismarck'"), ("state", "TEXT DEFAULT 'ND'"),
-                       ("address", "TEXT DEFAULT ''"), ("lat", "REAL DEFAULT 0"),
-                       ("lng", "REAL DEFAULT 0"), ("website", "TEXT DEFAULT ''"),
-                       ("phone", "TEXT DEFAULT ''")):
-        if _col not in _rcols:
-            c.execute(f"ALTER TABLE restaurants ADD COLUMN {_col} {_ddl}")
-    # restaurant partnership applications (added 2026-10-11)
-    c.execute("""CREATE TABLE IF NOT EXISTS partner_applications (
+    # gift orders (added 2026-10-11)
+    ocols = [r[1] for r in c.execute("PRAGMA table_info(orders)").fetchall()]
+    for _col, _ddl in (("is_gift", "INTEGER DEFAULT 0"),
+                       ("gift_recipient", "TEXT DEFAULT ''"),
+                       ("gift_contact", "TEXT DEFAULT ''"),
+                       ("gift_message", "TEXT DEFAULT ''"),
+                       ("gift_sender", "TEXT DEFAULT ''")):
+        if _col not in ocols:
+            c.execute(f"ALTER TABLE orders ADD COLUMN {_col} {_ddl}")
+    c.execute("""CREATE TABLE IF NOT EXISTS gift_queue (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        business_name TEXT NOT NULL, contact_name TEXT DEFAULT '',
-        email TEXT DEFAULT '', phone TEXT DEFAULT '', city TEXT DEFAULT '',
-        state TEXT DEFAULT '', cuisine TEXT DEFAULT '', locations INTEGER DEFAULT 1,
-        volume TEXT DEFAULT '', proposal TEXT DEFAULT '', status TEXT DEFAULT 'new',
-        ai_score INTEGER DEFAULT 0, ai_verdict TEXT DEFAULT '',
-        created_at TEXT NOT NULL)""")
-    # outreach prospects (added 2026-10-11)
-    c.execute("""CREATE TABLE IF NOT EXISTS prospects (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL, email TEXT DEFAULT '', city TEXT DEFAULT '',
-        state TEXT DEFAULT '', cuisine TEXT DEFAULT '', status TEXT DEFAULT 'new',
-        draft_subject TEXT DEFAULT '', draft_body TEXT DEFAULT '',
-        sent_at TEXT DEFAULT '', created_at TEXT NOT NULL)""")
-    c.execute("""CREATE TABLE IF NOT EXISTS opt_outs (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        email TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL)""")
-    # suggest-a-spot (added 2026-10-11)
-    c.execute("""CREATE TABLE IF NOT EXISTS spot_suggestions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL, city TEXT DEFAULT '', note TEXT DEFAULT '',
-        contact TEXT DEFAULT '', created_at TEXT NOT NULL)""")
-    # AI bot chat (added 2026-10-11)
-    c.execute("""CREATE TABLE IF NOT EXISTS bot_chats (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        role TEXT NOT NULL DEFAULT 'ken',
-        message TEXT NOT NULL, created_at TEXT NOT NULL)""")
-    # AI improvement ideas (added 2026-10-11)
-    c.execute("""CREATE TABLE IF NOT EXISTS ai_ideas (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
-        why_beats TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'pending',
+        order_id INTEGER NOT NULL,
+        recipient TEXT NOT NULL DEFAULT '',
+        contact TEXT NOT NULL DEFAULT '',
+        message TEXT DEFAULT '',
+        sender TEXT DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'pending',
         created_at TEXT NOT NULL)""")
     # DROP MORE marketplace: business partnerships (added 2026-10-11)
     c.execute("""CREATE TABLE IF NOT EXISTS business_partners (
@@ -596,682 +421,8 @@ def seed():
     conn.close()
 
 
-def seed_cities():
-    """Idempotent: add real multi-city restaurants (Fargo, Minneapolis) if missing."""
-    conn = db()
-    c = conn.cursor()
-    SPOTS = [
-    # (name, cuisine, emoji, address, city, state, website, menu[(name, price)])
-    ("ThaiKota", "Thai", "🍜", "1201 1st Ave N, Fargo, ND", "Fargo", "ND", "https://www.thaikota.com/",
-     [("Pad Thai", 14.99), ("Khao Soi Curry", 15.99), ("Tom Yum Noodle Soup", 13.99), ("Spring Rolls", 7.99)]),
-    ("JL Beers", "Burgers", "🍔", "518 1st Ave N, Fargo, ND", "Fargo", "ND", "http://www.jlbeers.com/",
-     [("Humpty Dumpty Burger", 12.99), ("Rajun Cajun Burger", 11.99), ("Garlic Parm Fries", 6.99), ("Beer Cheese Pretzel", 8.99)]),
-    ("Taco Brothers", "Mexican", "🌮", "428 Roberts St N, Fargo, ND", "Fargo", "ND", "",
-     [("Trust You Bro Platter", 11.99), ("Big Brother Burrito", 10.99), ("Butter-Fried Chicken Taco", 4.99), ("Chips & Guac", 7.99)]),
-    ("Wasabi", "Sushi", "🍣", "560 2nd Ave N, Fargo, ND", "Fargo", "ND", "https://www.wasabipokebowl.com/",
-     [("Chef's Special Roll", 14.99), ("Corona Roll", 13.99), ("Poke Bowl", 12.99), ("Seared Tuna Salad", 13.99)]),
-    ("Pounds", "Diner", "🍔", "6 Broadway N, Fargo, ND", "Fargo", "ND", "http://poundsfargo.com/",
-     [("Californication Burger", 12.99), ("Torch Wings", 11.99), ("BBQ Porker Mac", 10.99), ("Queso Fries", 7.99)]),
-    ("Old Broadway", "Bar & Grill", "🍺", "22 Broadway N, Fargo, ND", "Fargo", "ND", "http://www.theoldbroadway.com/",
-     [("Eggs Benedict", 11.99), ("Beer Cheese Soup", 8.99), ("Breakfast Pizza", 10.99), ("Bread Pudding", 6.99)]),
-    ("Hai Hai", "Southeast Asian", "🍜", "2121 University Ave NE, Minneapolis, MN", "Minneapolis", "MN", "",
-     [("Street Noodles", 15.99), ("Coconut Curry", 16.99), ("Pork Belly Buns", 9.99), ("Papaya Salad", 11.99)]),
-    ("Element Wood Fire Pizza", "Pizza", "🍕", "96 Broadway St NE, Minneapolis, MN", "Minneapolis", "MN", "",
-     [("Wood-Fired Margherita", 14.99), ("Pepperoni Char Pie", 15.99), ("White Pie", 14.99), ("Caesar Salad", 9.99)]),
-    ("Diane's Place", "Brunch", "🍳", "117 14th Ave NE, Minneapolis, MN", "Minneapolis", "MN", "",
-     [("Hmong Sausage & Eggs", 15.99), ("Thai Tea French Toast", 13.99), ("Brunch Burger", 14.99), ("Sticky Rice Plate", 12.99)]),
-    ("Chimborazo", "Ecuadorian", "🫓", "2851 Central Ave NE, Minneapolis, MN", "Minneapolis", "MN", "",
-     [("Llapingachos", 13.99), ("Encebollado", 12.99), ("Fritada Plate", 15.99), ("Empanadas (3)", 8.99)]),
-    ("Gorkha Palace", "Indian", "🍛", "23 4th St NE, Minneapolis, MN", "Minneapolis", "MN", "",
-     [("Chicken Tikka Masala", 14.99), ("Lamb Curry", 16.99), ("Garlic Naan", 3.99), ("Samosa (2)", 5.99)]),
-    ("The Anchor Fish & Chips", "Fish & Chips", "🐟", "302 13th Ave NE, Minneapolis, MN", "Minneapolis", "MN", "",
-     [("Fish & Chips", 13.99), ("Shrimp Basket", 12.99), ("Clam Chowder", 7.99), ("Coleslaw Side", 3.99)]),
-]
-    for name, cuisine, emoji, addr, city, state, site, menu in SPOTS:
-        exists = c.execute("SELECT id FROM restaurants WHERE name=? AND city=?", (name, city)).fetchone()
-        if exists:
-            continue
-        try:
-            lat, lng = geocode(addr)
-        except Exception:
-            lat, lng = 0, 0
-        cur = c.execute(
-            "INSERT INTO restaurants(name, cuisine, emoji, open, address, lat, lng, website, city, state)"
-            " VALUES(?,?,?,?,?,?,?,?,?,?)",
-            (name, cuisine, emoji, 1, addr, lat, lng, site, city, state))
-        rid = cur.lastrowid
-        for mname, price in menu:
-            c.execute("INSERT INTO menu_items(restaurant_id, name, price, available) VALUES(?,?,?,1)",
-                      (rid, mname, price))
-    conn.commit()
-    conn.close()
-
-
-def seed_expansion_cities():
-    """Idempotent: add 88 real restaurants across 10 major US cities."""
-    conn = db()
-    c = conn.cursor()
-    SPOTS = [
-    ("The Varsity", "American · Burgers", "🍔", "61 North Ave NW", "Atlanta", "GA", "(404) 881-1706"),
-    ("Mary Mac's Tea Room", "Southern · Comfort", "🍗", "224 Ponce De Leon Ave NE", "Atlanta", "GA", "(404) 876-1800"),
-    ("The Vortex Bar & Grill", "Burgers · American", "🍔", "438 Moreland Ave NE", "Atlanta", "GA", "(404) 688-1828"),
-    ("Fox Bros Bar-B-Q", "BBQ", "🍖", "1238 DeKalb Ave NE", "Atlanta", "GA", "(404) 577-4030"),
-    ("Antico Pizza Napoletana", "Pizza · Italian", "🍕", "1093 Hemphill Ave NW", "Atlanta", "GA", "(404) 724-2333"),
-    ("The Busy Bee Cafe", "Soul Food", "🍗", "810 Martin Luther King Jr Dr SW", "Atlanta", "GA", "(404) 521-9061"),
-    ("Slutty Vegan", "Vegan · Burgers", "🌱", "1542 Ralph David Abernathy Blvd SW", "Atlanta", "GA", "(470) 240-1976"),
-    ("Canoe", "American · Fine Dining", "🍽️", "4199 Paces Ferry Rd SE", "Atlanta", "GA", "(770) 432-2663"),
-    ("Bacchanalia", "Fine Dining · American", "🍽️", "1460 Ellsworth Industrial Blvd NW", "Atlanta", "GA", "(404) 365-0410"),
-    ("Pecan Lodge", "BBQ", "🍖", "2702 Main St", "Dallas", "TX", "(214) 748-8900"),
-    ("Mi Cocina", "Tex-Mex", "🌮", "2515 McKinney Ave", "Dallas", "TX", "(214) 754-0368"),
-    ("Hutchins BBQ", "BBQ", "🍖", "1301 N Tennessee St", "McKinney", "TX", "(214) 548-4119"),
-    ("Terry Black's Barbecue", "BBQ", "🍖", "3025 Main St", "Dallas", "TX", "(214) 997-1551"),
-    ("Uchi Dallas", "Japanese · Sushi", "🍣", "2817 Maple Ave", "Dallas", "TX", "(214) 855-5454"),
-    ("Cane Rosso", "Pizza · Italian", "🍕", "2612 Commerce St", "Dallas", "TX", "(214) 741-4760"),
-    ("Ellen's", "Breakfast · Brunch", "🥞", "1790 N Record St", "Dallas", "TX", "(214) 702-4667"),
-    ("Rodeo Goat", "Burgers", "🍔", "1926 Market Center Blvd", "Dallas", "TX", "(214) 741-4628"),
-    ("The Breakfast Klub", "Breakfast", "🥞", "3711 Travis St", "Houston", "TX", "(713) 528-8561"),
-    ("Pappadeaux Seafood Kitchen", "Seafood · Cajun", "🦐", "2410 Richmond Ave", "Houston", "TX", "(713) 521-2233"),
-    ("Killen's Barbecue", "BBQ", "🍖", "3613 E Broadway St", "Pearland", "TX", "(281) 485-2272"),
-    ("Uchi Houston", "Japanese · Sushi", "🍣", "904 Westheimer Rd", "Houston", "TX", "(713) 522-4808"),
-    ("Goode Company BBQ", "BBQ", "🍖", "5109 Kirby Dr", "Houston", "TX", "(713) 522-2530"),
-    ("The Original Ninfa's", "Tex-Mex", "🌮", "2704 Navigation Blvd", "Houston", "TX", "(713) 228-1175"),
-    ("Crawfish & Noodles", "Vietnamese-Cajun · Seafood", "🦐", "11360 Bellaire Blvd #990", "Houston", "TX", "(281) 988-8098"),
-    ("Lankford Grocery", "Burgers", "🍔", "88 Dennis St", "Houston", "TX", "(713) 522-9555"),
-    ("Pinkerton's Barbecue", "BBQ", "🍖", "1100 E 5 1/2 St", "Houston", "TX", "(713) 904-9100"),
-    ("Lou Malnati's Pizzeria", "Deep Dish Pizza", "🍕", "439 N Wells St", "Chicago", "IL", "(312) 828-9800"),
-    ("Giordano's", "Deep Dish Pizza", "🍕", "730 N Rush St", "Chicago", "IL", "(312) 951-0747"),
-    ("Portillo's Hot Dogs", "Hot Dogs · Italian Beef", "🌭", "100 W Ontario St", "Chicago", "IL", "(312) 587-8910"),
-    ("Al's #1 Italian Beef", "Italian Beef", "🥪", "1079 W Taylor St", "Chicago", "IL", "(312) 226-4017"),
-    ("Girl & the Goat", "American", "🍽️", "809 W Randolph St", "Chicago", "IL", "(312) 492-6262"),
-    ("Pequod's Pizza", "Pan Pizza", "🍕", "2207 N Clybourn Ave", "Chicago", "IL", "(773) 327-1512"),
-    ("The Wiener's Circle", "Hot Dogs", "🌭", "2622 N Clark St", "Chicago", "IL", "(773) 477-7444"),
-    ("Mr. Beef", "Italian Beef", "🥪", "666 N Orleans St", "Chicago", "IL", "(312) 337-8500"),
-    ("Xoco", "Mexican", "🌮", "449 N Clark St", "Chicago", "IL", "(312) 334-3688"),
-    ("In-N-Out Burger", "Burgers", "🍔", "9149 S Sepulveda Blvd", "Los Angeles", "CA", "(800) 786-1000"),
-    ("Pink's Hot Dogs", "Hot Dogs", "🌭", "709 N La Brea Ave", "Los Angeles", "CA", "(323) 931-4223"),
-    ("The Original Pantry Cafe", "Diner · American", "🥞", "877 S Figueroa St", "Los Angeles", "CA", "(213) 972-9279"),
-    ("Philippe The Original", "Deli · French Dip", "🥪", "1001 N Alameda St", "Los Angeles", "CA", "(213) 628-3781"),
-    ("Guisados", "Tacos", "🌮", "2100 E Cesar E Chavez Ave", "Los Angeles", "CA", "(323) 264-7201"),
-    ("Howlin' Ray's", "Nashville Hot Chicken", "🍗", "727 N Broadway #128", "Los Angeles", "CA", "(213) 935-8399"),
-    ("Roscoe's House of Chicken & Waffles", "Soul Food", "🧇", "1514 N Gower St", "Los Angeles", "CA", "(323) 466-7453"),
-    ("Langer's Delicatessen", "Deli", "🥪", "704 S Alvarado St", "Los Angeles", "CA", "(213) 483-8050"),
-    ("Bestia", "Italian", "🍽️", "2121 E 7th Pl", "Los Angeles", "CA", "(213) 514-5724"),
-    ("Jon & Vinny's", "Italian", "🍕", "412 N Fairfax Ave", "Los Angeles", "CA", "(323) 334-3369"),
-    ("Katz's Delicatessen", "Deli", "🥪", "205 E Houston St", "New York", "NY", "(212) 254-2246"),
-    ("Joe's Pizza", "Pizza", "🍕", "7 Carmine St", "New York", "NY", "(212) 366-1182"),
-    ("Xi'an Famous Foods", "Chinese · Noodles", "🍜", "45 Bayard St", "New York", "NY", "(212) 786-2068"),
-    ("Prince Street Pizza", "Pizza", "🍕", "27 Prince St", "New York", "NY", "(212) 966-4100"),
-    ("Russ & Daughters", "Bagels · Appetizing", "🥯", "179 E Houston St", "New York", "NY", "(212) 475-4880"),
-    ("Di Fara Pizza", "Pizza", "🍕", "1424 Avenue J", "Brooklyn", "NY", "(718) 258-1367"),
-    ("Peter Luger Steak House", "Steakhouse", "🥩", "178 Broadway", "Brooklyn", "NY", "(718) 387-7400"),
-    ("Rubirosa", "Italian · Pizza", "🍕", "235 Mulberry St", "New York", "NY", "(212) 965-1700"),
-    ("Versailles Restaurant", "Cuban", "🍖", "3555 SW 8th St", "Miami", "FL", "(305) 444-0240"),
-    ("Joe's Stone Crab", "Seafood", "🦀", "11 Washington Ave", "Miami Beach", "FL", "(305) 673-0365"),
-    ("La Sandwicherie", "Sandwiches", "🥪", "229 14th St", "Miami Beach", "FL", "(305) 532-8934"),
-    ("Enriqueta's Sandwich Shop", "Cuban Sandwiches", "🥪", "186 NE 29th St", "Miami", "FL", "(305) 573-4681"),
-    ("Garcia's Seafood Grille", "Seafood", "🦐", "398 NW North River Dr", "Miami", "FL", "(305) 375-0765"),
-    ("Puerto Sagua", "Cuban", "🍗", "700 Collins Ave", "Miami Beach", "FL", "(305) 673-1115"),
-    ("Sanguich De Miami", "Cuban Sandwiches", "🥪", "1042 SW 8th St", "Miami", "FL", "(786) 558-8368"),
-    ("Casa Bonita", "Mexican", "🌮", "6715 W Colfax Ave", "Lakewood", "CO", "(303) 232-5115"),
-    ("Sam's No. 3", "Diner", "🥞", "1500 Curtis St", "Denver", "CO", "(303) 534-2227"),
-    ("Biker Jim's Gourmet Dogs", "Hot Dogs", "🌭", "2148 Larimer St", "Denver", "CO", "(303) 209-2808"),
-    ("Denver Biscuit Company", "Biscuits · Breakfast", "🥐", "3237 E Colfax Ave", "Denver", "CO", "(303) 377-7900"),
-    ("Illegal Pete's", "Burritos", "🌯", "270 S Broadway", "Denver", "CO", "(303) 778-1397"),
-    ("Snooze, an A.M. Eatery", "Breakfast", "🥞", "2262 Larimer St", "Denver", "CO", "(303) 297-0700"),
-    ("Tacos Tequila Whiskey", "Tacos", "🌮", "3300 Blake St", "Denver", "CO", "(303) 297-4939"),
-    ("The Buckhorn Exchange", "Steakhouse", "🥩", "1000 Osage St", "Denver", "CO", "(303) 534-9505"),
-    ("Rosenberg's Bagels", "Bagels · Deli", "🥯", "725 E 26th Ave", "Denver", "CO", "(720) 519-3841"),
-    ("Pike Place Chowder", "Seafood · Chowder", "🦐", "1530 Post Alley", "Seattle", "WA", "(206) 267-2537"),
-    ("Dick's Drive-In", "Burgers", "🍔", "111 NE 45th St", "Seattle", "WA", "(206) 632-5125"),
-    ("Piroshky Piroshky", "Russian Bakery", "🥐", "1908 Pike Pl", "Seattle", "WA", "(206) 441-6068"),
-    ("Salumi", "Italian Deli", "🥪", "309 3rd Ave S", "Seattle", "WA", "(206) 621-8772"),
-    ("The Pink Door", "Italian", "🍝", "1919 Post Alley", "Seattle", "WA", "(206) 443-3241"),
-    ("Din Tai Fung", "Chinese · Dumplings", "🥟", "2621 NE 46th St", "Seattle", "WA", "(206) 525-0958"),
-    ("Serious Pie", "Pizza", "🍕", "316 Virginia St", "Seattle", "WA", "(206) 838-7388"),
-    ("Ivar's Acres of Clams", "Seafood", "🦐", "1001 Alaskan Way", "Seattle", "WA", "(206) 624-6852"),
-    ("Marination Ma Kai", "Hawaiian", "🌺", "1660 Harbor Ave SW", "Seattle", "WA", "(206) 328-8226"),
-    ("Pizzeria Bianco", "Pizza", "🍕", "623 E Adams St", "Phoenix", "AZ", "(602) 258-8300"),
-    ("Matt's Big Breakfast", "Breakfast", "🥞", "825 N 1st St", "Phoenix", "AZ", "(602) 254-1074"),
-    ("Los Dos Molinos", "Mexican", "🌮", "8646 S Central Ave", "Phoenix", "AZ", "(602) 243-9113"),
-    ("Carolina's Mexican Food", "Mexican", "🌮", "2126 E Cactus Rd", "Phoenix", "AZ", "(602) 749-5961"),
-    ("Little Miss BBQ", "BBQ", "🍖", "4301 E University Dr", "Phoenix", "AZ", "(602) 437-1177"),
-    ("Welcome Diner", "Diner", "🍔", "924 E Roosevelt St", "Phoenix", "AZ", "(602) 495-1114"),
-    ("Tacos Huicho", "Tacos", "🌮", "822 N 16th St", "Phoenix", "AZ", "(602) 322-8824"),
-    ("Chino Bandido", "Chinese-Mexican Fusion", "🍜", "15414 N 19th Ave", "Phoenix", "AZ", "(602) 375-3639"),
-    ("Barrio Cafe", "Mexican", "🌮", "2814 N 16th St", "Phoenix", "AZ", "(602) 636-0240"),
-    ("Durant's", "Steakhouse", "🥩", "2611 N Central Ave", "Phoenix", "AZ", "(602) 264-5967"),
-    ]
-    for name, cuisine, emoji, addr, city, state, phone in SPOTS:
-        exists = c.execute(
-            "SELECT id FROM restaurants WHERE name=? AND city=?", (name, city)).fetchone()
-        if not exists:
-            c.execute(
-                "INSERT INTO restaurants(name, cuisine, emoji, address, city, state, phone, open)"
-                " VALUES(?,?,?,?,?,?,?,1)",
-                (name, cuisine, emoji, addr, city, state, phone))
-    conn.commit()
-    conn.close()
-
-
-def seed_expansion_cities2():
-    """Idempotent: add 168 more restaurants across 27 cities."""
-    conn = db()
-    c = conn.cursor()
-    # Batch 2: 27 more cities
-    SPOTS2 = [
-("Union Oyster House", "Seafood · American", "🦪", "41 Union St", "Boston", "MA", "(617) 227-2750"),
-("Mike's Pastry", "Bakery · Cannoli", "🍰", "300 Hanover St", "Boston", "MA", "(617) 742-3050"),
-("Neptune Oyster", "Seafood", "🦞", "63 Salem St", "Boston", "MA", "(617) 742-3474"),
-("Regina Pizzeria", "Pizza", "🍕", "11 1/2 Thacher St", "Boston", "MA", "(617) 227-0765"),
-("Legal Sea Foods", "Seafood", "🐟", "255 State St", "Boston", "MA", "(617) 742-5300"),
-("Santarpio's Pizza", "Pizza · Italian", "🍕", "111 Chelsea St", "Boston", "MA", "(617) 567-9871"),
-("Yume Wo Katare", "Ramen", "🍜", "1923 Massachusetts Ave", "Boston", "MA", "(617) 492-9219"),
-("Pat's King of Steaks", "Cheesesteak", "🧀", "1237 E Passyunk Ave", "Philadelphia", "PA", "(215) 468-1546"),
-("Geno's Steaks", "Cheesesteak", "🥩", "1219 S 9th St", "Philadelphia", "PA", "(215) 389-0659"),
-("Jim's Steaks", "Cheesesteak", "🧀", "400 South St", "Philadelphia", "PA", "(215) 928-1911"),
-("Reading Terminal Market", "Market Hall", "🍽️", "1136 Arch St", "Philadelphia", "PA", "(215) 922-2317"),
-("Federal Donuts", "Donuts · Chicken", "🍩", "1219 S 2nd St", "Philadelphia", "PA", ""),
-("Zahav", "Israeli", "🥙", "237 St James Pl", "Philadelphia", "PA", "(215) 625-8800"),
-("La Colombe", "Coffee", "☕", "1335 Frankford Ave", "Philadelphia", "PA", "(215) 425-0584"),
-("Ben's Chili Bowl", "Chili · American", "🌭", "1213 U St NW", "Washington", "DC", "(202) 667-0909"),
-("Old Ebbitt Grill", "American", "🦀", "675 15th St NW", "Washington", "DC", "(202) 347-4800"),
-("Georgetown Cupcake", "Cupcakes", "🧁", "3301 M St NW", "Washington", "DC", "(202) 333-8448"),
-("Le Diplomate", "French", "🥖", "1601 14th St NW", "Washington", "DC", "(202) 332-3333"),
-("Founding Farmers", "American", "🥞", "1255 20th St NW", "Washington", "DC", "(202) 822-8783"),
-("Jumbo Slice", "Pizza", "🍕", "2341 18th St NW", "Washington", "DC", "(202) 232-8185"),
-("Faidley's Seafood", "Seafood · Crab Cakes", "🦀", "203 N Paca St", "Baltimore", "MD", "(410) 727-4898"),
-("Lexington Market", "Market Hall", "🍽️", "112 N Eutaw St", "Baltimore", "MD", "(410) 685-6169"),
-("Di Pasquale's", "Italian Deli", "🍝", "3700 Gough St", "Baltimore", "MD", "(410) 276-6929"),
-("Pete's Grille", "Diner", "🥞", "3130 Greenmount Ave", "Baltimore", "MD", "(410) 467-7698"),
-("The Helmand", "Afghan", "🍛", "806 N Charles St", "Baltimore", "MD", "(410) 752-0311"),
-("Chaps Pit Beef", "BBQ · Pit Beef", "🍖", "5801 Pulaski Hwy", "Baltimore", "MD", "(410) 483-2379"),
-("Hattie B's Hot Chicken", "Hot Chicken", "🍗", "112 19th Ave S", "Nashville", "TN", "(615) 678-4794"),
-("Prince's Hot Chicken Shack", "Hot Chicken", "🔥", "5814 Nolensville Pike", "Nashville", "TN", "(615) 810-9388"),
-("Biscuit Love", "Southern · Brunch", "🥞", "316 11th Ave S", "Nashville", "TN", "(615) 490-9584"),
-("The Bluebird Cafe", "Cafe · American", "🎸", "4104 Hillsboro Pike", "Nashville", "TN", "(615) 383-1461"),
-("Robert's Western World", "Honky Tonk · Burgers", "🍔", "416 B Broadway", "Nashville", "TN", "(615) 244-9552"),
-("Five Points Pizza", "Pizza", "🍕", "1012 Woodland St", "Nashville", "TN", "(615) 915-4174"),
-("Mas Tacos Por Favor", "Mexican", "🌮", "732 McFerrin Ave", "Nashville", "TN", ""),
-("Gus's World Famous Fried Chicken", "Fried Chicken", "🍗", "310 S Front St", "Memphis", "TN", "(901) 527-4877"),
-("Rendezvous", "BBQ · Ribs", "🍖", "52 S 2nd St", "Memphis", "TN", "(901) 523-2746"),
-("Central BBQ", "BBQ", "🍖", "2249 Central Ave", "Memphis", "TN", "(901) 272-9377"),
-("Payne's Bar-B-Q", "BBQ", "🍖", "1762 Lamar Ave", "Memphis", "TN", "(901) 272-1523"),
-("The Arcade Restaurant", "Diner", "🥞", "540 S Main St", "Memphis", "TN", "(901) 526-5757"),
-("Corky's Ribs & BBQ", "BBQ", "🍖", "5259 Poplar Ave", "Memphis", "TN", "(901) 685-9744"),
-("Cafe Du Monde", "Beignets · Coffee", "🍩", "800 Decatur St", "New Orleans", "LA", "(504) 525-4544"),
-("Commander's Palace", "Creole", "🦐", "1403 Washington Ave", "New Orleans", "LA", "(504) 899-8221"),
-("Dooky Chase's Restaurant", "Creole", "🍛", "2301 Orleans Ave", "New Orleans", "LA", "(504) 821-0600"),
-("Acme Oyster House", "Oysters · Seafood", "🦪", "724 Iberville St", "New Orleans", "LA", "(504) 522-5973"),
-("Mother's Restaurant", "Po'boys · Cajun", "🥪", "401 Poydras St", "New Orleans", "LA", "(504) 523-9656"),
-("Parkway Bakery & Tavern", "Po'boys", "🥖", "538 Hagan Ave", "New Orleans", "LA", "(504) 482-3047"),
-("Cochon", "Cajun", "🐷", "930 Tchoupitoulas St", "New Orleans", "LA", "(504) 588-7675"),
-("Franklin Barbecue", "BBQ", "🍖", "900 E 11th St", "Austin", "TX", "(512) 653-1187"),
-("Torchy's Tacos", "Tacos", "🌮", "2809 S Congress Ave", "Austin", "TX", ""),
-("Whataburger", "Burgers · Fast Food", "🍔", "1200 E 6th St", "Austin", "TX", "(512) 478-5614"),
-("Uchi", "Japanese · Sushi", "🍣", "801 S Lamar Blvd", "Austin", "TX", "(512) 916-4808"),
-("Gourdough's Big. Fat. Donuts.", "Donuts", "🍩", "1503 S 1st St", "Austin", "TX", "(512) 912-9070"),
-("Home Slice Pizza", "Pizza", "🍕", "1415 S Congress Ave", "Austin", "TX", "(512) 444-7437"),
-("Matt's El Rancho", "Mexican", "🌮", "2613 S Lamar Blvd", "Austin", "TX", "(512) 462-9333"),
-("The Pearl", "Market Hall", "🍽️", "303 Pearl Pkwy", "San Antonio", "TX", "(210) 212-7260"),
-("Mi Tierra Cafe y Panaderia", "Mexican", "🌮", "218 Produce Row", "San Antonio", "TX", "(210) 225-1262"),
-("Rosario's", "Mexican", "🌯", "910 S Alamo St", "San Antonio", "TX", "(210) 223-1806"),
-("Schilo's Delicatessen", "German · Deli", "🥪", "424 E Commerce St", "San Antonio", "TX", "(210) 223-6692"),
-("Bill Miller Bar-B-Q", "BBQ", "🍖", "909 Broadway", "San Antonio", "TX", "(210) 225-4461"),
-("The Guenther House", "Brunch · Southern", "🥞", "205 E Guenther St", "San Antonio", "TX", "(210) 227-1061"),
-("Cattlemen's Steakhouse", "Steakhouse", "🥩", "1309 S Agnew Ave", "Oklahoma City", "OK", "(405) 236-0416"),
-("Nic's Grill", "Burgers", "🍔", "1201 N Pennsylvania Ave", "Oklahoma City", "OK", "(405) 524-6427"),
-("Tucker's Onion Burgers", "Burgers", "🍔", "324 NW 23rd St", "Oklahoma City", "OK", "(405) 609-2333"),
-("Cheever's Cafe", "American", "🍽️", "2409 N Hudson Ave", "Oklahoma City", "OK", "(405) 525-7007"),
-("Big Truck Tacos", "Tacos", "🌮", "5300 N Western Ave", "Oklahoma City", "OK", "(405) 728-1743"),
-("Paseo Grill", "American", "🥗", "2909 Paseo", "Oklahoma City", "OK", "(405) 601-1079"),
-("Arthur Bryant's Barbeque", "BBQ", "🍖", "1727 Brooklyn Ave", "Kansas City", "MO", "(816) 231-1123"),
-("Gates Bar-B-Q", "BBQ", "🍖", "1221 Brooklyn Ave", "Kansas City", "MO", "(816) 483-3880"),
-("Joe's Kansas City Bar-B-Que", "BBQ", "🍖", "3002 W 47th Ave", "Kansas City", "MO", "(913) 722-3366"),
-("Town Topic Hamburgers", "Burgers", "🍔", "2021 Broadway Blvd", "Kansas City", "MO", "(816) 842-2294"),
-("The Peanut", "Bar · Wings", "🍗", "418 W 9th St", "Kansas City", "MO", "(816) 753-9499"),
-("Q39", "BBQ", "🍖", "1000 W 39th St", "Kansas City", "MO", "(816) 255-3753"),
-("Pappy's Smokehouse", "BBQ", "🍖", "3106 Olive St", "St Louis", "MO", "(314) 535-4340"),
-("Ted Drewes Frozen Custard", "Frozen Custard", "🍦", "6726 Chippewa St", "St Louis", "MO", "(314) 481-2652"),
-("Imo's Pizza", "Pizza · St. Louis Style", "🍕", "17 W Kirkham Rd", "St Louis", "MO", "(314) 821-4545"),
-("Bogart's Smokehouse", "BBQ", "🍖", "1627 S 9th St", "St Louis", "MO", "(314) 621-3344"),
-("Fitz's", "Root Beer · Burgers", "🍔", "6605 Delmar Blvd", "St Louis", "MO", "(314) 726-9555"),
-("The Hill", "Italian", "🍝", "2132 Edwards St", "St Louis", "MO", ""),
-("American Coney Island", "Coney Dogs", "🌭", "114 W Lafayette Blvd", "Detroit", "MI", "(313) 961-7758"),
-("Lafayette Coney Island", "Coney Dogs", "🌭", "118 W Lafayette Blvd", "Detroit", "MI", "(313) 964-8198"),
-("Buddy's Pizza", "Pizza · Detroit Style", "🍕", "17125 Conant St", "Detroit", "MI", "(313) 892-9001"),
-("Slows Bar BQ", "BBQ", "🍖", "2138 Michigan Ave", "Detroit", "MI", "(313) 962-9828"),
-("Green Dot Stables", "Sliders · Burgers", "🍔", "2200 W Lafayette Blvd", "Detroit", "MI", "(313) 962-5588"),
-("Supino Pizzeria", "Pizza", "🍕", "2457 Russell St", "Detroit", "MI", "(313) 567-7879"),
-("Slyman's Restaurant", "Corned Beef · Deli", "🥪", "3106 Saint Clair Ave NE", "Cleveland", "OH", "(216) 621-3760"),
-("West Side Market", "Market Hall", "🍽️", "1979 W 25th St", "Cleveland", "OH", "(216) 664-3387"),
-("Melt Bar and Grilled", "Grilled Cheese", "🧀", "14718 Detroit Ave", "Cleveland", "OH", "(440) 799-0574"),
-("Great Lakes Brewing Company", "Brewpub · American", "🍺", "2516 Market Ave", "Cleveland", "OH", "(216) 771-4404"),
-("Sokolowski's University Inn", "Polish", "🥟", "1201 University Rd", "Cleveland", "OH", "(216) 771-9236"),
-("Tommy's Restaurant", "Vegetarian · Diner", "🥗", "1824 Coventry Rd", "Cleveland", "OH", "(216) 321-7757"),
-("Skyline Chili", "Chili", "🍝", "643 Vine St", "Cincinnati", "OH", "(513) 241-2020"),
-("Gold Star Chili", "Chili", "🌶️", "308 W 4th St", "Cincinnati", "OH", "(513) 621-4443"),
-("Graeter's Ice Cream", "Ice Cream", "🍨", "511 Walnut St", "Cincinnati", "OH", "(513) 381-0653"),
-("Camp Washington Chili", "Chili", "🍝", "3002 Colerain Ave", "Cincinnati", "OH", "(513) 541-0061"),
-("Findlay Market", "Market Hall", "🍽️", "1801 Race St", "Cincinnati", "OH", "(513) 665-4839"),
-("Taste of Belgium", "Belgian · Waffles", "🧇", "16 W 12th St", "Cincinnati", "OH", "(513) 381-3280"),
-("Primanti Bros.", "Sandwiches", "🥪", "46 18th St", "Pittsburgh", "PA", "(412) 263-2142"),
-("Pamela's Diner", "Breakfast", "🥞", "60 21st St", "Pittsburgh", "PA", "(412) 281-6366"),
-("The Original Hot Dog Shop", "Hot Dogs", "🌭", "3901 Forbes Ave", "Pittsburgh", "PA", "(412) 621-3362"),
-("Gaucho Parrilla Argentina", "Argentinian", "🥩", "146 6th St", "Pittsburgh", "PA", "(412) 709-6622"),
-("Mineo's Pizza House", "Pizza", "🍕", "2128 Murray Ave", "Pittsburgh", "PA", "(412) 521-9862"),
-("Conflict Kitchen", "International", "🌍", "221 Schenley Dr", "Pittsburgh", "PA", "(412) 621-3344"),
-("Price's Chicken Coop", "Fried Chicken", "🍗", "2908 Wilkinson Blvd", "Charlotte", "NC", "(704) 333-9866"),
-("The Penguin", "Diner · Burgers", "🍔", "1921 Commonwealth Ave", "Charlotte", "NC", "(704) 375-6959"),
-("Mert's Heart and Soul", "Soul Food", "🍛", "214 N College St", "Charlotte", "NC", "(704) 342-4222"),
-("Amelie's French Bakery", "Bakery · French", "🥐", "2424 N Davidson St", "Charlotte", "NC", "(704) 376-1781"),
-("Fuel Pizza", "Pizza", "🍕", "1501 Central Ave", "Charlotte", "NC", "(704) 376-3835"),
-("Midwood Smokehouse", "BBQ", "🍖", "1401 Central Ave", "Charlotte", "NC", "(704) 295-4227"),
-("The Pit", "BBQ", "🍖", "328 W Davie St", "Raleigh", "NC", "(919) 890-4500"),
-("Beasley's Chicken + Honey", "Fried Chicken", "🍗", "237 S Wilmington St", "Raleigh", "NC", "(919) 322-0127"),
-("Clyde Cooper's Barbecue", "BBQ", "🍖", "109 E Davie St", "Raleigh", "NC", "(919) 832-7614"),
-("Poole's Diner", "Diner · Southern", "🥞", "426 S McDowell St", "Raleigh", "NC", "(919) 832-4477"),
-("Bida Manda", "Laotian", "🍜", "222 S Blount St", "Raleigh", "NC", "(919) 829-9999"),
-("Gonza Tacos y Tequila", "Tacos", "🌮", "7713 Lead Mine Rd", "Raleigh", "NC", "(919) 322-0424"),
-("Maple Street Biscuit Company", "Biscuits · Southern", "🥞", "2100 3rd St S", "Jacksonville", "FL", "(904) 372-1500"),
-("Safe Harbor Seafood", "Seafood", "🦐", "4378 Ocean St", "Jacksonville", "FL", "(904) 246-4911"),
-("Metro Diner", "Diner", "🥞", "3302 Hendricks Ave", "Jacksonville", "FL", "(904) 438-0903"),
-("V Pizza", "Pizza · Neapolitan", "🍕", "1406 Hendricks Ave", "Jacksonville", "FL", "(904) 527-1125"),
-("Black Sheep Restaurant", "American", "🍽️", "1534 Oak St", "Jacksonville", "FL", "(904) 380-3091"),
-("Angie's Subs", "Subs · Sandwiches", "🥪", "1436 Beach Blvd", "Jacksonville", "FL", "(904) 249-5326"),
-("Columbia Restaurant", "Cuban · Spanish", "🥘", "2117 E 7th Ave", "Tampa", "FL", "(813) 248-4961"),
-("Bern's Steak House", "Steakhouse", "🥩", "1208 S Howard Ave", "Tampa", "FL", "(813) 251-2421"),
-("La Segunda Central Bakery", "Bakery · Cuban", "🥖", "2512 N 15th St", "Tampa", "FL", "(813) 248-1531"),
-("Taco Bus", "Tacos", "🌮", "913 E Hillsborough Ave", "Tampa", "FL", "(813) 374-8943"),
-("Goody Goody Burgers", "Burgers", "🍔", "1601 W Swann Ave", "Tampa", "FL", "(813) 308-0600"),
-("Ulele", "Native-Inspired · Seafood", "🦐", "1810 N Highland Ave", "Tampa", "FL", "(813) 999-4952"),
-("4 Rivers Smokehouse", "BBQ", "🍖", "2103 W Fairbanks Ave", "Orlando", "FL", "(407) 474-8377"),
-("Prato", "Italian", "🍝", "124 N Park Ave", "Orlando", "FL", "(407) 262-0050"),
-("Se7en Bites", "Southern · Bakery", "🥞", "617 Primrose Dr", "Orlando", "FL", "(407) 203-0727"),
-("Black Rooster Taqueria", "Tacos", "🌮", "1323 N Mills Ave", "Orlando", "FL", "(407) 704-3662"),
-("The Coop", "Fried Chicken", "🍗", "610 W Morse Blvd", "Orlando", "FL", "(407) 636-5447"),
-("Gideon's Bakehouse", "Cookies · Bakery", "🍪", "124 N Grand Ave", "Orlando", "FL", "(407) 886-4319"),
-("In-N-Out Burger", "Burgers", "🍔", "4888 Dean Martin Dr", "Las Vegas", "NV", "(800) 786-1000"),
-("Lotus of Siam", "Thai", "🍜", "620 E Flamingo Rd", "Las Vegas", "NV", "(702) 735-3033"),
-("Tacos El Gordo", "Tacos", "🌮", "3049 S Las Vegas Blvd", "Las Vegas", "NV", "(702) 331-1160"),
-("Secret Pizza", "Pizza", "🍕", "3708 S Las Vegas Blvd", "Las Vegas", "NV", "(702) 698-2665"),
-("Bachi Burger", "Burgers · Asian Fusion", "🍔", "9410 W Sahara Ave", "Las Vegas", "NV", "(702) 368-8808"),
-("Roberto's Taco Shop", "Tacos · Mexican", "🌮", "540 E Sahara Ave", "Las Vegas", "NV", "(702) 733-3553"),
-("Red Iguana", "Mexican", "🌮", "736 W North Temple", "Salt Lake City", "UT", "(801) 322-1489"),
-("The Dodo Restaurant", "Burgers · Diner", "🍔", "135 W 300 S", "Salt Lake City", "UT", "(801) 328-3330"),
-("Lucky 13 Bar & Grill", "Burgers", "🍔", "135 W 1300 S", "Salt Lake City", "UT", "(801) 487-4418"),
-("Settebello Pizzeria", "Pizza · Neapolitan", "🍕", "260 S 200 W", "Salt Lake City", "UT", "(801) 322-3556"),
-("Crown Burgers", "Burgers · Greek", "🍔", "377 E 200 S", "Salt Lake City", "UT", "(801) 532-1155"),
-("Hsu's Ginseng House", "Chinese", "🥟", "3089 S State St", "Salt Lake City", "UT", "(801) 467-0222"),
-("Voodoo Doughnut", "Donuts", "🍩", "22 SW 3rd Ave", "Portland", "OR", "(503) 241-4704"),
-("Pok Pok", "Thai", "🍜", "3226 SE Division St", "Portland", "OR", "(503) 232-5001"),
-("Blue Star Donuts", "Donuts", "🍩", "1237 SW Washington St", "Portland", "OR", "(503) 265-8410"),
-("Tasty n Alder", "Brunch · American", "🥞", "580 SW 12th Ave", "Portland", "OR", "(503) 621-9251"),
-("Pine State Biscuits", "Biscuits · Southern", "🥞", "2204 NE Alberta St", "Portland", "OR", "(503) 477-6605"),
-("Nong's Khao Man Gai", "Thai · Chicken Rice", "🍗", "609 SE Ankeny St", "Portland", "OR", "(503) 740-2907"),
-("Hodad's", "Burgers", "🍔", "5010 Newport Ave", "San Diego", "CA", "(619) 224-4623"),
-("Lucha Libre Taco Shop", "Tacos", "🌮", "1810 W Washington St", "San Diego", "CA", "(619) 296-8226"),
-("Phil's BBQ", "BBQ", "🍖", "3750 Sports Arena Blvd", "San Diego", "CA", "(619) 226-6333"),
-("The Taco Stand", "Tacos", "🌮", "621 Pearl St", "San Diego", "CA", "(858) 551-6666"),
-("Cafe 21", "Brunch · Mediterranean", "🥞", "802 Fifth Ave", "San Diego", "CA", "(619) 795-0721"),
-("Lolita's Mexican Food", "Mexican", "🌯", "2703 5th Ave", "San Diego", "CA", "(619) 718-5123"),
-("Tartine Bakery", "Bakery", "🥐", "600 Guerrero St", "San Francisco", "CA", "(415) 487-2600"),
-("La Taqueria", "Tacos · Mexican", "🌮", "2889 Mission St", "San Francisco", "CA", "(415) 285-7117"),
-("Bi-Rite Creamery", "Ice Cream", "🍨", "3692 18th St", "San Francisco", "CA", "(415) 626-5600"),
-("House of Prime Rib", "Steakhouse", "🥩", "1906 Van Ness Ave", "San Francisco", "CA", "(415) 885-4605"),
-("Souvla", "Greek", "🥙", "517 Hayes St", "San Francisco", "CA", "(415) 400-5458"),
-("Mitchell's Ice Cream", "Ice Cream", "🍨", "477 San Jose Ave", "San Francisco", "CA", "(415) 648-2300"),
-("Senor Sisig", "Filipino · Fusion", "🌯", "990 Harrison St", "San Francisco", "CA", "(415) 735-6591"),
-("Tower Cafe", "Eclectic · Brunch", "🥞", "1518 Broadway", "Sacramento", "CA", "(916) 441-0228"),
-("Bacon & Butter", "Breakfast", "🥓", "5913 Broadway", "Sacramento", "CA", "(916) 736-1111"),
-("La Garnacha", "Tacos · Mexican", "🌮", "9411 Folsom Blvd", "Sacramento", "CA", "(916) 706-2182"),
-("The Waterboy", "Californian", "🍽️", "2000 Capitol Ave", "Sacramento", "CA", "(916) 498-9891"),
-("Tres Hermanas", "Mexican", "🌯", "2416 K St", "Sacramento", "CA", "(916) 443-6919"),
-("Midtown's Cantina Alley", "Tacos", "🌮", "2326 K St", "Sacramento", "CA", "(916) 443-2345"),
-    ]
-    for name, cuisine, emoji, addr, city, state, phone in SPOTS2:
-        exists = c.execute(
-            "SELECT id FROM restaurants WHERE name=? AND city=?", (name, city)).fetchone()
-        if not exists:
-            c.execute(
-                "INSERT INTO restaurants(name, cuisine, emoji, address, city, state, phone, open)"
-                " VALUES(?,?,?,?,?,?,?,1)",
-                (name, cuisine, emoji, addr, city, state, phone))
-    conn.commit()
-    conn.close()
-
-
-def seed_ga_fl_menus():
-    """Starter menus for the Atlanta GA + Florida expansion spots (added 2026-10-11).
-    Idempotent: only fills restaurants that currently have ZERO menu items.
-    Prices are best-estimates — Ken must verify before real orders."""
-    MENUS = {
-    # ---------------- ATLANTA GA ----------------
-    "The Varsity": [("Famous Chili Dog", 5.49), ("Double Cheeseburger", 6.99),
-        ("Pimento Cheeseburger", 5.99), ("Chili Cheese Fries", 4.99),
-        ("Onion Rings", 3.99), ("Frosted Orange Shake", 4.49),
-        ("Chicken Sandwich", 5.49), ("Varsity Peach Pie", 3.49)],
-    "Mary Mac's Tea Room": [("Fried Chicken Plate", 16.99), ("Country Fried Steak", 15.99),
-        ("Meatloaf", 13.99), ("Fried Green Tomatoes", 8.99),
-        ("Collard Greens", 4.99), ("Mac & Cheese", 5.99),
-        ("Cornbread", 2.99), ("Peach Cobbler", 6.99)],
-    "The Vortex Bar & Grill": [("Double Bypass Burger", 13.99), ("Coronary Bypass Burger", 16.99),
-        ("Tater Tot Nachos", 10.99), ("Fried Pickles", 7.99),
-        ("Blue Cheese Chips", 6.99), ("Turkey Burger", 11.99),
-        ("Patty Melt", 12.99), ("Deep Fried Moon Pie", 5.99)],
-    "Fox Bros Bar-B-Q": [("Brisket Plate", 17.99), ("Pulled Pork Plate", 14.99),
-        ("Half Rack Ribs", 18.99), ("Frito Pie", 11.99),
-        ("Brunswick Stew", 6.99), ("Collard Greens", 4.49),
-        ("Mac & Cheese", 4.99), ("Banana Pudding", 5.49)],
-    "Antico Pizza Napoletana": [("Margherita D.O.P.", 16.99), ("Diavola", 18.99),
-        ("San Daniele", 19.99), ("Lasagna", 17.99),
-        ("Meatball Sandwich", 13.99), ("Caprese Salad", 11.99),
-        ("Tiramisu", 7.99), ("Cannoli", 6.99)],
-    "The Busy Bee Cafe": [("Fried Chicken", 15.99), ("Smothered Pork Chops", 14.99),
-        ("Oxtails", 18.99), ("Mac & Cheese", 5.49),
-        ("Collard Greens", 4.99), ("Black Eyed Peas", 4.49),
-        ("Cornbread", 2.49), ("Sweet Potato Pie", 5.99)],
-    "Slutty Vegan": [("One Night Stand Burger", 12.99), ("Fussy Hussy Burger", 13.99),
-        ("Menage a Trois", 15.99), ("Hollywood Hooker Chicken Sandwich", 12.99),
-        ("Slutty Fries", 8.99), ("Banana Pudding Shake", 7.99),
-        ("Side Salad", 6.99), ("Sweet Potato Fries", 5.99)],
-    "Canoe": [("Seared Scallops", 38.00), ("Filet Mignon", 46.00),
-        ("Lobster Risotto", 42.00), ("Duck Breast", 36.00),
-        ("Crab Cake", 24.00), ("Burrata Salad", 18.00),
-        ("Chocolate Torte", 14.00), ("Creme Brulee", 12.00)],
-    "Bacchanalia": [("Tasting Menu", 125.00), ("Lobster Fritters", 28.00),
-        ("Wagyu Carpaccio", 32.00), ("Organic Chicken", 44.00),
-        ("Dry-Aged Ribeye", 68.00), ("Truffle Pasta", 42.00),
-        ("Cheese Course", 24.00), ("Valrhona Souffle", 18.00)],
-    # ---------------- MIAMI FL ----------------
-    "Versailles Restaurant": [("Cuban Sandwich", 10.99), ("Ropa Vieja", 16.99),
-        ("Lechon Asado", 15.99), ("Medianoche", 9.99),
-        ("Croquetas (6)", 5.99), ("Yuca con Mojo", 6.99),
-        ("Flan", 5.99), ("Cafe Cubano", 2.99)],
-    "Coyo Taco": [("Baja Shrimp Taco", 5.99), ("Al Pastor Taco", 4.99),
-        ("Carne Asada Taco", 5.49), ("Pollo Asado Taco", 4.99),
-        ("Queso Fundido", 8.99), ("Elote", 4.99),
-        ("Churros", 4.99), ("Jarritos", 3.49)],
-    "Enriqueta's Sandwich Shop": [("Pan con Bistec", 9.99), ("Cuban Sandwich", 8.99),
-        ("Croqueta Preparada", 7.99), ("Batido de Mamey", 5.99),
-        ("Papas Rellenas", 4.99), ("Medianoche", 8.49),
-        ("Flan", 4.99), ("Materva", 2.99)],
-    "Garcia's Seafood Grille": [("Fried Snapper", 22.99), ("Shrimp Creole", 19.99),
-        ("Stone Crab Claws", 32.99), ("Conch Fritters", 11.99),
-        ("Blackened Mahi", 21.99), ("Seafood Paella", 26.99),
-        ("Key Lime Pie", 7.99), ("Garlic Crab", 24.99)],
-    "El Palacio De Los Jugos": [("Cuban Sandwich", 9.49), ("Churrasco Steak", 17.99),
-        ("Fresh Mango Juice", 5.49), ("Batido de Trigo", 5.99),
-        ("Tostones Rellenos", 8.99), ("Masitas de Puerco", 13.99),
-        ("Flan", 4.49), ("Cortadito", 2.49)],
-    "Sanguich De Miami": [("Cubano", 11.99), ("Croqueta Melt", 9.99),
-        ("Pan con Lechon", 10.99), ("Yuca Fries", 5.99),
-        ("Batido de Guayaba", 5.49), ("Tres Leches", 6.49),
-        ("Croquetas (4)", 4.99), ("Cafe con Leche", 3.49)],
-    # ---------------- MIAMI BEACH FL ----------------
-    "Joe's Stone Crab": [("Stone Crab Claws (Large)", 89.99), ("Jumbo Lump Crab Cake", 32.99),
-        ("Joe's Key Lime Pie", 10.99), ("Grilled Swordfish", 42.99),
-        ("Lobster Tail", 54.99), ("Creamed Spinach", 12.99),
-        ("Lyonnaise Potatoes", 11.99), ("Shrimp Cocktail", 19.99)],
-    "La Sandwicherie": [("French Cuban Sandwich", 9.99), ("Tuna Melt", 8.99),
-        ("Turkey Avocado", 9.49), ("Veggie Supreme", 8.49),
-        ("Lentil Soup", 6.99), ("Fresh Squeezed OJ", 5.99),
-        ("Croissant", 3.49), ("Quiche of the Day", 7.99)],
-    "Puerto Sagua": [("Ropa Vieja", 14.99), ("Picadillo", 12.99),
-        ("Camarones al Ajillo", 17.99), ("Cuban Sandwich", 8.99),
-        ("Bistec de Palomilla", 15.99), ("Tostones", 5.49),
-        ("Arroz con Pollo", 13.99), ("Flan", 4.99)],
-    # ---------------- ORLANDO FL ----------------
-    "4 Rivers Smokehouse": [("Brisket Plate", 16.99), ("Pulled Pork Sandwich", 10.99),
-        ("Smoked Turkey", 12.99), ("Burnt Ends", 15.99),
-        ("Mac & Cheese", 4.99), ("Collard Greens", 4.49),
-        ("Cornbread", 2.99), ("Bread Pudding", 5.99)],
-    "Prato": [("Cacio e Pepe", 19.99), ("Margherita Pizza", 16.99),
-        ("Short Rib Ravioli", 24.99), ("Burrata & Prosciutto", 14.99),
-        ("Chicken Milanese", 22.99), ("Wood-Fired Meatballs", 13.99),
-        ("Tiramisu", 8.99), ("Panna Cotta", 7.99)],
-    "Se7en Bites": [("Fried Chicken Biscuit", 9.99), ("Pimento Cheese Biscuit", 7.99),
-        ("Meatloaf Melt", 11.99), ("Mac & Cheese Bites", 8.99),
-        ("Banana Pudding", 6.99), ("Chocolate Chess Pie", 5.99),
-        ("Biscuit Flight", 8.99), ("Sweet Tea", 2.99)],
-    "Black Rooster Taqueria": [("Carnitas Taco", 4.49), ("Baja Fish Taco", 5.49),
-        ("Al Pastor Taco", 4.49), ("Elote", 4.99),
-        ("Queso & Chips", 8.49), ("Churro Bites", 5.49),
-        ("Agua Fresca", 3.99), ("Quesadilla", 9.99)],
-    "The Coop": [("Nashville Hot Chicken", 13.99), ("Chicken & Waffles", 14.99),
-        ("Coop Tenders", 11.99), ("Fried Chicken Sandwich", 12.49),
-        ("Mac & Cheese", 5.49), ("Honey Butter Biscuit", 3.99),
-        ("Banana Pudding", 6.49), ("Sweet Tea", 2.99)],
-    "Gideon's Bakehouse": [("Chocolate Chip Cookie", 6.49), ("Peanut Butter Crunch", 6.49),
-        ("Cookies & Cream", 6.49), ("Pistachio Toffee", 6.99),
-        ("Cold Brew", 5.49), ("Cookie Cake Slice", 8.99),
-        ("Hot Chocolate", 5.99), ("Nitro Cold Brew", 6.49)],
-    # ---------------- TAMPA FL ----------------
-    "Columbia Restaurant": [("1905 Salad", 14.99), ("Cuban Sandwich", 12.99),
-        ("Ropa Vieja", 21.99), ("Paella a la Valenciana", 32.99),
-        ("Snapper Alicante", 28.99), ("Boliche", 22.99),
-        ("Flan", 7.99), ("Sangria", 9.99)],
-    "Bern's Steak House": [("Filet Mignon", 68.00), ("Delmonico", 62.00),
-        ("Chateaubriand for Two", 145.00), ("Lobster Tail", 58.00),
-        ("French Onion Soup", 12.00), ("Creamed Spinach", 11.00),
-        ("Baked Potato", 9.00), ("Macadamia Nut Ice Cream", 12.00)],
-    "La Segunda Central Bakery": [("Cuban Bread Loaf", 4.99), ("Guava Pastry", 3.49),
-        ("Cheese Pastry", 3.29), ("Ham Croissant", 4.99),
-        ("Cafe con Leche", 3.29), ("Cuban Sandwich", 8.99),
-        ("Media Noche", 8.49), ("Flan", 4.99)],
-    "Taco Bus": [("Al Pastor Taco", 3.99), ("Carnitas Taco", 3.99),
-        ("Fish Taco", 4.99), ("Quesadilla", 8.99),
-        ("Burrito", 9.99), ("Elote", 3.99),
-        ("Churros", 3.99), ("Horchata", 3.49)],
-    "Goody Goody Burgers": [("POX Burger", 9.99), ("Double POX", 12.99),
-        ("Butterscotch Milkshake", 6.99), ("Onion Rings", 4.99),
-        ("Secret Sauce Fries", 5.99), ("Chicken Tenders", 9.49),
-        ("Hyde Park Burger", 11.99), ("Banana Pudding", 5.49)],
-    "Ulele": [("Alligator Hush Puppies", 13.99), ("Okra Fries", 9.99),
-        ("Native Chili", 22.99), ("Cedar Plank Salmon", 29.99),
-        ("Duck Tacos", 16.99), ("Fire-Roasted Corn", 7.99),
-        ("Key Lime Pie", 8.99), ("Guava Bread Pudding", 9.99)],
-    # ---------------- JACKSONVILLE FL ----------------
-    "Maple Street Biscuit Company": [("Squawking Goat Biscuit", 8.99), ("Sticky Maple Biscuit", 7.99),
-        ("Fried Chicken Biscuit", 9.49), ("Mac & Cheese", 4.99),
-        ("Fried Green Tomatoes", 7.99), ("Sweet Potato Fries", 4.99),
-        ("Cinnamon Biscuit", 4.99), ("Sweet Tea", 2.99)],
-    "Safe Harbor Seafood": [("Minorcan Chowder", 8.99), ("Fried Shrimp Basket", 16.99),
-        ("Blackened Mahi Sandwich", 14.99), ("Datil Crab Cakes", 18.99),
-        ("Fish Tacos", 13.99), ("Hush Puppies", 5.99),
-        ("Key Lime Pie", 6.99), ("Grouper Sandwich", 17.99)],
-    "Metro Diner": [("Fried Chicken & Waffles", 15.99), ("Meatloaf Plate", 14.99),
-        ("Shrimp & Grits", 16.99), ("Chicken Pot Pie", 13.99),
-        ("Cinnamon Roll Pancakes", 11.99), ("Biscuits & Gravy", 9.99),
-        ("Yo Hala Burger", 12.99), ("Bread Pudding", 6.99)],
-    "V Pizza": [("Marinara Pizza", 13.99), ("Margherita", 15.99),
-        ("Diavola", 17.99), ("Quattro Formaggi", 17.99),
-        ("Meatballs", 11.99), ("Arancini", 9.99),
-        ("Tiramisu", 7.99), ("Nutella Calzone", 9.99)],
-    "Black Sheep Restaurant": [("Rooftop Burger", 14.99), ("Shrimp & Grits", 19.99),
-        ("Fried Green Tomato BLT", 12.99), ("Short Rib", 26.99),
-        ("Kale Caesar", 11.99), ("Pimento Cheese Dip", 9.99),
-        ("Chocolate Pot de Creme", 8.99), ("Sweet Tea", 2.99)],
-    "Angie's Subs": [("Turkey Sub", 9.99), ("Italian Sub", 10.49),
-        ("Tuna Melt", 9.49), ("Veggie Sub", 8.99),
-        ("Meatball Sub", 10.99), ("Cuban Sub", 10.49),
-        ("Chips", 2.99), ("Sweet Tea", 2.49)],
-    }
-    conn = db()
-    c = conn.cursor()
-    filled = 0
-    for name, items in MENUS.items():
-        for r in c.execute("SELECT id FROM restaurants WHERE name=?", (name,)).fetchall():
-            n = c.execute("SELECT COUNT(*) n FROM menu_items WHERE restaurant_id=?",
-                          (r["id"],)).fetchone()["n"]
-            if n == 0:
-                for iname, price in items:
-                    c.execute("INSERT INTO menu_items(restaurant_id, name, price, available)"
-                              " VALUES(?,?,?,1)", (r["id"], iname, price))
-                filled += 1
-    conn.commit()
-    conn.close()
-    return filled
-
-
-def seed_50_states():
-    """50-state completion (added 2026-10-11): famous real restaurants in the
-    26 states Drop did not cover yet. Idempotent: skips name+city already present.
-    Addresses/phones are best-effort — Ken must verify before real orders."""
-    SPOTS = [
-        ('Dreamland Bar-B-Que', 'BBQ', '🍖', '5535 15th Ave E', 'Tuscaloosa', 'AL', '(205) 758-8132'),
-        ('Highlands Bar & Grill', 'Fine Dining · Southern', '🍽️', '2011 11th Ave S', 'Birmingham', 'AL', '(205) 939-1400'),
-        ('Big Bob Gibson Bar-B-Q', 'BBQ', '🍖', '1715 6th Ave SE', 'Decatur', 'AL', '(256) 350-6969'),
-        ('The Fish Market', 'Seafood', '🦐', '612 22nd St S', 'Birmingham', 'AL', '(205) 322-3330'),
-        ("Saw's Soul Kitchen", 'Southern · BBQ', '🍗', '215 41st St S', 'Birmingham', 'AL', '(205) 591-1402'),
-        ("Moose's Tooth Pub & Pizzeria", 'Pizza · Pub', '🍕', '3300 Old Seward Hwy', 'Anchorage', 'AK', '(907) 258-2537'),
-        ('Snow City Cafe', 'Breakfast · Brunch', '🥞', '1034 W 4th Ave', 'Anchorage', 'AK', '(907) 272-2489'),
-        ('Glacier Brewhouse', 'Seafood · American', '🦐', '737 W 5th Ave', 'Anchorage', 'AK', '(907) 274-2833'),
-        ('Double Musky Inn', 'Cajun · Steakhouse', '🥩', 'Mile 3 Crow Creek Rd', 'Girdwood', 'AK', '(907) 783-2822'),
-        ("Simon & Seafort's", 'Seafood', '🦀', '420 L St', 'Anchorage', 'AK', '(907) 274-3502'),
-        ("Wright's Barbecue", 'BBQ', '🍖', '2212 Main Dr', 'Johnson', 'AR', '(479) 633-4242'),
-        ('Lassis Inn', 'Southern · Soul Food', '🍗', '518 E 27th St', 'Little Rock', 'AR', '(501) 372-9242'),
-        ('The Root Cafe', 'Farm to Table', '🥗', '1500 Main St', 'Little Rock', 'AR', '(501) 414-0420'),
-        ("Doe's Eat Place", 'Steakhouse', '🥩', '1023 W Markham St', 'Little Rock', 'AR', '(501) 376-1195'),
-        ('AQ Chicken House', 'Southern · Chicken', '🍗', '1207 N Thompson St', 'Springdale', 'AR', '(479) 751-4633'),
-        ('Frank Pepe Pizzeria Napoletana', 'Pizza', '🍕', '157 Wooster St', 'New Haven', 'CT', '(203) 865-5762'),
-        ("Louis' Lunch", 'Burgers', '🍔', '263 Crown St', 'New Haven', 'CT', '(203) 562-5507'),
-        ("Sally's Apizza", 'Pizza', '🍕', '237 Wooster St', 'New Haven', 'CT', '(203) 624-5271'),
-        ('Mystic Pizza', 'Pizza', '🍕', '56 W Main St', 'Mystic', 'CT', '(860) 536-3700'),
-        ('The Griswold Inn', 'American · Historic', '🍽️', '36 Main St', 'Essex', 'CT', '(860) 767-1776'),
-        ('Dogfish Head Brewings & Eats', 'Brewpub · American', '🍺', '320 Rehoboth Ave', 'Rehoboth Beach', 'DE', '(302) 226-2739'),
-        ('Nicola Pizza', 'Pizza', '🍕', '8 N 1st St', 'Rehoboth Beach', 'DE', '(302) 227-6211'),
-        ('Iron Hill Brewery & Restaurant', 'Brewpub', '🍺', '147 E Main St', 'Newark', 'DE', '(302) 266-9000'),
-        ("Capriotti's Sandwich Shop", 'Sandwiches', '🥪', '1300 N Market St', 'Wilmington', 'DE', '(302) 429-0200'),
-        ('Grotto Pizza', 'Pizza', '🍕', '35 N 1st St', 'Rehoboth Beach', 'DE', '(302) 227-3600'),
-        ("Leonard's Bakery", 'Bakery · Malasadas', '🍩', '933 Kapahulu Ave', 'Honolulu', 'HI', '(808) 737-5591'),
-        ("Helena's Hawaiian Food", 'Hawaiian', '🍖', '1240 N School St', 'Honolulu', 'HI', '(808) 845-8044'),
-        ('Ono Seafood', 'Poke · Seafood', '🐟', '747 Kapahulu Ave', 'Honolulu', 'HI', '(808) 732-4806'),
-        ('Matsumoto Shave Ice', 'Shave Ice', '🍧', '66-111 Kamehameha Hwy', 'Haleiwa', 'HI', '(808) 637-4827'),
-        ("Duke's Waikiki", 'Hawaiian · Seafood', '🌺', '2335 Kalakaua Ave', 'Honolulu', 'HI', '(808) 922-2268'),
-        ('Westside Drive-In', 'Burgers · Drive-In', '🍔', '1939 W State St', 'Boise', 'ID', '(208) 342-2952'),
-        ("Goldy's Breakfast Bistro", 'Breakfast', '🥞', '108 S Capitol Blvd', 'Boise', 'ID', '(208) 345-4100'),
-        ('Bardenay Restaurant & Distillery', 'American · Distillery', '🍸', '610 Grove St', 'Boise', 'ID', '(208) 426-0538'),
-        ("Big Jud's", 'Burgers', '🍔', '1289 S Vista Ave', 'Boise', 'ID', '(208) 336-4810'),
-        ('Chandlers Steakhouse', 'Steakhouse', '🥩', '981 W Grove St', 'Boise', 'ID', '(208) 383-4300'),
-        ('St. Elmo Steak House', 'Steakhouse', '🥩', '127 S Illinois St', 'Indianapolis', 'IN', '(317) 635-0636'),
-        ('The Mug-n-Bun', 'Drive-In · Burgers', '🍔', '5211 W 10th St', 'Indianapolis', 'IN', '(317) 244-5669'),
-        ("Nick's English Hut", 'Bar · Burgers', '🍺', '423 E Kirkwood Ave', 'Bloomington', 'IN', '(812) 332-4040'),
-        ('Triple XXX Family Restaurant', 'Burgers · Diner', '🍔', '2 N Salisbury St', 'West Lafayette', 'IN', '(765) 743-5373'),
-        ('Coney Island Wiener Stand', 'Hot Dogs', '🌭', '131 W Main St', 'Fort Wayne', 'IN', '(260) 424-2997'),
-        ('Zombie Burger + Drink Lab', 'Burgers', '🍔', '300 E Grand Ave', 'Des Moines', 'IA', '(515) 244-9292'),
-        ('The Machine Shed', 'Comfort · American', '🍗', '11151 Hickman Rd', 'Urbandale', 'IA', '(515) 270-6818'),
-        ("Fong's Pizza", 'Pizza · Asian Fusion', '🍕', '223 4th St', 'Des Moines', 'IA', '(515) 323-3333'),
-        ("Breitbach's Country Dining", 'Comfort · Family', '🥧', '563 Balltown Rd', 'Balltown', 'IA', '(563) 552-2220'),
-        ("Jethro's BBQ", 'BBQ', '🍖', '9350 University Ave', 'Des Moines', 'IA', '(515) 279-3300'),
-        ("Joe's Kansas City Bar-B-Que", 'BBQ', '🍖', '3002 W 47th Ave', 'Kansas City', 'KS', '(913) 722-3366'),
-        ("Arthur Bryant's Barbeque", 'BBQ', '🍖', '1727 Brooklyn Ave', 'Kansas City', 'KS', '(816) 231-1123'),
-        ("Fritz's Railroad Restaurant", 'Burgers · Family', '🚂', '250 N 18th St', 'Kansas City', 'KS', '(913) 342-0274'),
-        ("Winstead's Steakburgers", 'Burgers · Diner', '🍔', '101 Emanuel Cleaver II Blvd', 'Kansas City', 'KS', '(816) 753-2244'),
-        ('Doo-Dah Diner', 'Diner · Breakfast', '🥞', '206 E Kellogg St', 'Wichita', 'KS', '(316) 265-7010'),
-        ('Brown Hotel Lobby Bar & Grill', 'Southern · Historic', '🍽️', '335 W Broadway', 'Louisville', 'KY', '(502) 583-1234'),
-        ('Wallace Station', 'Southern · Deli', '🥪', '3850 Old Frankfort Pike', 'Versailles', 'KY', '(859) 846-5161'),
-        ('Merrick Inn', 'Southern · Fine Dining', '🍽️', '1074 Merrick Dr', 'Lexington', 'KY', '(859) 269-5417'),
-        ('Old Talbott Tavern', 'American · Historic', '🍺', '107 W Stephen Foster Ave', 'Bardstown', 'KY', '(502) 348-3494'),
-        ("Bourbon n' Toulouse", 'Cajun · Creole', '🌶️', '829 Euclid Ave', 'Lexington', 'KY', '(859) 335-0300'),
-        ('The Lobster Shack', 'Seafood', '🦞', '225 Two Lights Rd', 'Cape Elizabeth', 'ME', '(207) 799-1677'),
-        ('Eventide Oyster Co.', 'Seafood · Oysters', '🦪', '86 Middle St', 'Portland', 'ME', '(207) 774-8538'),
-        ('Duckfat', 'Sandwiches · Belgian Fries', '🍟', '43 Middle St', 'Portland', 'ME', '(207) 774-8080'),
-        ("Becky's Diner", 'Diner · Seafood', '🥞', '390 Commercial St', 'Portland', 'ME', '(207) 773-7070'),
-        ("Red's Eats", 'Lobster Rolls', '🦞', '41 Water St', 'Wiscasset', 'ME', '(207) 882-6128'),
-        ('The Shed Barbeque & Blues Joint', 'BBQ · Blues', '🍖', '7501 US-57', 'Ocean Springs', 'MS', '(228) 875-9590'),
-        ("Doe's Eat Place", 'Steakhouse', '🥩', '502 Nelson St', 'Greenville', 'MS', '(662) 334-3315'),
-        ('White Trolley Cafe', 'Diner · Southern', '🚋', '1211 US-72', 'Corinth', 'MS', '(662) 287-7295'),
-        ("Abe's Grill", 'Southern · Meat & Three', '🍗', '1100 US-72 W', 'Corinth', 'MS', '(662) 286-2562'),
-        ('Taylor Grocery', 'Southern · Catfish', '🐟', '4 County Road 338', 'Taylor', 'MS', '(662) 236-1716'),
-        ('The Notorious P.I.G.', 'BBQ', '🍖', '313 W Front St', 'Missoula', 'MT', '(406) 317-1395'),
-        ('Biga Pizza', 'Pizza', '🍕', '241 W Main St', 'Missoula', 'MT', '(406) 542-0622'),
-        ('Plonk', 'Wine Bar · Small Plates', '🍷', '29 E Main St', 'Bozeman', 'MT', '(406) 587-2170'),
-        ("Sir Scott's Oasis", 'Steakhouse', '🥩', '5 Main St', 'Manhattan', 'MT', '(406) 284-6929'),
-        ('The Burger Dive', 'Burgers', '🍔', '114 N 27th St', 'Billings', 'MT', '(406) 969-1326'),
-        ('The Drover', 'Steakhouse', '🥩', '2121 S 73rd St', 'Omaha', 'NE', '(402) 558-3500'),
-        ('Block 16', 'Burgers · Farm to Table', '🍔', '1616 Harney St', 'Omaha', 'NE', '(402) 342-1220'),
-        ('Runza', 'Fast Food · Regional', '🥪', '1801 K St', 'Lincoln', 'NE', '(402) 474-3394'),
-        ("Stella's", 'Burgers · Bar', '🍔', '10301 S 23rd St', 'Bellevue', 'NE', '(402) 291-3427'),
-        ("Yia Yia's", 'Pizza', '🍕', '1423 O St', 'Lincoln', 'NE', '(402) 477-0013'),
-        ('Red Arrow Diner', 'Diner', '🥞', '61 Lowell St', 'Manchester', 'NH', '(603) 626-1118'),
-        ("Polly's Pancake Parlor", 'Breakfast · Pancakes', '🥞', '672 NH-117', 'Sugar Hill', 'NH', '(603) 823-5575'),
-        ('The Friendly Toast', 'Breakfast · Brunch', '🍳', '121 Congress St', 'Portsmouth', 'NH', '(603) 430-2154'),
-        ("Gilley's PM Lunch", 'Diner · Late Night', '🌭', '175 Fleet St', 'Portsmouth', 'NH', '(603) 431-6343'),
-        ("Tilt'n Diner", 'Diner', '🥞', '61 Laconia Rd', 'Tilton', 'NH', '(603) 286-7832'),
-        ('White Manna', 'Burgers · Sliders', '🍔', '358 River St', 'Hackensack', 'NJ', '(201) 342-0914'),
-        ("Holsten's", 'Diner · Ice Cream', '🍨', '1063 Broad St', 'Bloomfield', 'NJ', '(973) 743-3562'),
-        ('White House Sub Shop', 'Subs · Sandwiches', '🥪', '2301 Arctic Ave', 'Atlantic City', 'NJ', '(609) 345-1564'),
-        ("Rutt's Hut", 'Hot Dogs', '🌭', '417 River Rd', 'Clifton', 'NJ', '(201) 791-7227'),
-        ('Tick Tock Diner', 'Diner', '🥞', '281 Allwood Rd', 'Clifton', 'NJ', '(973) 777-0511'),
-        ('The Shed', 'New Mexican', '🌶️', '113 E Palace Ave', 'Santa Fe', 'NM', '(505) 982-9030'),
-        ('Frontier Restaurant', 'New Mexican', '🌯', '2400 Central Ave SE', 'Albuquerque', 'NM', '(505) 266-0550'),
-        ("Sadie's of New Mexico", 'New Mexican', '🌶️', '6230 4th St NW', 'Albuquerque', 'NM', '(505) 345-5339'),
-        ("Mary & Tito's Cafe", 'New Mexican', '🫔', '2711 4th St NW', 'Albuquerque', 'NM', '(505) 344-6266'),
-        ('The Pantry', 'New Mexican · Breakfast', '🍳', '1820 Cerrillos Rd', 'Santa Fe', 'NM', '(505) 986-0022'),
-        ('Al Forno', 'Italian', '🍝', '577 S Water St', 'Providence', 'RI', '(401) 273-9760'),
-        ('Haven Brothers Diner', 'Diner · Food Truck', '🚚', 'Kennedy Plaza', 'Providence', 'RI', '(401) 861-7777'),
-        ("Iggy's Doughboys & Chowder House", 'Seafood', '🦪', '889 Oakland Beach Ave', 'Warwick', 'RI', '(401) 737-9459'),
-        ('Olneyville New York System', 'Hot Weiners', '🌭', '18 Plainfield St', 'Providence', 'RI', '(401) 621-9500'),
-        ('Caserta Pizzeria', 'Pizza', '🍕', '121 Spruce St', 'Providence', 'RI', '(401) 272-3618'),
-        ('Husk', 'Southern · Fine Dining', '🍽️', '76 Queen St', 'Charleston', 'SC', '(843) 577-2500'),
-        ('Bowens Island Restaurant', 'Seafood', '🦐', '1870 Bowens Island Rd', 'Charleston', 'SC', '(843) 795-2757'),
-        ("Shealy's Bar-B-Que", 'BBQ', '🍖', '340 E Columbia Ave', 'Batesburg-Leesville', 'SC', '(803) 532-8135'),
-        ('The Beacon Drive-In', 'Burgers · Drive-In', '🍔', '255 John B White Sr Blvd', 'Spartanburg', 'SC', '(864) 585-9387'),
-        ("Bertha's Kitchen", 'Southern · Soul Food', '🍗', '2332 Meeting Street Rd', 'Charleston', 'SC', '(843) 554-6519'),
-        ('The Phillips Avenue Diner', 'Diner', '🥞', '121 S Phillips Ave', 'Sioux Falls', 'SD', '(605) 335-5757'),
-        ('Alpine Inn', 'German · Steakhouse', '🥨', '133 Main St', 'Hill City', 'SD', '(605) 574-2749'),
-        ('Black Hills Burger and Bun Co', 'Burgers', '🍔', '404 W Mount Rushmore Rd', 'Custer', 'SD', '(605) 673-3411'),
-        ("Tally's Silver Spoon", 'American · Brunch', '🍳', '530 6th St', 'Rapid City', 'SD', '(605) 342-7621'),
-        ('Minervas', 'American · Steakhouse', '🥩', '301 S Phillips Ave', 'Sioux Falls', 'SD', '(605) 334-0388'),
-        ('Hen of the Wood', 'Farm to Table · Fine Dining', '🍽️', '55 Cherry St', 'Burlington', 'VT', '(802) 540-0534'),
-        ("Al's French Frys", 'Burgers · Fries', '🍟', '1251 Williston Rd', 'South Burlington', 'VT', '(802) 862-9203'),
-        ('The Skinny Pancake', 'Crepes · Breakfast', '🥞', '60 Lake St', 'Burlington', 'VT', '(802) 540-0188'),
-        ('Blue Benn Diner', 'Diner', '🥞', '314 North St', 'Bennington', 'VT', '(802) 442-5140'),
-        ('The Worthy Burger', 'Burgers · Beer', '🍔', '56 Rainbow St', 'South Royalton', 'VT', '(802) 763-2578'),
-        ("Mama J's Kitchen", 'Southern · Soul Food', '🍗', '415 N 1st St', 'Richmond', 'VA', '(804) 225-7449'),
-        ("Sally Bell's Kitchen", 'Southern · Lunch', '🥪', '708 W Grace St', 'Richmond', 'VA', '(804) 644-2838'),
-        ("Doumar's", 'BBQ · Drive-In', '🍔', '1919 Monticello Ave', 'Norfolk', 'VA', '(757) 627-4163'),
-        ('The Virginia Diner', 'Southern · Diner', '🥧', '408 W Main St', 'Wakefield', 'VA', '(757) 899-3106'),
-        ("Dot's Back Inn", 'Bar · Burgers', '🍔', '4030 MacArthur Ave', 'Richmond', 'VA', '(804) 616-2690'),
-        ('Hillbilly Hot Dogs', 'Hot Dogs', '🌭', '6951 Ohio River Rd', 'Lesage', 'WV', '(304) 762-2458'),
-        ("Tudor's Biscuit World", 'Biscuits · Breakfast', '🥞', '1908 Kanawha Blvd E', 'Charleston', 'WV', '(304) 344-6379'),
-        ('Secret Sandwich Society', 'Sandwiches', '🥪', '123 S Court St', 'Fayetteville', 'WV', '(304) 574-4770'),
-        ('Vandalia Grille', 'American', '🍽️', '205 Capitol St', 'Charleston', 'WV', '(304) 205-3737'),
-        ('Pies & Pints', 'Pizza · Craft Beer', '🍕', '219 W Maple Ave', 'Fayetteville', 'WV', '(304) 574-2203'),
-        ("Kopp's Frozen Custard", 'Frozen Custard · Burgers', '🍦', '18880 W Bluemound Rd', 'Brookfield', 'WI', '(262) 789-0121'),
-        ("Sobelman's Pub & Grill", 'Burgers', '🍔', '1900 W St Paul Ave', 'Milwaukee', 'WI', '(414) 931-1919'),
-        ('The Old Fashioned', 'Wisconsin Supper Club', '🧀', '23 N Pinckney St', 'Madison', 'WI', '(608) 310-4545'),
-        ("Mader's", 'German', '🥨', '1041 N Old World 3rd St', 'Milwaukee', 'WI', '(414) 271-3377'),
-        ("Al Johnson's Swedish Restaurant", 'Swedish', '🐐', '10698 N Bay Shore Dr', 'Sister Bay', 'WI', '(920) 854-2626'),
-        ('The Bunnery', 'Bakery · Breakfast', '🥐', '130 N Cache St', 'Jackson', 'WY', '(307) 733-5474'),
-        ("Bubba's Bar-B-Que", 'BBQ', '🍖', '112 E Broadway Ave', 'Jackson', 'WY', '(307) 733-2288'),
-        ('Persephone Bakery', 'Bakery', '🍞', '145 E Broadway Ave', 'Jackson', 'WY', '(307) 200-6707'),
-        ('The Virginian Restaurant', 'American · Saloon', '🍺', '750 W Broadway', 'Jackson', 'WY', '(307) 733-2792'),
-        ("Sanford's Grub & Pub", 'Pub · Grub', '🍔', '320 S Ash St', 'Casper', 'WY', '(307) 237-3381'),
-    ]
-    conn = db()
-    c = conn.cursor()
-    added = 0
-    for name, cuisine, emoji, addr, city, state, phone in SPOTS:
-        exists = c.execute(
-            "SELECT id FROM restaurants WHERE name=? AND city=?", (name, city)).fetchone()
-        if not exists:
-            c.execute(
-                "INSERT INTO restaurants(name, cuisine, emoji, address, city, state, phone, open)"
-                " VALUES(?,?,?,?,?,?,?,1)",
-                (name, cuisine, emoji, addr, city, state, phone))
-            added += 1
-    conn.commit()
-    conn.close()
-    return added
-
 init_db()
 seed()
-seed_cities()
-seed_expansion_cities()
-seed_expansion_cities2()
-seed_ga_fl_menus()
-seed_50_states()
 
 
 # ---------------- helpers ----------------
@@ -1308,34 +459,6 @@ def fmt_hour(h):
     return f"{h % 12 or 12}{ap}"
 
 
-def max_queue_size():
-    """Ken's cap on how many live orders he juggles at once (dashboard setting)."""
-    try:
-        return max(1, min(50, int(get_setting("max_queue") or 8)))
-    except (TypeError, ValueError):
-        return 8
-
-
-def active_order_count():
-    conn = db()
-    n = conn.execute(
-        "SELECT COUNT(*) c FROM orders WHERE status NOT IN ('delivered','cancelled')"
-    ).fetchone()["c"]
-    conn.close()
-    return n
-
-
-def queue_reason():
-    """Why we are/aren't taking orders: open | closed | paused | full."""
-    if not is_open_now():
-        return "closed"
-    if get_setting("accepting_orders") == "0":
-        return "paused"
-    if active_order_count() >= max_queue_size():
-        return "full"
-    return "open"
-
-
 def order_dict(row):
     d = dict(row)
     d["items"] = json.loads(d.pop("items_json"))
@@ -1365,49 +488,6 @@ def notify_ken(order):
             daemon=True).start()
     except Exception:
         pass  # never break an order because a push failed
-
-
-# ---------------- Security hardening ----------------
-_rate_buckets: dict = {}
-_pin_fails: dict = {}
-
-
-def client_ip(req: Request) -> str:
-    return req.headers.get("x-forwarded-for", req.client.host if req.client else "?").split(",")[0].strip()
-
-
-def rate_limit(ip: str, max_hits: int = 10, window: int = 60) -> bool:
-    """True if this IP should be throttled. Sliding window."""
-    import time
-    now = time.time()
-    b = _rate_buckets.setdefault(ip, [])
-    b[:] = [t for t in b if now - t < window]
-    if len(b) >= max_hits:
-        return True
-    b.append(now)
-    return False
-
-
-def pin_throttled(ip: str) -> bool:
-    import time
-    f = _pin_fails.get(ip)
-    return bool(f and time.time() - f["at"] < 900 and f["n"] >= 5)
-
-
-def pin_failed(ip: str):
-    import time
-    f = _pin_fails.setdefault(ip, {"n": 0, "at": 0})
-    f["n"] += 1
-    f["at"] = time.time()
-
-
-@app.middleware("http")
-async def security_middleware(req: Request, call_next):
-    resp = await call_next(req)
-    resp.headers["X-Content-Type-Options"] = "nosniff"
-    resp.headers["X-Frame-Options"] = "DENY"
-    resp.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    return resp
 
 
 def check_pin(x_pin: str = Header(default="")):
@@ -1470,597 +550,6 @@ def list_restaurants():
     return out
 
 
-@app.get("/api/nearby")
-def nearby_restaurants(lat: float = 0, lng: float = 0, radius: float = 50):
-    """Restaurants within `radius` miles of the given GPS point. Sorted nearest-first."""
-    if not lat or not lng:
-        return []
-    conn = db()
-    rows = conn.execute("SELECT * FROM restaurants WHERE lat != 0 AND lng != 0").fetchall()
-    out = []
-    for r in rows:
-        d = haversine_miles(r["lat"], r["lng"], lat, lng)
-        if d <= radius:
-            rd = dict(r)
-            rd["distance_mi"] = round(d, 1)
-            items = conn.execute(
-                "SELECT * FROM menu_items WHERE restaurant_id=? AND available=1 ORDER BY id",
-                (r["id"],)).fetchall()
-            rd["menu"] = [dict(i) for i in items]
-            out.append(rd)
-    conn.close()
-    out.sort(key=lambda x: x["distance_mi"])
-    return out
-
-
-@app.get("/api/cities")
-def list_cities():
-    """Distinct cities with live restaurants, for the homepage picker."""
-    conn = db()
-    rows = conn.execute(
-        "SELECT city, state, COUNT(*) n FROM restaurants GROUP BY city, state ORDER BY n DESC").fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
-
-
-@app.get("/api/live-restaurants")
-def live_restaurants(city: str = "", state: str = "", lat: float = 0, lng: float = 0):
-    """Get REAL restaurants for any city via OpenStreetMap (free, no key needed).
-    Returns live data — not from our DB, but real places that exist."""
-    import urllib.request, urllib.parse, json, time
-    if not city:
-        return []
-    # Check cache first (24h)
-    cache_key = f"{city},{state}".lower()
-    conn = db()
-    try:
-        cached = conn.execute(
-            "SELECT data, cached_at FROM live_cache WHERE key=?", (cache_key,)).fetchone()
-        if cached:
-            age = time.time() - float(cached["cached_at"])
-            if age < 86400:  # 24h
-                conn.close()
-                return json.loads(cached["data"])
-    except Exception:
-        pass
-    # Fetch from Nominatim
-    try:
-        query = f"restaurants in {city}, {state}" if state else f"restaurants in {city}"
-        url = f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(query)}&format=json&limit=20&extratags=1"
-        req = urllib.request.Request(url, headers={"User-Agent": "DropApp/1.0"})
-        data = json.loads(urllib.request.urlopen(req, timeout=15).read())
-        results = []
-        for r in data:
-            # Extract name and address
-            name = r.get("display_name", "").split(",")[0].strip()
-            addr_parts = r.get("display_name", "").split(",")[1:3]
-            addr = ",".join(addr_parts).strip()
-            if name and len(name) > 2:
-                results.append({
-                    "name": name,
-                    "address": addr,
-                    "city": city,
-                    "state": state,
-                    "lat": float(r.get("lat", 0)),
-                    "lng": float(r.get("lon", 0)),
-                    "cuisine": r.get("extratags", {}).get("cuisine", "Restaurant"),
-                    "live": True  # Mark as live data
-                })
-        # Cache it
-        try:
-            conn.execute(
-                "INSERT OR REPLACE INTO live_cache(key, data, cached_at) VALUES(?,?,?)",
-                (cache_key, json.dumps(results), str(time.time())))
-            conn.commit()
-        except Exception:
-            pass
-        conn.close()
-        return results
-    except Exception as e:
-        conn.close()
-        return []
-
-
-@app.get("/api/ip-location")
-def ip_location(req: Request):
-    """Fallback location from IP address (free, no key needed)."""
-    # Get client IP (handle proxies)
-    ip = req.headers.get("x-forwarded-for", "").split(",")[0].strip()
-    if not ip:
-        ip = req.client.host if req.client else ""
-    if not ip or ip.startswith("127.") or ip == "localhost":
-        return {"city": "", "state": "", "lat": 0, "lng": 0}
-    try:
-        import urllib.request, json
-        # Free IP geolocation (no key)
-        url = f"http://ip-api.com/json/{ip}?fields=city,region,regionName,lat,lon,status"
-        rq = urllib.request.Request(url, headers={"User-Agent": "DropApp/1.0"})
-        d = json.loads(urllib.request.urlopen(rq, timeout=5).read())
-        if d.get("status") == "success":
-            return {"city": d.get("city", ""), "state": d.get("region", ""),
-                    "lat": d.get("lat", 0), "lng": d.get("lon", 0)}
-    except Exception:
-        pass
-    return {"city": "", "state": "", "lat": 0, "lng": 0}
-
-
-@app.post("/api/help/ask")
-async def help_ask(req: Request):
-    """AI help agent — answers questions about using Drop."""
-    body = await req.json()
-    q = (body.get("question") or "").strip().lower()
-    page = body.get("page") or ""
-    # Smart keyword-based answers (no API key needed)
-    if any(w in q for w in ["location", "gps", "where am i", "detect"]):
-        answer = "Tap '📍 Use my location' on the homepage. If it doesn't work, make sure location is allowed in your browser settings, or just type your city manually."
-    elif any(w in q for w in ["order", "track", "where is my"]):
-        answer = "After you order, you'll get a tracking link. You can also check your order history in your Account page."
-    elif any(w in q for w in ["pickup", "already ordered"]):
-        answer = "Use '📦 Request a Drop' — tell us what to pick up and where, and we'll bring it to you. Works in any city!"
-    elif any(w in q for w in ["pay", "payment", "card", "cost", "price", "fee"]):
-        answer = "Food delivery is $3.99 flat. Drop requests (pickup/delivery) are $1.50 per mile with a $3.99 minimum. You pay securely by card at checkout."
-    elif any(w in q for w in ["driver", "who"]):
-        answer = "Your driver is assigned after you order. You'll see their name, photo, rating, and live location on the tracking page."
-    elif any(w in q for w in ["cancel", "refund"]):
-        answer = "You can cancel from your tracking page. Refunds are processed automatically to your original payment method."
-    elif any(w in q for w in ["account", "password", "login", "profile"]):
-        answer = "Manage your profile, order history, and saved payment methods in the Account page (👤 icon, top right)."
-    elif any(w in q for w in ["business"]):
-        answer = "Business owners can create an account for volume discounts, saved addresses, and priority service. Check the Drop More section."
-    elif "human" in q or "support" in q or "contact" in q:
-        answer = "You can reach us at wearedropservicesllc@gmail.com or (262) 977-7869."
-    else:
-        answer = "I can help with orders, tracking, payments, location, drivers, and your account. What do you need help with?"
-    return {"answer": answer}
-
-
-@app.get("/api/user/orders")
-def user_order_history(phone: str = ""):
-    """Customer's order history."""
-    if not phone:
-        return []
-    conn = db()
-    rows = conn.execute(
-        "SELECT id, restaurant_id, pickup_name, address, total, status, created_at"
-        " FROM orders WHERE phone=? ORDER BY id DESC LIMIT 20",
-        (phone,)).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
-
-
-@app.get("/api/user/cards")
-def user_saved_cards(phone: str = ""):
-    """Customer's saved payment methods (last4 only)."""
-    if not phone:
-        return []
-    conn = db()
-    rows = conn.execute(
-        "SELECT id, last4, brand, exp_month, exp_year FROM saved_cards"
-        " WHERE phone=? ORDER BY id DESC", (phone,)).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
-
-
-@app.post("/api/user/cards")
-async def user_save_card(req: Request):
-    """Save a card reference (last4 + brand, never full number)."""
-    body = await req.json()
-    phone = (body.get("phone") or "").strip()
-    last4 = (body.get("last4") or "").strip()[-4:]
-    brand = (body.get("brand") or "").strip()[:20]
-    if not phone or len(last4) != 4:
-        raise HTTPException(400, "Phone and valid last4 required")
-    conn = db()
-    # Avoid duplicates
-    if not conn.execute("SELECT id FROM saved_cards WHERE phone=? AND last4=?",
-                        (phone, last4)).fetchone():
-        conn.execute(
-            "INSERT INTO saved_cards(phone, last4, brand, exp_month, exp_year, created_at)"
-            " VALUES(?,?,?,?,?,?)",
-            (phone, last4, brand, body.get("exp_month", "")[:2],
-             body.get("exp_year", "")[:4], now_iso()))
-        conn.commit()
-    conn.close()
-    return {"ok": True}
-
-
-@app.delete("/api/user/cards/{cid}")
-def user_delete_card(cid: int, phone: str = ""):
-    conn = db()
-    conn.execute("DELETE FROM saved_cards WHERE id=? AND phone=?", (cid, phone))
-    conn.commit()
-    conn.close()
-    return {"ok": True}
-
-
-# ---------------- Driver broadcasts ----------------
-@app.get("/api/drivers/broadcasts")
-def driver_broadcasts():
-    conn = db()
-    rows = conn.execute(
-        "SELECT * FROM driver_broadcasts ORDER BY id DESC LIMIT 20").fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
-
-
-@app.post("/api/operator/broadcasts")
-async def op_broadcast(req: Request, x_pin: str = Header(default="")):
-    """Ken posts an announcement to all drivers."""
-    check_pin(x_pin)
-    body = await req.json()
-    title = (body.get("title") or "").strip()[:100]
-    message = (body.get("message") or "").strip()[:1000]
-    if not title or not message:
-        raise HTTPException(400, "Title and message required")
-    conn = db()
-    conn.execute(
-        "INSERT INTO driver_broadcasts(title, message, created_at) VALUES(?,?,?)",
-        (title, message, now_iso()))
-    conn.commit()
-    conn.close()
-    log_event("broadcast", f"📢 {title}", message[:100])
-    return {"ok": True}
-
-
-# ---------------- Driver complaints (AI triaged) ----------------
-@app.post("/api/drivers/complaint")
-async def driver_complaint(req: Request):
-    """Driver files a complaint. AI summarizes and suggests solution."""
-    body = await req.json()
-    driver_id = int(body.get("driver_id") or 0)
-    subject = (body.get("subject") or "").strip()[:100]
-    message = (body.get("message") or "").strip()[:1000]
-    if not driver_id or not subject or not message:
-        raise HTTPException(400, "driver_id, subject, and message required")
-    # AI triage: categorize and suggest
-    msg_lower = message.lower()
-    if any(w in msg_lower for w in ["pay", "money", "payout", "earn"]):
-        category = "💰 Pay issue"
-        suggestion = "Check their payout status and recent deliveries. Verify amounts match."
-    elif any(w in msg_lower for w in ["customer", "rude", "complaint"]):
-        category = "😤 Customer issue"
-        suggestion = "Review the order details and customer feedback. Consider mediating."
-    elif any(w in msg_lower for w in ["app", "bug", "broken", "error", "crash"]):
-        category = "🐛 App issue"
-        suggestion = "Check if it's a known bug. May need a fix pushed."
-    elif any(w in msg_lower for w in ["safety", "danger", "threat"]):
-        category = "🚨 Safety concern"
-        suggestion = "PRIORITY: Review immediately. May need to suspend involved parties."
-    else:
-        category = "📝 General"
-        suggestion = "Review the details and respond directly to the driver."
-    ai_summary = f"{category}: {subject}"
-    conn = db()
-    conn.execute(
-        "INSERT INTO driver_complaints(driver_id, subject, message, ai_summary, ai_suggestion, created_at)"
-        " VALUES(?,?,?,?,?,?)",
-        (driver_id, subject, message, ai_summary, suggestion, now_iso()))
-    conn.commit()
-    conn.close()
-    log_event("complaint", f"📝 Complaint from driver #{driver_id}", ai_summary)
-    return {"ok": True, "ai_category": category}
-
-
-@app.get("/api/drivers/complaints")
-def driver_my_complaints(driver_id: int = 0):
-    conn = db()
-    rows = conn.execute(
-        "SELECT * FROM driver_complaints WHERE driver_id=? ORDER BY id DESC",
-        (driver_id,)).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
-
-
-@app.get("/api/operator/drivers/monitor")
-def op_driver_monitor(x_pin: str = Header(default="")):
-    """Ken monitors all drivers: PINs, status, activity."""
-    check_pin(x_pin)
-    conn = db()
-    rows = conn.execute(
-        "SELECT id, name, phone, status, login_pin, rating, deliveries,"
-        " last_location_at as last_active FROM drivers ORDER BY id DESC").fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
-
-
-    return [dict(r) for r in rows]
-
-
-@app.post("/api/drivers/ntfy-test")
-async def driver_ntfy_test(req: Request):
-    """Send a test push notification."""
-    body = await req.json()
-    topic = (body.get("topic") or "").strip()
-    if not topic:
-        raise HTTPException(400, "Topic required")
-    try:
-        import urllib.request, urllib.parse
-        msg = "🔔 Test from Drop Driver Hub! If you see this, push notifications are working."
-        r2 = urllib.request.Request(
-            f"https://ntfy.sh/{urllib.parse.quote(topic)}",
-            data=msg.encode(), headers={"Title": "Drop test"}, method="POST")
-        urllib.request.urlopen(r2, timeout=10).read()
-        return {"ok": True}
-    except Exception as e:
-        return {"ok": False, "error": str(e)[:100]}
-
-
-@app.post("/api/drivers/ntfy")
-async def driver_ntfy_save(req: Request):
-    body = await req.json()
-    topic = (body.get("topic") or "").strip()[:100]
-    driver_id = int(body.get("driver_id") or 0)
-    if driver_id:
-        conn = db()
-        conn.execute("UPDATE drivers SET ntfy_topic=? WHERE id=?", (topic, driver_id))
-        conn.commit()
-        conn.close()
-    return {"ok": True}
-
-
-@app.delete("/api/drivers/account")
-async def driver_delete_account(req: Request):
-    """Driver deletes their own account."""
-    body = await req.json()
-    driver_id = int(body.get("driver_id") or 0)
-    pin = (body.get("pin") or "").strip()
-    if not driver_id or not pin:
-        raise HTTPException(400, "driver_id and PIN required")
-    conn = db()
-    d = conn.execute("SELECT * FROM drivers WHERE id=? AND login_pin=?",
-                     (driver_id, pin)).fetchone()
-    if not d:
-        conn.close()
-        raise HTTPException(401, "Invalid credentials")
-    # Soft delete: mark as deleted, keep record for audit
-    conn.execute("UPDATE drivers SET status='deleted', login_pin='' WHERE id=?", (driver_id,))
-    conn.commit()
-    conn.close()
-    audit("driver", "account_deleted", "driver", driver_id, d["name"])
-    return {"ok": True}
-
-
-@app.delete("/api/user/account")
-async def user_delete_account(req: Request, phone: str = ""):
-    """Customer deletes their own account. Uses the login session —
-    no phone guessing, and removes the real auth account too."""
-    me = get_session_user(req)
-    if me:
-        uid, phone = me["id"], me["phone"]
-    elif phone:
-        uid = 0
-    else:
-        raise HTTPException(401, "Log in to delete your account")
-    conn = db()
-    if uid:
-        conn.execute("DELETE FROM sessions WHERE user_id=?", (uid,))
-        conn.execute("DELETE FROM rewards WHERE user_id=?", (uid,))
-        conn.execute("DELETE FROM users WHERE id=?", (uid,))
-    if phone:
-        conn.execute("DELETE FROM user_profiles WHERE phone=?", (phone,))
-        conn.execute("DELETE FROM saved_cards WHERE phone=?", (phone,))
-    conn.commit()
-    conn.close()
-    return {"ok": True}
-
-
-@app.post("/api/drivers/orders/{oid}/deny")
-async def driver_deny_order(oid: int, req: Request):
-    """Driver declines an assigned order."""
-    body = await req.json()
-    driver_id = int(body.get("driver_id") or 0)
-    reason = (body.get("reason") or "").strip()[:200]
-    d = get_driver(req)
-    if not d or d["id"] != driver_id:
-        raise HTTPException(403, "Driver login required")
-    conn = db()
-    if d.get("is_owner"):
-        o = conn.execute("SELECT * FROM orders WHERE id=? AND driver_id=0"
-                         " AND claimed_by_owner=1", (oid,)).fetchone()
-        if not o:
-            conn.close()
-            raise HTTPException(404, "Order not claimed by you")
-        conn.execute("UPDATE orders SET claimed_by_owner=0, updated_at=? WHERE id=?",
-                     (now_iso(), oid))
-        conn.commit()
-        conn.close()
-        log_event("order", f"👑 Owner released order #{oid}", reason)
-        return {"ok": True}
-    # Verify this driver has the order
-    o = conn.execute("SELECT * FROM orders WHERE id=? AND driver_id=?",
-                     (oid, driver_id)).fetchone()
-    if not o:
-        conn.close()
-        raise HTTPException(404, "Order not found or not assigned to you")
-    # Release the order back to unassigned
-    conn.execute("UPDATE orders SET driver_id=0, status='new' WHERE id=?", (oid,))
-    conn.commit()
-    conn.close()
-    log_event("order", f"❌ Driver #{driver_id} declined order #{oid}", reason)
-    return {"ok": True}
-
-
-@app.post("/api/drivers/orders/{oid}/pass")
-async def driver_pass_order(oid: int, req: Request):
-    """Driver passes order to another nearby driver."""
-    import math
-    body = await req.json()
-    driver_id = int(body.get("driver_id") or 0)
-    d = get_driver(req)
-    if not d or d["id"] != driver_id:
-        raise HTTPException(403, "Driver login required")
-    conn = db()
-    if d.get("is_owner"):
-        o = conn.execute("SELECT * FROM orders WHERE id=? AND driver_id=0"
-                         " AND claimed_by_owner=1", (oid,)).fetchone()
-    else:
-        o = conn.execute("SELECT * FROM orders WHERE id=? AND driver_id=?",
-                         (oid, driver_id)).fetchone()
-    if not o:
-        conn.close()
-        raise HTTPException(404, "Order not found")
-    # Find nearby available drivers (excluding current)
-    plat, plng = o["pickup_lat"] or 0, o["pickup_lng"] or 0
-    drivers = conn.execute(
-        "SELECT id, name, ntfy_topic, lat, lng FROM drivers"
-        " WHERE status='approved' AND id != ? AND lat != 0", (driver_id,)).fetchall()
-    notified = 0
-    for d in drivers:
-        if plat and plng and d["lat"] and d["lng"]:
-            dist = math.hypot(d["lat"] - plat, d["lng"] - plng) * 69
-            if dist <= 15 and d["ntfy_topic"]:
-                try:
-                    import urllib.request, urllib.parse, threading
-                    msg = f"📦 Order #{oid} available near you! Tap to accept in Driver Hub."
-                    r2 = urllib.request.Request(
-                        f"https://ntfy.sh/{urllib.parse.quote(d['ntfy_topic'])}",
-                        data=msg.encode(),
-                        headers={"Title": "Drop: Order available"}, method="POST")
-                    threading.Thread(
-                        target=lambda r=r2: urllib.request.urlopen(r, timeout=5).read(),
-                        daemon=True).start()
-                    notified += 1
-                except Exception:
-                    pass
-    # Release order
-    conn.execute("UPDATE orders SET driver_id=0, claimed_by_owner=0, status='new' WHERE id=?", (oid,))
-    conn.commit()
-    conn.close()
-    log_event("order", f"🔄 Driver #{driver_id} passed order #{oid}", f"{notified} drivers notified")
-    return {"ok": True, "notified": notified}
-
-
-@app.get("/api/operator/complaints")
-def op_complaints(x_pin: str = Header(default="")):
-    """Ken sees all complaints with AI suggestions."""
-    check_pin(x_pin)
-    conn = db()
-    rows = conn.execute(
-        "SELECT dc.*, d.name as driver_name FROM driver_complaints dc"
-        " JOIN drivers d ON d.id=dc.driver_id"
-        " ORDER BY dc.id DESC").fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
-
-
-@app.post("/api/operator/complaints/{cid}/respond")
-async def op_complaint_respond(cid: int, req: Request, x_pin: str = Header(default="")):
-    check_pin(x_pin)
-    body = await req.json()
-    response = (body.get("response") or "").strip()[:1000]
-    conn = db()
-    conn.execute(
-        "UPDATE driver_complaints SET ken_response=?, status='responded' WHERE id=?",
-        (response, cid))
-    conn.commit()
-    conn.close()
-    return {"ok": True}
-
-
-# ---------------- Driver earnings goals ----------------
-@app.get("/api/drivers/goals")
-def driver_goals_get(driver_id: int = 0):
-    conn = db()
-    r = conn.execute("SELECT * FROM driver_goals WHERE driver_id=?", (driver_id,)).fetchone()
-    # Get today's earnings
-    today = now_iso()[:10]
-    earned = conn.execute(
-        "SELECT COALESCE(SUM(amount),0) as total FROM payouts"
-        " WHERE driver_id=? AND date(created_at)=?",
-        (driver_id, today)).fetchone()
-    week_earned = conn.execute(
-        "SELECT COALESCE(SUM(amount),0) as total FROM payouts"
-        " WHERE driver_id=? AND date(created_at) >= date('now','-7 days')",
-        (driver_id,)).fetchone()
-    conn.close()
-    return {
-        "daily_target": r["daily_target"] if r else 100,
-        "weekly_target": r["weekly_target"] if r else 500,
-        "today_earned": earned["total"] if earned else 0,
-        "week_earned": week_earned["total"] if week_earned else 0,
-    }
-
-
-@app.post("/api/drivers/goals")
-async def driver_goals_set(req: Request):
-    body = await req.json()
-    driver_id = int(body.get("driver_id") or 0)
-    daily = float(body.get("daily_target") or 100)
-    weekly = float(body.get("weekly_target") or 500)
-    conn = db()
-    conn.execute(
-        "INSERT OR REPLACE INTO driver_goals(driver_id, daily_target, weekly_target, updated_at)"
-        " VALUES(?,?,?,?)",
-        (driver_id, daily, weekly, now_iso()))
-    conn.commit()
-    conn.close()
-    return {"ok": True}
-
-
-@app.get("/api/nearest-city")
-def nearest_city(lat: float = 0, lng: float = 0):
-    """GPS -> what city are you in, and does Drop serve it?"""
-    import math
-    city, state = "", ""
-    try:
-        q = f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lng}&format=json"
-        req = urllib.request.Request(q, headers={"User-Agent": "DropDelivery/1.0 (wearedropservicesllc@gmail.com)"})
-        data = json.load(urllib.request.urlopen(req, timeout=8))
-        addr = data.get("address", {})
-        city = addr.get("city") or addr.get("town") or addr.get("village") or addr.get("county") or ""
-        _states = {"North Dakota": "ND", "South Dakota": "SD", "Minnesota": "MN",
-                   "Nebraska": "NE", "Iowa": "IA", "Montana": "MT", "New York": "NY",
-                   "Texas": "TX", "Florida": "FL", "California": "CA"}
-        state = _states.get(addr.get("state", ""), "")
-    except Exception:
-        pass
-    conn = db()
-    cities = conn.execute(
-        "SELECT city, state, COUNT(*) n FROM restaurants GROUP BY city, state").fetchall()
-    match = None
-    for c in cities:
-        if city and c["city"].lower() == city.lower():
-            match = {"city": c["city"], "state": c["state"]}
-            break
-    if not match and lat and lng:
-        best, bestd = None, 1e9
-        rows = conn.execute(
-            "SELECT city, state, lat, lng FROM restaurants WHERE lat != 0").fetchall()
-        for r in rows:
-            d = math.hypot(r["lat"] - lat, r["lng"] - lng)
-            if d < bestd:
-                bestd, best = d, r
-        if best and bestd < 1.0:
-            match = {"city": best["city"], "state": best["state"]}
-    conn.close()
-    return {"detected_city": city, "detected_state": state, "match": match}
-
-
-@app.post("/api/spot/suggest")
-async def spot_suggest(req: Request):
-    """Customer suggests a restaurant/spot. Deduped, notifies Ken."""
-    body = await req.json()
-    name = (body.get("name") or "").strip()
-    city = (body.get("city") or "").strip()[:80]
-    if not name:
-        raise HTTPException(400, "Name required")
-    conn = db()
-    dup = conn.execute(
-        "SELECT id FROM spot_suggestions WHERE LOWER(name)=LOWER(?)", (name,)).fetchone()
-    if not dup:
-        conn.execute(
-            "INSERT INTO spot_suggestions(name, city, note, contact, created_at) VALUES(?,?,?,?,?)",
-            (name[:120], city, (body.get("note") or "")[:500],
-             (body.get("contact") or "")[:120], now_iso()))
-        conn.commit()
-    conn.close()
-    try:
-        push_ken("📍 New spot suggestion", f"{name} in {city or 'unknown city'}")
-    except Exception:
-        pass
-    return {"ok": True}
-
-
 @app.post("/api/orders")
 async def create_order(req: Request):
     """Create an order (unpaid). Server prices everything from the DB."""
@@ -2069,8 +558,6 @@ async def create_order(req: Request):
         oh, _ = get_hours()
         raise HTTPException(400, f"We're closed right now — back at {fmt_hour(oh)}")
     if get_setting("accepting_orders") == "0":
-        raise HTTPException(400, "We've paused orders for a moment — please check back soon")
-    if queue_reason() == "full":
         raise HTTPException(400, "We're at capacity right now — please check back soon")
     rid = body.get("restaurant_id")
     # logged-in customer?
@@ -2092,11 +579,6 @@ async def create_order(req: Request):
     if not rest["open"]:
         conn.close()
         raise HTTPException(400, "Restaurant is closed right now")
-    nmenu = conn.execute("SELECT COUNT(*) c FROM menu_items WHERE restaurant_id=? AND available=1",
-                         (rid,)).fetchone()["c"]
-    if not nmenu:
-        conn.close()
-        raise HTTPException(400, "This spot's menu isn't live yet — check back soon")
     food_total = 0.0
     priced = []
     for it in items:
@@ -2133,15 +615,32 @@ async def create_order(req: Request):
             promo_code = pcode.strip().upper()
             conn.execute("UPDATE promo_codes SET uses=uses+1 WHERE code=?", (promo_code,))
     total = round(food_total + fee + tip - discount, 2)
+    # gift order?
+    gift = body.get("gift") or {}
+    is_gift = 1 if gift.get("recipient_name") else 0
+    gift_recipient = (gift.get("recipient_name") or "").strip()[:80]
+    gift_contact = (gift.get("recipient_contact") or "").strip()[:120]
+    gift_message = (gift.get("message") or "").strip()[:500]
     cur = conn.execute(
         """INSERT INTO orders(restaurant_id, items_json, customer_name, phone, address,
                               notes, food_total, delivery_fee, tip, discount, promo_code,
-                              user_id, total, status, stripe_status, created_at, updated_at)
-           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'placed','pending',?,?)""",
+                              user_id, total, status, stripe_status, created_at, updated_at,
+                              is_gift, gift_recipient, gift_contact, gift_message, gift_sender)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'placed','pending',?,?, ?,?,?,?,?)""",
         (rid, json.dumps(priced), name, phone, address, notes,
-         food_total, fee, tip, discount, promo_code, user_id, total, now_iso(), now_iso()))
+         food_total, fee, tip, discount, promo_code, user_id, total, now_iso(), now_iso(),
+         is_gift, gift_recipient, gift_contact, gift_message, name if is_gift else ""))
     oid = cur.lastrowid
     conn.commit()
+    # queue gift notification (sent by background job from business Gmail)
+    if is_gift and gift_contact:
+        conn.execute(
+            "INSERT INTO gift_queue(order_id, recipient, contact, message, sender, status, created_at)"
+            " VALUES(?,?,?,?,?,'pending',?)",
+            (oid, gift_recipient, gift_contact, gift_message, name, now_iso()))
+        conn.commit()
+        log_event("gift", f"🎁 Gift order #{oid} queued",
+                  f"For {gift_recipient} from {name}")
     # pin the delivery address on the map (background — never slows the order)
     def _geocode_order():
         try:
@@ -2501,11 +1000,9 @@ def op_get_settings(x_pin: str = Header(default="")):
             "min_order": float(get_setting("min_order") or 10),
             "accepting_orders": get_setting("accepting_orders") != "0",
             "mins_per_delivery": int(get_setting("mins_per_delivery") or 18),
-            "max_queue": max_queue_size(),
             "open_hour": oh, "close_hour": ch,
             "delivery_zone": get_setting("delivery_zone") or "Bismarck, ND",
             "pin": get_setting("pin"),
-            "owner_pin": get_setting("owner_pin") or "",
             "ntfy_topic": get_setting("ntfy_topic"),
             "tagline": get_setting("tagline")}
 
@@ -2535,16 +1032,6 @@ async def op_put_settings(req: Request, x_pin: str = Header(default="")):
         mpd = max(5, min(120, int(body["mins_per_delivery"])))
         set_setting("mins_per_delivery", str(mpd))
         out["mins_per_delivery"] = mpd
-    if "max_queue" in body:
-        mq = max(1, min(50, int(body["max_queue"])))
-        set_setting("max_queue", str(mq))
-        out["max_queue"] = mq
-    if "owner_pin" in body:
-        opin = str(body["owner_pin"]).strip()
-        if opin and not (opin.isdigit() and len(opin) == 6):
-            raise HTTPException(400, "Owner PIN must be 6 digits")
-        set_setting("owner_pin", opin)
-        out["owner_pin"] = opin
     if "pin" in body:
         pin = str(body["pin"]).strip()
         if not (pin.isdigit() and 4 <= len(pin) <= 8):
@@ -2800,21 +1287,6 @@ async def auth_logout(req: Request, resp: Response):
     return {"ok": True}
 
 
-@app.post("/api/auth/verify")
-async def auth_verify(req: Request):
-    """Re-check password for sensitive actions (e.g. account deletion)."""
-    body = await req.json()
-    me = get_session_user(req)
-    if not me:
-        raise HTTPException(401, "Not logged in")
-    conn = db()
-    u = conn.execute("SELECT password_hash FROM users WHERE id=?", (me["id"],)).fetchone()
-    conn.close()
-    if not u or not check_pw(body.get("password") or "", u["password_hash"]):
-        raise HTTPException(401, "Wrong password")
-    return {"ok": True}
-
-
 @app.get("/api/auth/me")
 def auth_me(req: Request):
     u = get_session_user(req)
@@ -2849,20 +1321,21 @@ def refund_order(o):
 
 @app.get("/api/queue")
 def queue_status():
-    n = active_order_count()
-    reason = queue_reason()
-    accepting = reason == "open"
+    conn = db()
+    n = conn.execute(
+        "SELECT COUNT(*) c FROM orders WHERE status NOT IN ('delivered','cancelled')"
+    ).fetchone()["c"]
+    conn.close()
+    accepting = get_setting("accepting_orders") != "0"
     open_now = is_open_now()
     oh, ch = get_hours()
     try:
         mins = max(5, min(120, int(get_setting("mins_per_delivery") or 18)))
     except (TypeError, ValueError):
         mins = 18
-    return {"active": n, "accepting": accepting, "reason": reason,
-            "open_now": open_now, "paused": get_setting("accepting_orders") == "0",
-            "max_queue": max_queue_size(),
-            "hours_label": f"{fmt_hour(oh)}–{fmt_hour(ch)}",
-            "estimated_mins": (n * mins + 25) if accepting else 0}
+    return {"active": n, "accepting": accepting and open_now,
+            "open_now": open_now, "hours_label": f"{fmt_hour(oh)}–{fmt_hour(ch)}",
+            "estimated_mins": (n * mins + 25) if (accepting and open_now) else 0}
 
 
 @app.post("/api/orders/{oid}/cancel")
@@ -3131,29 +1604,6 @@ def list_businesses():
     return {"businesses": out, "categories": cats}
 
 
-@app.get("/api/businesses/nearby")
-def nearby_businesses(lat: float = 0, lng: float = 0, radius: float = 50):
-    """Businesses within `radius` miles of GPS point. Sorted nearest-first."""
-    if not lat or not lng:
-        return {"businesses": [], "categories": []}
-    conn = db()
-    rows = conn.execute("SELECT * FROM businesses WHERE open=1 AND lat != 0").fetchall()
-    out = []
-    for b in rows:
-        d = haversine_miles(b["lat"], b["lng"], lat, lng)
-        if d <= radius:
-            bd = dict(b)
-            bd["distance_mi"] = round(d, 1)
-            out.append(bd)
-    conn.close()
-    out.sort(key=lambda x: x["distance_mi"])
-    cats = []
-    for b in out:
-        if b["category"] not in cats:
-            cats.append(b["category"])
-    return {"businesses": out, "categories": cats}
-
-
 @app.post("/api/operator/businesses")
 async def op_add_business(req: Request, x_pin: str = Header(default="")):
     check_pin(x_pin)
@@ -3228,8 +1678,6 @@ async def create_courier_order(req: Request):
         oh, _ = get_hours()
         raise HTTPException(400, f"We're closed right now — back at {fmt_hour(oh)}")
     if get_setting("accepting_orders") == "0":
-        raise HTTPException(400, "We've paused orders for a moment — please check back soon")
-    if queue_reason() == "full":
         raise HTTPException(400, "We're at capacity right now — please check back soon")
     me = get_session_user(req)
     user_id = me["id"] if me else 0
@@ -3309,15 +1757,6 @@ def get_driver(req):
     if not s:
         conn.close()
         return None
-    if s["driver_id"] == 0:
-        # Owner master session — synthetic driver record
-        conn.close()
-        return {"id": 0, "name": "Owner 👑", "status": "approved", "is_owner": True,
-                "login_pin": get_setting("owner_pin"), "ntfy_topic": "",
-                "on_time": 0, "deliveries": 0, "on_time_rate": 100.0,
-                "gov_id_status": "verified", "insurance_status": "verified",
-                "vehicle_reg_status": "verified", "vehicle_year": "",
-                "vehicle_make": "", "vehicle_model": "", "vehicle_color": ""}
     d = conn.execute("SELECT * FROM drivers WHERE id=?", (s["driver_id"],)).fetchone()
     conn.close()
     if not d or d["status"] != "approved":
@@ -3405,82 +1844,10 @@ def op_approve_driver(did: int, x_pin: str = Header(default="")):
         raise HTTPException(400,
             "Cannot approve: driver has not provided insurance information. "
             "Insurance is required — no exceptions.")
-    # Generate unique 6-digit PIN
-    import random
-    pin = str(random.randint(100000, 999999))
-    # Ensure uniqueness
-    while conn.execute("SELECT id FROM drivers WHERE login_pin=?", (pin,)).fetchone():
-        pin = str(random.randint(100000, 999999))
-    conn.execute("UPDATE drivers SET status='approved', login_pin=? WHERE id=?", (pin, did))
-    conn.commit()
-    # Notify driver via ntfy if they have a topic set
-    try:
-        topic = d["ntfy_topic"] if "ntfy_topic" in d.keys() else None
-        if topic:
-            import urllib.request, urllib.parse, threading
-            msg = f"🎉 You're approved! Your Drop Driver Hub PIN is: {pin}. Log in at drop-52yj.onrender.com/hub.html"
-            r2 = urllib.request.Request(
-                f"https://ntfy.sh/{urllib.parse.quote(topic)}",
-                data=msg.encode(), headers={"Title": "Drop driver approved"}, method="POST")
-            threading.Thread(
-                target=lambda: urllib.request.urlopen(r2, timeout=5).read(),
-                daemon=True).start()
-    except Exception:
-        pass
-    # Queue PIN email from business Gmail (sent by outreach cron within 15 min)
-    try:
-        driver_email = (d["email"] or "").strip()
-        if driver_email and "@" in driver_email:
-            conn.execute(
-                """INSERT INTO outreach_emails
-                   (to_email, to_name, subject, body, business_name, status, created_at, sent_at)
-                   VALUES (?, ?, ?, ?, ?, 'approved', ?, '')""",
-                (driver_email, d["name"],
-                 f"🚗 Your Drop Driver Hub PIN is {pin}",
-                 f"""Hi {d['name']},
-
-Great news — you've been approved as a Drop driver! 🎉
-
-Your Driver Hub login PIN is: {pin}
-
-Here's how to get started:
-
-1. Go to https://drop-52yj.onrender.com/hub.html
-2. Enter your 6-digit PIN: {pin}
-3. Set up push notifications (instructions in the Hub)
-4. Start accepting deliveries!
-
-Your PIN is unique to you — keep it safe.
-
-Welcome to the Drop team!
-— Drop Services LLC""",
-                 "Driver PIN",
-                 datetime.now(timezone.utc).isoformat()))
-            conn.commit()
-    except Exception:
-        pass
-    conn.close()
-    audit("operator", "driver_approved", "driver", did, f"{d['name']} PIN:{pin}")
-    log_event("driver", f"✅ Driver #{did} approved", f"{d['name']} — PIN {pin}")
-    return {"ok": True, "pin": pin, "message": f"Driver approved! Their login PIN is {pin}. PIN email queued to {d['email'] or 'no email on file'}."}
-
-
-@app.post("/api/operator/drivers/{did}/photo-approve")
-async def op_approve_driver_photo(did: int, req: Request, x_pin: str = Header(default="")):
-    """Ken approves or rejects a driver's selfie/car photo."""
-    check_pin(x_pin)
-    body = await req.json()
-    photo_type = (body.get("type") or "").strip()  # 'selfie' or 'car'
-    approve = bool(body.get("approve"))
-    if photo_type not in ("selfie", "car"):
-        raise HTTPException(400, "type must be selfie or car")
-    conn = db()
-    col = "selfie_approved" if photo_type == "selfie" else "car_approved"
-    conn.execute(f"UPDATE drivers SET {col}=? WHERE id=?", (1 if approve else 0, did))
+    conn.execute("UPDATE drivers SET status='approved' WHERE id=?", (did,))
     conn.commit()
     conn.close()
-    action = "approved" if approve else "rejected"
-    audit("operator", f"driver_photo_{action}", "driver", did, photo_type)
+    audit("operator", "driver_approved", "driver", did, d["name"])
     return {"ok": True}
 
 
@@ -3502,52 +1869,6 @@ def op_suspend_driver(did: int, x_pin: str = Header(default="")):
     conn.commit()
     conn.close()
     return {"ok": True}
-
-
-@app.post("/api/drivers/pin-login")
-async def driver_pin_login(req: Request, resp: Response):
-    """Driver Hub login via 6-digit PIN. The owner's master PIN opens the
-    master hub in the very same box."""
-    from secrets import token_urlsafe
-    body = await req.json()
-    pin = (body.get("pin") or "").strip()
-    if len(pin) != 6 or not pin.isdigit():
-        raise HTTPException(401, "Invalid PIN")
-    owner_pin = get_setting("owner_pin").strip()
-    conn = db()
-    if owner_pin and pin == owner_pin:
-        token = token_urlsafe(32)
-        exp = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
-        conn.execute("INSERT INTO driver_sessions(token, driver_id, expires_at)"
-                     " VALUES(?,?,?)", (token, 0, exp))
-        conn.commit()
-        conn.close()
-        resp.set_cookie("drop_driver", token, httponly=True, samesite="lax",
-                        path="/", max_age=30 * 86400)
-        return {"ok": True, "id": 0, "driver_id": 0, "name": "Owner 👑",
-                "is_owner": True}
-    d = conn.execute("SELECT * FROM drivers WHERE login_pin=?", (pin,)).fetchone()
-    if not d:
-        conn.close()
-        raise HTTPException(401, "Invalid PIN")
-    if d["status"] != "approved":
-        conn.close()
-        raise HTTPException(403, "Driver account not active")
-    token = token_urlsafe(32)
-    exp = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
-    conn.execute("INSERT INTO driver_sessions(token, driver_id, expires_at)"
-                 " VALUES(?,?,?)", (token, d["id"], exp))
-    conn.commit()
-    conn.close()
-    resp.set_cookie("drop_driver", token, httponly=True, samesite="lax",
-                    path="/", max_age=30 * 86400)
-    return {"ok": True, "id": d["id"], "driver_id": d["id"], "name": d["name"]}
-
-
-@app.get("/hub.html", response_class=HTMLResponse)
-def hubpage():
-    with open(os.path.join(BASE, "static", "hub.html")) as f:
-        return f.read()
 
 
 @app.post("/api/drivers/login")
@@ -3600,7 +1921,19 @@ async def driver_me(req: Request):
 
 
 @app.get("/api/drivers/orders")
-def _order_cards(rows):
+async def driver_orders(req: Request):
+    """Orders assigned to this driver."""
+    d = get_driver(req)
+    if not d:
+        raise HTTPException(401, "Not logged in")
+    conn = db()
+    rows = conn.execute(
+        """SELECT o.*, COALESCE(r.name, o.pickup_name) AS pickup_label,
+                  COALESCE(r.address, o.pickup_address) AS pickup_addr,
+                  COALESCE(r.lat, o.pickup_lat) AS plat, COALESCE(r.lng, o.pickup_lng) AS plng
+           FROM orders o LEFT JOIN restaurants r ON r.id = o.restaurant_id
+           WHERE o.driver_id=? AND o.status NOT IN ('delivered','cancelled')
+           ORDER BY o.id""", (d["id"],)).fetchall()
     out = []
     for r in rows:
         od = order_dict(r)
@@ -3608,91 +1941,9 @@ def _order_cards(rows):
         od["pickup_addr"] = r["pickup_addr"]
         od["plat"] = r["plat"] or 0
         od["plng"] = r["plng"] or 0
-        od["claimed_by_owner"] = r["claimed_by_owner"] or 0
         out.append(od)
-    return out
-
-
-async def driver_orders(req: Request):
-    """Orders assigned to this driver. Owner sees what they've claimed."""
-    d = get_driver(req)
-    if not d:
-        raise HTTPException(401, "Not logged in")
-    conn = db()
-    if d.get("is_owner"):
-        rows = conn.execute(
-            """SELECT o.*, COALESCE(r.name, o.pickup_name) AS pickup_label,
-                      COALESCE(r.address, o.pickup_address) AS pickup_addr,
-                      COALESCE(r.lat, o.pickup_lat) AS plat, COALESCE(r.lng, o.pickup_lng) AS plng
-               FROM orders o LEFT JOIN restaurants r ON r.id = o.restaurant_id
-               WHERE o.claimed_by_owner=1 AND o.status NOT IN ('delivered','cancelled')
-               ORDER BY o.id""").fetchall()
-    else:
-        rows = conn.execute(
-            """SELECT o.*, COALESCE(r.name, o.pickup_name) AS pickup_label,
-                      COALESCE(r.address, o.pickup_address) AS pickup_addr,
-                      COALESCE(r.lat, o.pickup_lat) AS plat, COALESCE(r.lng, o.pickup_lng) AS plng
-               FROM orders o LEFT JOIN restaurants r ON r.id = o.restaurant_id
-               WHERE o.driver_id=? AND o.status NOT IN ('delivered','cancelled')
-               ORDER BY o.id""", (d["id"],)).fetchall()
-    out = _order_cards(rows)
     conn.close()
     return out
-
-
-@app.get("/api/drivers/pool")
-async def driver_pool(req: Request):
-    """Owner only: every unassigned live order, ready to claim."""
-    d = get_driver(req)
-    if not d or not d.get("is_owner"):
-        raise HTTPException(403, "Owner only")
-    conn = db()
-    rows = conn.execute(
-        """SELECT o.*, COALESCE(r.name, o.pickup_name) AS pickup_label,
-                  COALESCE(r.address, o.pickup_address) AS pickup_addr,
-                  COALESCE(r.lat, o.pickup_lat) AS plat, COALESCE(r.lng, o.pickup_lng) AS plng
-           FROM orders o LEFT JOIN restaurants r ON r.id = o.restaurant_id
-           WHERE o.driver_id=0 AND o.claimed_by_owner=0
-             AND o.status NOT IN ('delivered','cancelled')
-           ORDER BY o.id""").fetchall()
-    out = _order_cards(rows)
-    conn.close()
-    return out
-
-
-@app.post("/api/drivers/claim/{oid}")
-async def driver_claim(oid: int, req: Request):
-    """Owner jumps on any unassigned delivery."""
-    d = get_driver(req)
-    if not d or not d.get("is_owner"):
-        raise HTTPException(403, "Owner only")
-    conn = db()
-    o = conn.execute("SELECT * FROM orders WHERE id=? AND driver_id=0"
-                     " AND claimed_by_owner=0 AND status NOT IN ('delivered','cancelled')",
-                     (oid,)).fetchone()
-    if not o:
-        conn.close()
-        raise HTTPException(404, "Order not available")
-    conn.execute("UPDATE orders SET claimed_by_owner=1, updated_at=? WHERE id=?",
-                 (now_iso(), oid))
-    conn.commit()
-    conn.close()
-    log_event("order", f"👑 Owner claimed order #{oid}", "")
-    return {"ok": True}
-
-
-@app.post("/api/drivers/release/{oid}")
-async def driver_release(oid: int, req: Request):
-    """Owner releases a claimed delivery back to the pool."""
-    d = get_driver(req)
-    if not d or not d.get("is_owner"):
-        raise HTTPException(403, "Owner only")
-    conn = db()
-    conn.execute("UPDATE orders SET claimed_by_owner=0, updated_at=? WHERE id=?",
-                 (now_iso(), oid))
-    conn.commit()
-    conn.close()
-    return {"ok": True}
 
 
 @app.post("/api/drivers/orders/{oid}/status")
@@ -3705,18 +1956,14 @@ async def driver_set_status(oid: int, req: Request):
     if status not in ("picked_up", "on_the_way", "delivered"):
         raise HTTPException(400, "Bad status")
     conn = db()
-    if d.get("is_owner"):
-        o = conn.execute("SELECT * FROM orders WHERE id=? AND driver_id=0"
-                         " AND claimed_by_owner=1", (oid,)).fetchone()
-    else:
-        o = conn.execute("SELECT * FROM orders WHERE id=? AND driver_id=?",
-                         (oid, d["id"])).fetchone()
+    o = conn.execute("SELECT * FROM orders WHERE id=? AND driver_id=?",
+                     (oid, d["id"])).fetchone()
     if not o:
         conn.close()
         raise HTTPException(404, "Order not found")
     conn.execute("UPDATE orders SET status=?, updated_at=? WHERE id=?",
                  (status, now_iso(), oid))
-    if status == "delivered" and not d.get("is_owner"):
+    if status == "delivered":
         conn.execute("UPDATE drivers SET deliveries=deliveries+1, on_time=on_time+1 WHERE id=?",
                      (d["id"],))
     conn.commit()
@@ -3724,628 +1971,7 @@ async def driver_set_status(oid: int, req: Request):
     return {"ok": True}
 
 
-@app.post("/api/drivers/photo")
-async def driver_upload_photo(req: Request):
-    """Driver uploads selfie or car photo. Basic AI check, Ken approves."""
-    from PIL import Image
-    import io, os
-    form = await req.form()
-    driver_id = int(form.get("driver_id") or 0)
-    photo_type = (form.get("type") or "").strip()  # 'selfie' or 'car'
-    file = form.get("file")
-    if not driver_id or photo_type not in ("selfie", "car") or not file:
-        raise HTTPException(400, "driver_id, type (selfie/car), and file required")
-    data = await file.read()
-    if len(data) > 5 * 1024 * 1024:
-        raise HTTPException(400, "Photo too large (max 5MB)")
-    # AI basic check: valid image, not blank, reasonable size
-    try:
-        img = Image.open(io.BytesIO(data))
-        img.verify()
-        img = Image.open(io.BytesIO(data))  # reopen after verify
-        w, h = img.size
-        if w < 200 or h < 200:
-            raise HTTPException(400, "Photo too small — use a clearer picture")
-        # Check not blank (sample pixels)
-        small = img.resize((10, 10)).convert("RGB")
-        pixels = list(small.getdata())
-        if len(set(pixels)) < 5:
-            raise HTTPException(400, "Photo looks blank — retake it")
-    except HTTPException:
-        raise
-    except Exception:
-        raise HTTPException(400, "Invalid image file")
-    # Save
-    os.makedirs("static/driver-photos", exist_ok=True)
-    fname = f"d{driver_id}_{photo_type}_{int(__import__('time').time())}.jpg"
-    path = f"static/driver-photos/{fname}"
-    img.convert("RGB").save(path, "JPEG", quality=85)
-    # Update driver record (pending Ken's approval)
-    conn = db()
-    col = "selfie_photo" if photo_type == "selfie" else "car_photo"
-    appcol = "selfie_approved" if photo_type == "selfie" else "car_approved"
-    conn.execute(f"UPDATE drivers SET {col}=?, {appcol}=0 WHERE id=?",
-                 (f"/{path}", driver_id))
-    conn.commit()
-    conn.close()
-    log_event("driver", f"📸 Driver #{driver_id} uploaded {photo_type} photo",
-              "Awaiting Ken's approval")
-    return {"ok": True, "path": f"/{path}", "message": "Photo uploaded — Ken will review it"}
-
-
-@app.post("/api/drivers/delivery-photo")
-async def driver_delivery_photo(req: Request):
-    """Driver snaps pickup/dropoff proof photo. Customer sees it live."""
-    from PIL import Image
-    import io, os
-    form = await req.form()
-    driver_id = int(form.get("driver_id") or 0)
-    order_id = int(form.get("order_id") or 0)
-    photo_type = (form.get("type") or "").strip()  # 'pickup' or 'dropoff'
-    file = form.get("file")
-    if not driver_id or not order_id or photo_type not in ("pickup", "dropoff") or not file:
-        raise HTTPException(400, "driver_id, order_id, type (pickup/dropoff), file required")
-    d = get_driver(req)
-    if not d or d["id"] != driver_id:
-        raise HTTPException(403, "Driver login required")
-    if d.get("is_owner"):
-        conn_chk = db()
-        oc = conn_chk.execute("SELECT claimed_by_owner FROM orders WHERE id=?",
-                              (order_id,)).fetchone()
-        conn_chk.close()
-        if not oc or not oc["claimed_by_owner"]:
-            raise HTTPException(403, "Claim this order first")
-    data = await file.read()
-    if len(data) > 5 * 1024 * 1024:
-        raise HTTPException(400, "Photo too large (max 5MB)")
-    try:
-        img = Image.open(io.BytesIO(data))
-        img.verify()
-        img = Image.open(io.BytesIO(data))
-    except Exception:
-        raise HTTPException(400, "Invalid image file")
-    os.makedirs("static/delivery-photos", exist_ok=True)
-    fname = f"o{order_id}_{photo_type}_{int(__import__('time').time())}.jpg"
-    path = f"static/delivery-photos/{fname}"
-    img.convert("RGB").save(path, "JPEG", quality=80)
-    conn = db()
-    conn.execute(
-        "INSERT INTO delivery_photos(order_id, driver_id, photo_type, photo_path, created_at)"
-        " VALUES(?,?,?,?,?)",
-        (order_id, driver_id, photo_type, f"/{path}", now_iso()))
-    # Update order status
-    if photo_type == "pickup":
-        conn.execute("UPDATE orders SET status='picked_up', updated_at=? WHERE id=?",
-                     (now_iso(), order_id))
-    elif photo_type == "dropoff":
-        conn.execute("UPDATE orders SET status='delivered', updated_at=? WHERE id=?",
-                     (now_iso(), order_id))
-    conn.commit()
-    conn.close()
-    label = "picked up" if photo_type == "pickup" else "delivered"
-    log_event("delivery", f"📸 Order #{order_id} {label} — photo proof",
-              f"Driver #{driver_id}")
-    return {"ok": True, "path": f"/{path}"}
-
-
-@app.get("/api/orders/{oid}/photos")
-def order_photos(oid: int):
-    """Customer sees pickup/dropoff photo proof."""
-    conn = db()
-    rows = conn.execute(
-        "SELECT photo_type, photo_path, created_at FROM delivery_photos"
-        " WHERE order_id=? ORDER BY id", (oid,)).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
-
-
-def _order_customer_phone(oid):
-    conn = db()
-    o = conn.execute("SELECT phone FROM orders WHERE id=?", (oid,)).fetchone()
-    conn.close()
-    return (o["phone"] if o else "") or ""
-
-
-def _digits(s):
-    return "".join(ch for ch in str(s or "") if ch.isdigit())
-
-
-@app.get("/api/orders/{oid}/messages")
-def order_messages_list(oid: int):
-    """Driver <-> customer chat thread for one order."""
-    conn = db()
-    rows = conn.execute(
-        "SELECT sender, body, created_at FROM order_messages"
-        " WHERE order_id=? ORDER BY id", (oid,)).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
-
-
-@app.post("/api/orders/{oid}/messages")
-async def order_message_send(oid: int, req: Request):
-    """Send a chat message on an order. Driver: logged-in session.
-    Customer: body.phone must match the order's phone."""
-    body = await req.json()
-    text = (body.get("body") or "").strip()[:1000]
-    if not text:
-        raise HTTPException(400, "Empty message")
-    conn = db()
-    o = conn.execute("SELECT * FROM orders WHERE id=?", (oid,)).fetchone()
-    if not o:
-        conn.close()
-        raise HTTPException(404, "Order not found")
-    sender = None
-    d = get_driver(req)
-    if d and not d.get("is_owner") and (o["driver_id"] == d["id"] or not o["driver_id"]):
-        sender = "driver"
-    elif d and d.get("is_owner") and o["driver_id"] == 0 and o["claimed_by_owner"]:
-        sender = "driver"
-    elif _digits(body.get("phone")) and _digits(body.get("phone")) == _digits(o["phone"]):
-        sender = "customer"
-    if not sender:
-        conn.close()
-        raise HTTPException(403, "Not your order")
-    conn.execute(
-        "INSERT INTO order_messages(order_id, sender, body, created_at)"
-        " VALUES(?,?,?,?)", (oid, sender, text, now_iso()))
-    conn.commit()
-    # Notify the other side: customer message -> driver's push; driver message -> Ken
-    try:
-        if sender == "customer" and o["driver_id"]:
-            drv = conn.execute("SELECT ntfy_topic FROM drivers WHERE id=?",
-                               (o["driver_id"],)).fetchone()
-            topic = (drv["ntfy_topic"] if drv else "") or ""
-            if topic:
-                import urllib.request, urllib.parse, threading
-                msg = f"💬 Order #{oid}: {text[:120]}"
-                r2 = urllib.request.Request(
-                    f"https://ntfy.sh/{urllib.parse.quote(topic)}",
-                    data=msg.encode(), headers={"Title": "Drop: customer message"},
-                    method="POST")
-                threading.Thread(
-                    target=lambda r=r2: urllib.request.urlopen(r, timeout=5).read(),
-                    daemon=True).start()
-        elif sender == "driver":
-            ktopic = get_setting("ntfy_topic").strip()
-            if ktopic:
-                import urllib.request, urllib.parse, threading
-                kr = urllib.request.Request(
-                    f"https://ntfy.sh/{urllib.parse.quote(ktopic)}",
-                    data=f"💬 Driver replied on order #{oid}: {text[:120]}".encode(),
-                    headers={"Title": "Drop: driver message"}, method="POST")
-                threading.Thread(
-                    target=lambda r=kr: urllib.request.urlopen(r, timeout=5).read(),
-                    daemon=True).start()
-    except Exception:
-        pass
-    conn.close()
-    return {"ok": True, "sender": sender}
-
-
-# ---------------- Business accounts (Drop More B2B) ----------------
-@app.post("/api/business/register")
-async def business_register(req: Request):
-    import hashlib
-    body = await req.json()
-    name = (body.get("business_name") or "").strip()[:100]
-    contact = (body.get("contact_name") or "").strip()[:80]
-    email = (body.get("email") or "").strip().lower()[:120]
-    phone = (body.get("phone") or "").strip()[:30]
-    pw = body.get("password") or ""
-    if not all([name, contact, email, phone, pw]):
-        raise HTTPException(400, "All fields required")
-    if len(pw) < 6:
-        raise HTTPException(400, "Password must be 6+ characters")
-    conn = db()
-    if conn.execute("SELECT id FROM business_accounts WHERE email=?", (email,)).fetchone():
-        conn.close()
-        raise HTTPException(400, "Email already registered")
-    ph = hashlib.sha256(pw.encode()).hexdigest()
-    cur = conn.execute(
-        "INSERT INTO business_accounts(business_name, contact_name, email, phone, password_hash, created_at)"
-        " VALUES(?,?,?,?,?,?)",
-        (name, contact, email, phone, ph, now_iso()))
-    bid = cur.lastrowid
-    conn.commit()
-    conn.close()
-    log_event("business", f"🏢 New business: {name}", contact)
-    return {"ok": True, "id": bid}
-
-
-@app.post("/api/business/login")
-async def business_login(req: Request):
-    import hashlib
-    body = await req.json()
-    email = (body.get("email") or "").strip().lower()
-    pw = body.get("password") or ""
-    conn = db()
-    b = conn.execute("SELECT * FROM business_accounts WHERE email=?", (email,)).fetchone()
-    conn.close()
-    if not b or b["password_hash"] != hashlib.sha256(pw.encode()).hexdigest():
-        raise HTTPException(401, "Invalid login")
-    return {"ok": True, "id": b["id"], "business_name": b["business_name"],
-            "discount_tier": b["discount_tier"]}
-
-
-def _biz_price(miles: float, tier: str = "standard") -> dict:
-    """$1.50/mile base, discounts for volume."""
-    base = round(miles * 1.50, 2)
-    discount = 0
-    if tier == "gold":
-        discount = round(base * 0.15, 2)  # 15% off
-    elif tier == "silver":
-        discount = round(base * 0.10, 2)  # 10% off
-    return {"miles": round(miles, 1), "base": base, "discount": discount,
-            "total": round(base - discount, 2), "tier": tier}
-
-
-@app.post("/api/business/quote")
-async def business_quote(req: Request):
-    """Price a pickup/dropoff by distance."""
-    import math
-    body = await req.json()
-    plat, plng = float(body.get("plat") or 0), float(body.get("plng") or 0)
-    dlat, dlng = float(body.get("dlat") or 0), float(body.get("dlng") or 0)
-    tier = (body.get("tier") or "standard").strip()
-    if not all([plat, plng, dlat, dlng]):
-        raise HTTPException(400, "Pickup and dropoff coordinates required")
-    miles = math.hypot(dlat - plat, dlng - plng) * 69
-    return _biz_price(miles, tier)
-
-
-# ---------------- Driver ratings ----------------
-@app.post("/api/drivers/rate")
-async def driver_rate(req: Request):
-    """Customer rates driver 1-5 + comment. Drivers start at 100% (5.0)."""
-    body = await req.json()
-    driver_id = int(body.get("driver_id") or 0)
-    order_id = int(body.get("order_id") or 0)
-    rating = int(body.get("rating") or 0)
-    comment = (body.get("comment") or "").strip()[:500]
-    customer = (body.get("customer_name") or "").strip()[:80]
-    if not driver_id or not order_id or rating < 1 or rating > 5:
-        raise HTTPException(400, "driver_id, order_id, rating 1-5 required")
-    conn = db()
-    # Prevent duplicate rating for same order
-    if conn.execute("SELECT id FROM driver_ratings WHERE order_id=?",
-                    (order_id,)).fetchone():
-        conn.close()
-        raise HTTPException(400, "Already rated")
-    conn.execute(
-        "INSERT INTO driver_ratings(driver_id, order_id, rating, comment, customer_name, created_at)"
-        " VALUES(?,?,?,?,?,?)",
-        (driver_id, order_id, rating, comment, customer, now_iso()))
-    # Recalculate driver rating (weighted: start at 5.0)
-    ratings = conn.execute(
-        "SELECT rating FROM driver_ratings WHERE driver_id=?", (driver_id,)).fetchall()
-    # Start at 100% (5.0), blend with actual ratings
-    total = 5.0 * 3  # 3 "perfect" starter ratings
-    count = 3
-    for r in ratings:
-        total += r["rating"]
-        count += 1
-    new_rating = round(total / count, 2)
-    conn.execute("UPDATE drivers SET rating=?, rating_count=? WHERE id=?",
-                 (new_rating, len(ratings), driver_id))
-    conn.commit()
-    conn.close()
-    log_event("rating", f"⭐ Driver #{driver_id} rated {rating}/5",
-              f"New avg: {new_rating}")
-    return {"ok": True, "new_rating": new_rating}
-
-
-@app.get("/api/operator/driver-ratings/{did}")
-def op_driver_ratings(did: int, x_pin: str = Header(default="")):
-    """Ken sees all ratings + comments for a driver."""
-    check_pin(x_pin)
-    conn = db()
-    rows = conn.execute(
-        "SELECT * FROM driver_ratings WHERE driver_id=? ORDER BY id DESC",
-        (did,)).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
-
-
-# ---------------- User profiles ----------------
-@app.post("/api/user/profile")
-async def user_profile_upsert(req: Request):
-    """Create/update customer profile: name, email, phone, photo, password."""
-    import hashlib
-    body = await req.json()
-    phone = (body.get("phone") or "").strip()[:30]
-    if not phone:
-        raise HTTPException(400, "Phone required")
-    conn = db()
-    existing = conn.execute("SELECT * FROM user_profiles WHERE phone=?", (phone,)).fetchone()
-    ph = ""
-    if body.get("password"):
-        ph = hashlib.sha256(body["password"].encode()).hexdigest()
-    if existing:
-        conn.execute(
-            "UPDATE user_profiles SET name=?, email=?, photo=?,"
-            " password_hash=CASE WHEN ?='' THEN password_hash ELSE ? END WHERE phone=?",
-            (body.get("name", existing["name"])[:80],
-             body.get("email", existing["email"])[:120],
-             body.get("photo", existing["photo"])[:500],
-             ph, ph, phone))
-    else:
-        conn.execute(
-            "INSERT INTO user_profiles(phone, name, email, photo, password_hash, created_at)"
-            " VALUES(?,?,?,?,?,?)",
-            (phone, body.get("name", "")[:80], body.get("email", "")[:120],
-             body.get("photo", "")[:500], ph, now_iso()))
-    conn.commit()
-    conn.close()
-    return {"ok": True}
-
-
-@app.get("/api/user/profile")
-def user_profile_get(phone: str = ""):
-    conn = db()
-    r = conn.execute("SELECT phone, name, email, photo FROM user_profiles WHERE phone=?",
-                     (phone,)).fetchone()
-    conn.close()
-    return dict(r) if r else {}
-
-
-@app.get("/api/operator/users")
-def op_users(x_pin: str = Header(default=""), q: str = ""):
-    """Ken sees all user profiles, can click to contact."""
-    check_pin(x_pin)
-    conn = db()
-    if q:
-        rows = conn.execute(
-            "SELECT * FROM user_profiles WHERE phone LIKE ? OR name LIKE ? OR email LIKE ?"
-            " ORDER BY id DESC LIMIT 50",
-            (f"%{q}%", f"%{q}%", f"%{q}%")).fetchall()
-    else:
-        rows = conn.execute("SELECT * FROM user_profiles ORDER BY id DESC LIMIT 50").fetchall()
-    conn.close()
-    # Don't expose password hashes
-    return [{k: v for k, v in dict(r).items() if k != "password_hash"} for r in rows]
-
-
-@app.post("/api/operator/users/{uid}/contact")
-async def op_contact_user(uid: int, req: Request, x_pin: str = Header(default="")):
-    """Ken messages a user directly (via ntfy push + logged)."""
-    check_pin(x_pin)
-    body = await req.json()
-    message = (body.get("message") or "").strip()[:500]
-    if not message:
-        raise HTTPException(400, "Message required")
-    conn = db()
-    u = conn.execute("SELECT * FROM user_profiles WHERE id=?", (uid,)).fetchone()
-    conn.close()
-    if not u:
-        raise HTTPException(404, "User not found")
-    # Log the outreach
-    log_event("contact", f"📩 Ken messaged {u['name'] or u['phone']}", message[:100])
-    audit("operator", "user_contacted", "user", uid, message[:100])
-    # If user has ntfy, they'd get it — for now, log it for Ken to send via his preferred channel
-    return {"ok": True, "user_phone": u["phone"], "user_email": u["email"],
-            "message": f"Contact {u['name'] or 'user'} at {u['phone']}" + (f" or {u['email']}" if u['email'] else "")}
-
-
-# ---------------- Driver food receipts + reimbursement ----------------
-@app.post("/api/drivers/receipt")
-async def driver_submit_receipt(req: Request):
-    """Driver paid for food at restaurant, submits receipt photo for reimbursement."""
-    from PIL import Image
-    import io, os
-    form = await req.form()
-    driver_id = int(form.get("driver_id") or 0)
-    order_id = int(form.get("order_id") or 0)
-    try:
-        amount = round(float(form.get("amount") or 0), 2)
-    except (TypeError, ValueError):
-        raise HTTPException(400, "Valid amount required")
-    file = form.get("file")
-    if not driver_id or not order_id or amount <= 0 or not file:
-        raise HTTPException(400, "driver_id, order_id, amount, and receipt photo required")
-    data = await file.read()
-    if len(data) > 5 * 1024 * 1024:
-        raise HTTPException(400, "Photo too large (max 5MB)")
-    try:
-        img = Image.open(io.BytesIO(data))
-        img.verify()
-        img = Image.open(io.BytesIO(data))
-    except Exception:
-        raise HTTPException(400, "Invalid image")
-    os.makedirs("static/receipts", exist_ok=True)
-    fname = f"r{order_id}_{int(__import__('time').time())}.jpg"
-    path = f"static/receipts/{fname}"
-    img.convert("RGB").save(path, "JPEG", quality=80)
-    # AI check: compare against order total
-    conn = db()
-    o = conn.execute("SELECT food_total FROM orders WHERE id=?", (order_id,)).fetchone()
-    ai_note = ""
-    if o:
-        expected = o["food_total"] or 0
-        diff = abs(amount - expected)
-        if diff < 1.0:
-            ai_note = f"✓ Matches order (${expected:.2f})"
-        elif amount > expected * 1.2:
-            ai_note = f"⚠️ ${amount:.2f} vs order ${expected:.2f} — review needed"
-        else:
-            ai_note = f"~ ${amount:.2f} vs order ${expected:.2f}"
-    conn.execute(
-        "INSERT INTO food_receipts(order_id, driver_id, amount, photo_path, ai_check, created_at)"
-        " VALUES(?,?,?,?,?,?)",
-        (order_id, driver_id, amount, f"/{path}", ai_note, now_iso()))
-    conn.commit()
-    conn.close()
-    log_event("payment", f"🧾 Receipt ${amount:.2f} from driver #{driver_id}",
-              f"Order #{order_id} — {ai_note}")
-    return {"ok": True, "ai_check": ai_note}
-
-
-@app.get("/api/operator/receipts")
-def op_receipts(x_pin: str = Header(default="")):
-    check_pin(x_pin)
-    conn = db()
-    rows = conn.execute(
-        "SELECT fr.*, d.name as driver_name FROM food_receipts fr"
-        " JOIN drivers d ON d.id=fr.driver_id"
-        " WHERE fr.status='pending' ORDER BY fr.id DESC").fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
-
-
-@app.post("/api/operator/receipts/{rid}/approve")
-async def op_receipt_approve(rid: int, req: Request, x_pin: str = Header(default="")):
-    """Ken approves receipt → driver gets reimbursed + profit via payout."""
-    check_pin(x_pin)
-    conn = db()
-    r = conn.execute("SELECT * FROM food_receipts WHERE id=?", (rid,)).fetchone()
-    if not r:
-        conn.close()
-        raise HTTPException(404, "Receipt not found")
-    # Mark approved
-    conn.execute("UPDATE food_receipts SET status='approved', decided_by='ken' WHERE id=?", (rid,))
-    # Create reimbursement payout (food cost + delivery earnings)
-    o = conn.execute("SELECT delivery_fee, tip FROM orders WHERE id=?", (r["order_id"],)).fetchone()
-    total = r["amount"] + (o["delivery_fee"] if o else 0) + (o["tip"] if o else 0)
-    conn.execute(
-        "INSERT INTO payouts(driver_id, amount, kind, status, note, created_at)"
-        " VALUES(?, ?, 'reimbursement', 'requested', ?, ?)",
-        (r["driver_id"], round(total, 2),
-         f"Food ${r['amount']:.2f} + delivery (order #{r['order_id']})", now_iso()))
-    conn.commit()
-    conn.close()
-    audit("operator", "receipt_approved", "receipt", rid, f"${r['amount']:.2f}")
-    log_event("payment", f"✅ Receipt approved — ${total:.2f} to driver #{r['driver_id']}",
-              f"Food reimbursement + delivery pay")
-    return {"ok": True, "payout_total": round(total, 2)}
-
-
-@app.post("/api/operator/receipts/{rid}/reject")
-async def op_receipt_reject(rid: int, req: Request, x_pin: str = Header(default="")):
-    check_pin(x_pin)
-    body = await req.json()
-    reason = (body.get("reason") or "").strip()[:200]
-    conn = db()
-    conn.execute("UPDATE food_receipts SET status='rejected', decided_by='ken' WHERE id=?", (rid,))
-    conn.commit()
-    conn.close()
-    audit("operator", "receipt_rejected", "receipt", rid, reason)
-    return {"ok": True}
-
-
-# ---------------- Driver disputes / theft / appeals ----------------
-@app.post("/api/operator/drivers/{did}/flag")
-async def op_flag_driver(did: int, req: Request, x_pin: str = Header(default="")):
-    """Ken flags a driver for theft/misconduct → suspended, can appeal."""
-    check_pin(x_pin)
-    body = await req.json()
-    issue = (body.get("issue_type") or "theft").strip()
-    desc = (body.get("description") or "").strip()[:500]
-    order_id = int(body.get("order_id") or 0)
-    if not desc:
-        raise HTTPException(400, "Description required")
-    conn = db()
-    conn.execute(
-        "INSERT INTO driver_disputes(driver_id, order_id, issue_type, description, created_at)"
-        " VALUES(?,?,?,?,?)",
-        (did, order_id, issue, desc, now_iso()))
-    # Suspend driver immediately
-    conn.execute("UPDATE drivers SET status='suspended' WHERE id=?", (did,))
-    conn.commit()
-    conn.close()
-    audit("operator", "driver_flagged", "driver", did, f"{issue}: {desc[:100]}")
-    log_event("safety", f"🚨 Driver #{did} suspended", f"{issue}: {desc[:100]}")
-    return {"ok": True, "message": "Driver suspended. They can submit an appeal."}
-
-
-@app.post("/api/drivers/appeal")
-async def driver_appeal(req: Request):
-    """Suspended driver submits an appeal."""
-    body = await req.json()
-    driver_id = int(body.get("driver_id") or 0)
-    dispute_id = int(body.get("dispute_id") or 0)
-    appeal = (body.get("appeal") or "").strip()[:1000]
-    if not driver_id or not dispute_id or not appeal:
-        raise HTTPException(400, "driver_id, dispute_id, and appeal text required")
-    conn = db()
-    conn.execute(
-        "UPDATE driver_disputes SET driver_appeal=?, status='appealed' WHERE id=? AND driver_id=?",
-        (appeal, dispute_id, driver_id))
-    conn.commit()
-    conn.close()
-    log_event("safety", f"📝 Driver #{driver_id} appealed dispute #{dispute_id}", "")
-    return {"ok": True}
-
-
-@app.get("/api/operator/disputes")
-def op_disputes(x_pin: str = Header(default="")):
-    check_pin(x_pin)
-    conn = db()
-    rows = conn.execute(
-        "SELECT dd.*, d.name as driver_name FROM driver_disputes dd"
-        " JOIN drivers d ON d.id=dd.driver_id"
-        " ORDER BY dd.id DESC").fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
-
-
-@app.post("/api/operator/disputes/{did}/resolve")
-async def op_dispute_resolve(did: int, req: Request, x_pin: str = Header(default="")):
-    """Ken resolves: reinstate driver or ban permanently."""
-    check_pin(x_pin)
-    body = await req.json()
-    action = (body.get("action") or "").strip()  # 'reinstate' or 'ban'
-    resolution = (body.get("resolution") or "").strip()[:500]
-    if action not in ("reinstate", "ban"):
-        raise HTTPException(400, "action must be reinstate or ban")
-    conn = db()
-    disp = conn.execute("SELECT * FROM driver_disputes WHERE id=?", (did,)).fetchone()
-    if not disp:
-        conn.close()
-        raise HTTPException(404, "Dispute not found")
-    new_status = "approved" if action == "reinstate" else "banned"
-    conn.execute(
-        "UPDATE driver_disputes SET status='resolved', resolution=?, decided_by='ken', resolved_at=? WHERE id=?",
-        (resolution, now_iso(), did))
-    conn.execute("UPDATE drivers SET status=? WHERE id=?", (new_status, disp["driver_id"]))
-    conn.commit()
-    conn.close()
-    audit("operator", f"dispute_{action}", "dispute", did, resolution[:100])
-    return {"ok": True}
-
-
-@app.post("/api/driver/nearby")
-async def driver_nearby(req: Request):
-    """Customer picks driver: approved drivers within 15 miles, sorted by rating."""
-    import math
-    body = await req.json()
-    lat = float(body.get("lat") or 0)
-    lng = float(body.get("lng") or 0)
-    if not lat or not lng:
-        raise HTTPException(400, "Location required")
-    conn = db()
-    rows = conn.execute(
-        "SELECT id, name, rating, rating_count, deliveries, selfie_photo, car_photo,"
-        " vehicle_make, vehicle_model, vehicle_color, last_lat, last_lng"
-        " FROM drivers WHERE status='approved' AND selfie_approved=1").fetchall()
-    out = []
-    for d in rows:
-        if not d["last_lat"]:
-            continue
-        dist = math.hypot(d["last_lat"] - lat, d["last_lng"] - lng) * 69
-        if dist <= 15:
-            out.append({
-                "id": d["id"], "name": d["name"].split()[0] + " " + (d["name"].split()[1][:1] + "." if len(d["name"].split()) > 1 else ""),
-                "rating": round(d["rating"] or 5.0, 1), "deliveries": d["deliveries"],
-                "distance_mi": round(dist, 1),
-                "photo": d["selfie_photo"],
-                "car": f"{d['vehicle_color']} {d['vehicle_make']} {d['vehicle_model']}".strip(),
-                "car_photo": d["car_photo"],
-            })
-    conn.close()
-    out.sort(key=lambda x: (-x["rating"], x["distance_mi"]))
-    return out
-
-
-@app.post("/api/driver/location")
+@app.post("/api/drivers/location")
 async def driver_location(req: Request):
     """A dropper's phone posts GPS — updates orders + detects speeding."""
     d = get_driver(req)
@@ -4432,22 +2058,11 @@ async def op_assign_order(oid: int, req: Request, x_pin: str = Header(default=""
     driver_id = int(body.get("driver_id") or 0)
     conn = db()
     if driver_id:
-        dr = conn.execute("SELECT id, name, last_lat, last_lng FROM drivers WHERE id=? AND status='approved'",
+        dr = conn.execute("SELECT id, name FROM drivers WHERE id=? AND status='approved'",
                           (driver_id,)).fetchone()
         if not dr:
             conn.close()
             raise HTTPException(400, "Driver not found or not approved")
-        # 15-mile radius: driver must be near the restaurant
-        o = conn.execute("SELECT restaurant_id FROM orders WHERE id=?", (oid,)).fetchone()
-        if o and o["restaurant_id"]:
-            r = conn.execute("SELECT lat, lng, name FROM restaurants WHERE id=?",
-                             (o["restaurant_id"],)).fetchone()
-            if r and r["lat"] and dr["last_lat"]:
-                d = haversine_miles(r["lat"], r["lng"], dr["last_lat"], dr["last_lng"])
-                if d > 15:
-                    conn.close()
-                    raise HTTPException(400,
-                        f"{dr['name']} is {d:.1f} miles from {r['name']} — outside the 15-mile delivery radius. Assign a closer driver.")
     conn.execute("UPDATE orders SET driver_id=?, updated_at=? WHERE id=?",
                  (driver_id, now_iso(), oid))
     conn.commit()
@@ -4661,8 +2276,8 @@ async def partner_apply(req: Request):
     return {"ok": True, "id": pid}
 
 
-@app.get("/api/operator/restaurant-apps")
-def op_restaurant_apps(x_pin: str = Header(default=""), status: str = ""):
+@app.get("/api/operator/partners")
+def op_partners(x_pin: str = Header(default=""), status: str = ""):
     """Ken's deal pipeline. Filter by stage."""
     check_pin(x_pin)
     conn = db()
@@ -5127,8 +2742,76 @@ def op_outreach_sent(eid: int, x_pin: str = Header(default="")):
     conn.commit()
     conn.close()
     audit("system", "outreach_sent", "outreach", eid, "")
-    log_event("email", f"📧 Outreach email sent to {e['to_email'][:40]}",
-              e["subject"][:80])
+    log_event("email", f"📧 Outreach email sent", f"ID {eid}")
+    return {"ok": True}
+
+
+# Render redeploy trigger 2026-10-11 00:40 CDT — ensure gift-queue endpoints live
+@app.get("/api/operator/gift-queue")
+def op_gift_queue(x_pin: str = Header(default="")):
+    """Pending gift notifications for the background sender."""
+    check_pin(x_pin)
+    conn = db()
+    rows = conn.execute("SELECT * FROM gift_queue WHERE status='pending' ORDER BY id").fetchall()
+    out = [dict(r) for r in rows]
+    conn.close()
+    return out
+
+
+@app.get("/api/operator/drivers/live")
+def op_drivers_live(x_pin: str = Header(default="")):
+    """Live GPS positions of all drivers for the operator map."""
+    check_pin(x_pin)
+    conn = db()
+    rows = conn.execute(
+        """SELECT d.id, d.name, d.status, d.last_lat as lat, d.last_lng as lng,
+                  d.last_gps_at,
+                  (SELECT COUNT(*) FROM orders o WHERE o.driver_id=d.id
+                   AND o.status IN ('confirmed','picked_up','on_the_way')) as active_orders
+           FROM drivers d WHERE d.status='approved' ORDER BY d.name""").fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        # human-friendly "updated X ago"
+        upd = ""
+        if d["last_gps_at"]:
+            try:
+                from datetime import datetime
+                dt = (datetime.now(timezone.utc) -
+                      datetime.fromisoformat(d["last_gps_at"])).total_seconds()
+                if dt < 90:
+                    upd = "live now"
+                elif dt < 3600:
+                    upd = f"{int(dt/60)}m ago"
+                else:
+                    upd = f"{int(dt/3600)}h ago"
+            except Exception:
+                pass
+        d["updated"] = upd
+        d["status"] = f"{d['active_orders']} active" if d["active_orders"] else "idle"
+        # only show recent positions (last 30 min)
+        if d["last_gps_at"]:
+            try:
+                from datetime import datetime
+                dt = (datetime.now(timezone.utc) -
+                      datetime.fromisoformat(d["last_gps_at"])).total_seconds()
+                if dt > 1800:
+                    d["lat"] = None
+                    d["lng"] = None
+            except Exception:
+                pass
+        out.append(d)
+    conn.close()
+    return out
+
+
+@app.post("/api/operator/gift-queue/{gid}/sent")
+def op_gift_sent(gid: int, x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    conn = db()
+    conn.execute("UPDATE gift_queue SET status='sent' WHERE id=?", (gid,))
+    conn.commit()
+    conn.close()
     return {"ok": True}
 
 
@@ -5265,559 +2948,6 @@ def op_suggestions(x_pin: str = Header(default="")):
     out.sort(key=lambda x: order.get(x["priority"], 3))
     log_event("suggestions", f"Generated {len(out)} AI suggestions", "")
     return out
-
-
-# ---------------- AI bot chat ----------------
-@app.get("/api/operator/bot/history")
-def op_bot_history(x_pin: str = Header(default="")):
-    check_pin(x_pin)
-    conn = db()
-    rows = conn.execute(
-        "SELECT id, role, message, created_at FROM bot_chats ORDER BY id DESC LIMIT 50").fetchall()
-    conn.close()
-    return [dict(r) for r in reversed(rows)]
-
-
-@app.post("/api/operator/bot/send")
-async def op_bot_send(req: Request, x_pin: str = Header(default="")):
-    check_pin(x_pin)
-    body = await req.json()
-    msg = (body.get("message") or "").strip()
-    if not msg:
-        raise HTTPException(400, "Empty message")
-    conn = db()
-    conn.execute("INSERT INTO bot_chats(role, message, created_at) VALUES('ken', ?, ?)",
-                 (msg[:2000], now_iso()))
-    conn.commit()
-    conn.close()
-    return {"ok": True}
-
-
-@app.post("/api/operator/bot/reply")
-async def op_bot_reply(req: Request, x_pin: str = Header(default="")):
-    check_pin(x_pin)
-    body = await req.json()
-    msg = (body.get("message") or "").strip()
-    if not msg:
-        raise HTTPException(400, "Empty message")
-    conn = db()
-    conn.execute("INSERT INTO bot_chats(role, message, created_at) VALUES('milli', ?, ?)",
-                 (msg[:2000], now_iso()))
-    conn.commit()
-    conn.close()
-    return {"ok": True}
-
-
-# ---------------- AI improvement ideas ----------------
-@app.get("/api/operator/ideas")
-def op_ideas(x_pin: str = Header(default="")):
-    check_pin(x_pin)
-    conn = db()
-    rows = conn.execute(
-        "SELECT id, title, description, why_beats, status, created_at FROM ai_ideas ORDER BY id DESC LIMIT 30").fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
-
-
-@app.post("/api/operator/ideas")
-async def op_ideas_add(req: Request, x_pin: str = Header(default="")):
-    check_pin(x_pin)
-    body = await req.json()
-    title = (body.get("title") or "").strip()
-    if not title:
-        raise HTTPException(400, "Title required")
-    conn = db()
-    dup = conn.execute("SELECT id FROM ai_ideas WHERE title=? AND status IN ('pending','approved')",
-                       (title,)).fetchone()
-    if dup:
-        conn.close()
-        return {"ok": True, "duplicate": True}
-    conn.execute("INSERT INTO ai_ideas(title, description, why_beats, created_at) VALUES(?,?,?,?)",
-                 (title[:120], (body.get("description") or "")[:1000],
-                  (body.get("why_beats") or "")[:500], now_iso()))
-    conn.commit()
-    conn.close()
-    return {"ok": True}
-
-
-@app.post("/api/operator/ideas/{iid}/{action}")
-def op_ideas_action(iid: int, action: str, x_pin: str = Header(default="")):
-    check_pin(x_pin)
-    if action not in ("approve", "reject"):
-        raise HTTPException(400, "Bad action")
-    conn = db()
-    conn.execute("UPDATE ai_ideas SET status=? WHERE id=?",
-                 ("approved" if action == "approve" else "rejected", iid))
-    conn.commit()
-    conn.close()
-    return {"ok": True}
-
-
-# ---------------- Command dashboard ----------------
-@app.get("/api/operator/command-stats")
-def op_command_stats(x_pin: str = Header(default="")):
-    """Everything the command dashboard needs, in one call."""
-    check_pin(x_pin)
-    conn = db()
-    today = now_iso()[:10]
-    orders_today = conn.execute(
-        "SELECT COUNT(*) FROM orders WHERE created_at LIKE ?", (today + "%",)).fetchone()[0]
-    rev_today = conn.execute(
-        "SELECT COALESCE(SUM(delivery_fee),0) FROM orders WHERE created_at LIKE ? AND stripe_status='paid'",
-        (today + "%",)).fetchone()[0]
-    active = conn.execute(
-        "SELECT COUNT(*) FROM orders WHERE status IN ('new','confirmed','preparing','on_the_way')").fetchone()[0]
-    restaurants = conn.execute("SELECT COUNT(*) FROM restaurants").fetchone()[0]
-    cities = conn.execute("SELECT COUNT(DISTINCT city) FROM restaurants").fetchone()[0]
-    pending_partners = conn.execute(
-        "SELECT COUNT(*) FROM partner_applications WHERE status='new'").fetchone()[0]
-    pending_prospects = conn.execute(
-        "SELECT COUNT(*) FROM prospects WHERE status='draft'").fetchone()[0]
-    auto = (conn.execute("SELECT value FROM settings WHERE key='auto_outreach'").fetchone() or ["0"])[0]
-    paused = (conn.execute("SELECT value FROM settings WHERE key='paused'").fetchone() or ["0"])[0]
-    conn.close()
-    return {"orders_today": orders_today, "revenue_today": round(rev_today or 0, 2),
-            "active_orders": active, "restaurants": restaurants, "cities": cities,
-            "pending_partners": pending_partners, "pending_prospects": pending_prospects,
-            "auto_outreach": auto == "1", "paused": paused == "1"}
-
-
-@app.get("/api/watch/status")
-def watch_status():
-    """Public watch portal: site health WITHOUT revenue/profit. For LOVE code holders."""
-    conn = db()
-    today = now_iso()[:10]
-    orders_today = conn.execute(
-        "SELECT COUNT(*) FROM orders WHERE created_at LIKE ?", (today + "%",)).fetchone()[0]
-    active = conn.execute(
-        "SELECT COUNT(*) FROM orders WHERE status IN ('new','confirmed','preparing','on_the_way')").fetchone()[0]
-    restaurants = conn.execute("SELECT COUNT(*) FROM restaurants").fetchone()[0]
-    cities = conn.execute("SELECT COUNT(DISTINCT city) FROM restaurants").fetchone()[0]
-    # AI upgrades (titles only, no details that could be copied)
-    upgrades = conn.execute(
-        "SELECT title, status FROM ai_ideas WHERE status IN ('pending','approved') ORDER BY id DESC LIMIT 5").fetchall()
-    # Recent maintenance events
-    maint = conn.execute(
-        "SELECT title, created_at FROM system_events WHERE kind IN ('maintenance','suggestions','warning') ORDER BY id DESC LIMIT 5").fetchall()
-    conn.close()
-    # Health assessment (no money numbers)
-    if active > 0 and orders_today > 0:
-        health, label = "good", "THRIVING 🟢"
-    elif orders_today > 0:
-        health, label = "good", "HEALTHY 🟢"
-    elif restaurants > 10:
-        health, label = "warn", "BUILDING 🟡"
-    else:
-        health, label = "warn", "STARTING UP 🟡"
-    # Trend (order count direction, no revenue)
-    trend = "Growing" if orders_today > 2 else "Steady" if orders_today > 0 else "Launching"
-    return {
-        "health": health, "health_label": label,
-        "restaurants": restaurants, "cities": cities,
-        "orders_today": orders_today, "active": active,
-        "upgrades": [{"title": u["title"], "status": u["status"]} for u in upgrades],
-        "maintenance": [{"title": m["title"], "when": m["created_at"][:16]} for m in maint],
-        "site_up": True, "orders_flowing": orders_today > 0, "trend": trend,
-    }
-
-
-# ---------------- City expansion requests ----------------
-@app.post("/api/city/request")
-async def city_request(req: Request):
-    """User wants Drop in their city. Logs it, notifies Ken, AI researches."""
-    body = await req.json()
-    city = (body.get("city") or "").strip()[:80]
-    state = (body.get("state") or "").strip()[:10]
-    if not city or not state:
-        raise HTTPException(400, "City and state required")
-    conn = db()
-    # Dedupe
-    existing = conn.execute(
-        "SELECT id FROM city_requests WHERE LOWER(city)=LOWER(?) AND LOWER(state)=LOWER(?)",
-        (city, state)).fetchone()
-    if not existing:
-        conn.execute(
-            "INSERT INTO city_requests(city, state, status, created_at) VALUES(?,?,?,?)",
-            (city, state, "requested", now_iso()))
-        conn.commit()
-    conn.close()
-    log_event("expansion", f"🌍 Drop requested in {city}, {state}",
-              "AI will research restaurants")
-    # Notify Ken
-    try:
-        topic = get_setting("ntfy_topic")
-        if topic:
-            import urllib.request, urllib.parse, threading
-            msg = f"🌍 NEW CITY REQUEST\n{city}, {state}\nSomeone wants Drop there!"
-            r2 = urllib.request.Request(
-                f"https://ntfy.sh/{urllib.parse.quote(topic)}",
-                data=msg.encode(), headers={"Title": "Drop city request"}, method="POST")
-            threading.Thread(
-                target=lambda: urllib.request.urlopen(r2, timeout=5).read(),
-                daemon=True).start()
-    except Exception:
-        pass
-    return {"ok": True}
-
-
-# ---------------- Google Places integration ----------------
-# Pulls REAL restaurants for ANY city via Google Places API.
-# REQUIRES: Google Cloud API key with Places API enabled + billing.
-# Set GOOGLE_PLACES_KEY in Render environment variables to activate.
-# Without a key, the endpoint returns {"active": False}.
-
-import os
-GOOGLE_PLACES_KEY = os.environ.get("GOOGLE_PLACES_KEY", "")
-
-
-@app.get("/api/places/search")
-def places_search(city: str = "", state: str = "", lat: float = 0, lng: float = 0):
-    """Search real restaurants via Google Places. Needs API key."""
-    if not GOOGLE_PLACES_KEY:
-        return {"active": False,
-                "message": "Google Places not configured. Add GOOGLE_PLACES_KEY to activate live restaurant lookup."}
-    import urllib.request, urllib.parse, json
-    try:
-        if lat and lng:
-            loc = f"{lat},{lng}"
-        else:
-            # Geocode the city first
-            geo_url = ("https://maps.googleapis.com/maps/api/geocode/json?"
-                       f"address={urllib.parse.quote(city + ',' + state)}&key={GOOGLE_PLACES_KEY}")
-            geo = json.loads(urllib.request.urlopen(geo_url, timeout=10).read())
-            if not geo.get("results"):
-                return {"active": True, "results": []}
-            loc_data = geo["results"][0]["geometry"]["location"]
-            loc = f"{loc_data['lat']},{loc_data['lng']}"
-        # Search nearby restaurants
-        places_url = ("https://maps.googleapis.com/maps/api/place/nearbysearch/json?"
-                      f"location={loc}&radius=15000&type=restaurant&key={GOOGLE_PLACES_KEY}")
-        data = json.loads(urllib.request.urlopen(places_url, timeout=10).read())
-        results = []
-        for p in data.get("results", [])[:20]:
-            results.append({
-                "name": p.get("name"),
-                "address": p.get("vicinity"),
-                "rating": p.get("rating"),
-                "lat": p["geometry"]["location"]["lat"],
-                "lng": p["geometry"]["location"]["lng"],
-                "place_id": p.get("place_id"),
-            })
-        return {"active": True, "results": results}
-    except Exception as e:
-        return {"active": True, "error": str(e)[:200], "results": []}
-
-
-@app.get("/api/osm/restaurants")
-def osm_restaurants(city: str = "", state: str = "", lat: float = 0, lng: float = 0):
-    """FREE: Find real restaurants via OpenStreetMap. No API key needed."""
-    import urllib.request, urllib.parse, json
-    try:
-        if lat and lng:
-            # Search around GPS coordinates (15km radius)
-            query = f"""
-            [out:json][timeout:25];
-            (
-              node["amenity"="restaurant"](around:15000,{lat},{lng});
-              way["amenity"="restaurant"](around:15000,{lat},{lng});
-            );
-            out center 20;
-            """
-        elif city:
-            # Search in city area
-            query = f"""
-            [out:json][timeout:25];
-            area["name"="{city}"]["admin_level"~"8"]->.a;
-            (
-              node["amenity"="restaurant"](area.a);
-              way["amenity"="restaurant"](area.a);
-            );
-            out center 20;
-            """
-        else:
-            return {"active": True, "results": []}
-        url = "https://overpass-api.de/api/interpreter"
-        data = urllib.parse.urlencode({"data": query}).encode()
-        req = urllib.request.Request(url, data=data, method="POST",
-                                     headers={"User-Agent": "DropApp/1.0"})
-        resp = json.loads(urllib.request.urlopen(req, timeout=30).read())
-        results = []
-        for el in resp.get("elements", [])[:20]:
-            tags = el.get("tags", {})
-            name = tags.get("name")
-            if not name:
-                continue
-            rlat = el.get("lat") or el.get("center", {}).get("lat", 0)
-            rlng = el.get("lon") or el.get("center", {}).get("lon", 0)
-            results.append({
-                "name": name,
-                "address": tags.get("addr:street", "") + " " + tags.get("addr:housenumber", ""),
-                "cuisine": tags.get("cuisine", ""),
-                "lat": rlat, "lng": rlng,
-                "source": "openstreetmap",
-            })
-        return {"active": True, "results": results}
-    except Exception as e:
-        return {"active": True, "error": str(e)[:200], "results": []}
-
-
-YELP_KEY = os.environ.get("YELP_API_KEY", "")
-
-
-@app.get("/api/yelp/restaurants")
-def yelp_restaurants(city: str = "", state: str = "", lat: float = 0, lng: float = 0):
-    """FREE TIER: Yelp Fusion API (5000 calls/day, no billing). Needs YELP_API_KEY."""
-    if not YELP_KEY:
-        return {"active": False,
-                "message": "Yelp not configured. Add YELP_API_KEY to activate free restaurant lookup."}
-    import urllib.request, urllib.parse, json
-    try:
-        if lat and lng:
-            params = f"latitude={lat}&longitude={lng}&radius=15000"
-        else:
-            params = f"location={urllib.parse.quote(city + ', ' + state)}"
-        url = f"https://api.yelp.com/v3/businesses/search?{params}&categories=restaurants&limit=20"
-        req = urllib.request.Request(url, headers={"Authorization": f"Bearer {YELP_KEY}"})
-        data = json.loads(urllib.request.urlopen(req, timeout=10).read())
-        results = []
-        for b in data.get("businesses", []):
-            results.append({
-                "name": b.get("name"),
-                "address": ", ".join(b.get("location", {}).get("display_address", [])),
-                "rating": b.get("rating"),
-                "lat": b.get("coordinates", {}).get("latitude", 0),
-                "lng": b.get("coordinates", {}).get("longitude", 0),
-                "source": "yelp",
-            })
-        return {"active": True, "results": results}
-    except Exception as e:
-        return {"active": True, "error": str(e)[:200], "results": []}
-
-
-# ---------------- WATCH portal comments ----------------
-# Friends comment, Ken replies. Legal name is auto-blocked.
-WATCH_BLOCKED_NAMES = ["kendrick cooley", "kendrick", "ken"]
-
-def _filter_watch_text(text: str) -> str:
-    """Replace blocked names with ████. Case-insensitive."""
-    out = text
-    for name in sorted(WATCH_BLOCKED_NAMES, key=len, reverse=True):
-        import re
-        out = re.sub(re.escape(name), "████", out, flags=re.IGNORECASE)
-    return out
-
-
-@app.get("/api/watch/comments")
-def watch_comments():
-    conn = db()
-    rows = conn.execute(
-        "SELECT id, author, message, reply, created_at FROM watch_comments"
-        " ORDER BY id DESC LIMIT 50").fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
-
-
-@app.post("/api/watch/comments")
-async def watch_comment_add(req: Request):
-    body = await req.json()
-    author = (body.get("author") or "Anonymous").strip()[:40]
-    message = (body.get("message") or "").strip()[:500]
-    if not message:
-        raise HTTPException(400, "Message required")
-    author = _filter_watch_text(author)
-    message = _filter_watch_text(message)
-    conn = db()
-    conn.execute(
-        "INSERT INTO watch_comments(author, message, created_at) VALUES(?,?,?)",
-        (author, message, now_iso()))
-    conn.commit()
-    conn.close()
-    log_event("watch", "👁️ New WATCH comment", f"From {author}")
-    return {"ok": True}
-
-
-@app.post("/api/operator/watch/reply")
-async def watch_comment_reply(req: Request, x_pin: str = Header(default="")):
-    """Ken replies to a WATCH comment."""
-    check_pin(x_pin)
-    body = await req.json()
-    cid = int(body.get("id") or 0)
-    reply = (body.get("reply") or "").strip()[:500]
-    if not cid or not reply:
-        raise HTTPException(400, "id and reply required")
-    reply = _filter_watch_text(reply)
-    conn = db()
-    conn.execute("UPDATE watch_comments SET reply=? WHERE id=?", (reply, cid))
-    conn.commit()
-    conn.close()
-    return {"ok": True}
-
-
-# ---------------- Universal Payment Control Center ----------------
-# Provider status: Marqeta/Lithic integration point.
-# Real card issuance requires: business contract, verification, funding account.
-# Until then, the system tracks applications and is provider-ready.
-
-@app.get("/api/operator/payments/overview")
-def payments_overview(x_pin: str = Header(default="")):
-    """Universal payment dashboard — no fake balances, only real records."""
-    check_pin(x_pin)
-    conn = db()
-    # Card applications
-    apps = conn.execute(
-        "SELECT ca.*, d.name as driver_name FROM card_applications ca"
-        " JOIN drivers d ON d.id=ca.driver_id ORDER BY ca.id DESC LIMIT 30").fetchall()
-    # Virtual cards
-    cards = conn.execute(
-        "SELECT vc.*, d.name as driver_name FROM virtual_cards vc"
-        " JOIN drivers d ON d.id=vc.driver_id ORDER BY vc.id DESC").fetchall()
-    # Ledger summary (real records only)
-    ledger = conn.execute(
-        "SELECT category, direction, SUM(amount) as total, COUNT(*) as n"
-        " FROM payment_ledger GROUP BY category, direction").fetchall()
-    # Pending payouts (from existing payout system)
-    payouts = conn.execute(
-        "SELECT COUNT(*) as n, SUM(amount) as total FROM payouts WHERE status='pending'").fetchone()
-    conn.close()
-    return {
-        "provider_status": "activation_required",
-        "provider_note": "Marqeta/Lithic integration ready. Needs business contract + funding.",
-        "applications": [dict(a) for a in apps],
-        "cards": [dict(c) for c in cards],
-        "ledger_summary": [dict(l) for l in ledger],
-        "pending_payouts": {"count": payouts["n"] or 0, "total": round(payouts["total"] or 0, 2)},
-    }
-
-
-@app.post("/api/drivers/card-apply")
-async def driver_card_apply(req: Request):
-    """Driver requests a Drop virtual card. AI evaluates, Ken decides."""
-    body = await req.json()
-    driver_id = int(body.get("driver_id") or 0)
-    if not driver_id:
-        raise HTTPException(400, "driver_id required")
-    conn = db()
-    d = conn.execute("SELECT * FROM drivers WHERE id=?", (driver_id,)).fetchone()
-    if not d:
-        conn.close()
-        raise HTTPException(404, "Driver not found")
-    if d["status"] != "approved":
-        conn.close()
-        raise HTTPException(400, "Driver must be approved first")
-    # Check existing
-    existing = conn.execute(
-        "SELECT id FROM card_applications WHERE driver_id=? AND status='pending'",
-        (driver_id,)).fetchone()
-    if existing:
-        conn.close()
-        raise HTTPException(400, "Application already pending")
-    # AI evaluation (policy v1: approved driver + insurance + selfie approved)
-    reasons = []
-    score = 0
-    if d["insurance"]:
-        score += 30; reasons.append("✓ Insurance on file")
-    else:
-        reasons.append("✗ No insurance")
-    if d["selfie_approved"]:
-        score += 25; reasons.append("✓ Photo verified")
-    else:
-        reasons.append("✗ Photo not approved")
-    if (d["deliveries"] or 0) >= 5:
-        score += 25; reasons.append(f"✓ {d['deliveries']} deliveries completed")
-    else:
-        reasons.append(f"✗ Only {d['deliveries'] or 0} deliveries (need 5+)")
-    if (d["rating"] or 5.0) >= 4.5:
-        score += 20; reasons.append(f"✓ Rating {d['rating']:.1f}")
-    else:
-        reasons.append(f"✗ Rating {d['rating'] or 0:.1f} below 4.5")
-    rec = "approve" if score >= 80 else "review" if score >= 50 else "reject"
-    conn.execute(
-        "INSERT INTO card_applications(driver_id, ai_recommendation, ai_reason, created_at)"
-        " VALUES(?,?,?,?)",
-        (driver_id, rec, "; ".join(reasons), now_iso()))
-    conn.commit()
-    conn.close()
-    log_event("payment", f"💳 Card application from driver #{driver_id}",
-              f"AI: {rec} ({score}/100)")
-    return {"ok": True, "ai_recommendation": rec, "score": score,
-            "message": "Application submitted — Ken will review"}
-
-
-@app.post("/api/operator/cards/{aid}/decide")
-async def card_application_decide(aid: int, req: Request, x_pin: str = Header(default="")):
-    """Ken approves/rejects a card application. Does NOT issue a real card."""
-    check_pin(x_pin)
-    body = await req.json()
-    approve = bool(body.get("approve"))
-    conn = db()
-    app = conn.execute("SELECT * FROM card_applications WHERE id=?", (aid,)).fetchone()
-    if not app:
-        conn.close()
-        raise HTTPException(404, "Application not found")
-    status = "approved" if approve else "rejected"
-    conn.execute(
-        "UPDATE card_applications SET status=?, decided_by='ken', decided_at=? WHERE id=?",
-        (status, now_iso(), aid))
-    if approve:
-        # Create card record (provider fields empty until Marqeta/Lithic activated)
-        conn.execute(
-            "INSERT OR IGNORE INTO virtual_cards(driver_id, status, created_at, updated_at)"
-            " VALUES(?, 'pending_provider', ?, ?)",
-            (app["driver_id"], now_iso(), now_iso()))
-    conn.commit()
-    conn.close()
-    audit("operator", f"card_app_{status}", "card_application", aid, "")
-    return {"ok": True, "note": "Card record created. Real issuance needs provider activation."}
-
-
-# ---------------- Restaurant partner applications ----------------
-@app.post("/api/partner/apply")
-async def restaurant_partner_apply(req: Request):
-    """Public: restaurant partnership application."""
-    body = await req.json()
-    name = (body.get("business_name") or "").strip()
-    if not name:
-        raise HTTPException(400, "Business name required")
-    conn = db()
-    conn.execute(
-        """INSERT INTO partner_applications(business_name, contact_name, email, phone, city, state,
-           cuisine, locations, volume, proposal, created_at)
-           VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
-        (name[:120], (body.get("contact_name") or "")[:80], (body.get("email") or "")[:120],
-         (body.get("phone") or "")[:40], (body.get("city") or "")[:80],
-         (body.get("state") or "")[:10], (body.get("cuisine") or "")[:60],
-         int(body.get("locations") or 1), (body.get("volume") or "")[:200],
-         (body.get("proposal") or "")[:2000], now_iso()))
-    conn.commit()
-    conn.close()
-    try:
-        push_ken("🤝 New partner application", name)
-    except Exception:
-        pass
-    return {"ok": True}
-
-
-@app.get("/api/operator/food-partner-apps")
-def op_restaurant_applications(x_pin: str = Header(default="")):
-    check_pin(x_pin)
-    conn = db()
-    rows = conn.execute(
-        "SELECT * FROM partner_applications ORDER BY id DESC").fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
-
-
-@app.post("/api/operator/food-partner-apps/{pid}/{action}")
-def op_restaurant_application_action(pid: int, action: str, x_pin: str = Header(default="")):
-    check_pin(x_pin)
-    if action not in ("approve", "reject"):
-        raise HTTPException(400, "Bad action")
-    conn = db()
-    conn.execute("UPDATE partner_applications SET status=? WHERE id=?",
-                 ("approved" if action == "approve" else "rejected", pid))
-    conn.commit()
-    conn.close()
-    return {"ok": True}
 
 
 # ---------------- Drop Investors ----------------
@@ -6064,137 +3194,6 @@ def op_payout_paid(pid: int, x_pin: str = Header(default="")):
     return {"ok": True}
 
 
-# ---------------- AI Auto-Payout Engine ----------------
-# Three modes: manual (Ken taps), auto (AI pays when Connect active), scheduled (weekly).
-# Without Stripe Connect: AI validates + queues, Ken does one-tap confirm.
-
-def _ai_review_payout(driver_id: int, amount: float) -> dict:
-    """AI validates a payout request. Returns {ok, reasons}."""
-    conn = db()
-    d = conn.execute("SELECT * FROM drivers WHERE id=?", (driver_id,)).fetchone()
-    if not d:
-        conn.close()
-        return {"ok": False, "reasons": ["Driver not found"]}
-    reasons = []
-    ok = True
-    # Check 1: driver is approved
-    if d["status"] != "approved":
-        ok = False
-        reasons.append("✗ Driver not approved")
-    else:
-        reasons.append("✓ Driver approved")
-    # Check 2: has completed deliveries
-    if (d["deliveries"] or 0) == 0:
-        ok = False
-        reasons.append("✗ No completed deliveries")
-    else:
-        reasons.append(f"✓ {d['deliveries']} deliveries")
-    # Check 3: no duplicate pending payout
-    dup = conn.execute(
-        "SELECT COUNT(*) FROM payouts WHERE driver_id=? AND status IN ('requested','processing')",
-        (driver_id,)).fetchone()[0]
-    if dup > 0:
-        ok = False
-        reasons.append("✗ Already has a pending payout")
-    else:
-        reasons.append("✓ No duplicate payouts")
-    # Check 4: amount is reasonable (not exceeding wallet)
-    # (wallet check done by caller)
-    reasons.append(f"✓ Amount ${amount:.2f}")
-    conn.close()
-    return {"ok": ok, "reasons": reasons}
-
-
-@app.get("/api/operator/payout-settings")
-def payout_settings_get(x_pin: str = Header(default="")):
-    check_pin(x_pin)
-    mode = get_setting("payout_mode") or "manual"
-    threshold = get_setting("payout_auto_threshold") or "50"
-    return {"mode": mode, "auto_threshold": float(threshold),
-            "connect_enabled": CONNECT_ENABLED}
-
-
-@app.post("/api/operator/payout-settings")
-async def payout_settings_set(req: Request, x_pin: str = Header(default="")):
-    """Ken sets payout mode: manual, auto, or weekly."""
-    check_pin(x_pin)
-    body = await req.json()
-    mode = (body.get("mode") or "manual").strip()
-    if mode not in ("manual", "auto", "weekly"):
-        raise HTTPException(400, "mode must be manual, auto, or weekly")
-    threshold = float(body.get("auto_threshold") or 50)
-    set_setting("payout_mode", mode)
-    set_setting("payout_auto_threshold", str(threshold))
-    audit("operator", "payout_mode_set", "settings", 0, f"mode={mode} threshold={threshold}")
-    return {"ok": True}
-
-
-@app.post("/api/operator/payouts/{pid}/process")
-async def op_payout_process(pid: int, x_pin: str = Header(default="")):
-    """Ken taps once → AI validates → pays via Stripe Connect (if active) or queues for manual."""
-    check_pin(x_pin)
-    conn = db()
-    p = conn.execute("SELECT * FROM payouts WHERE id=?", (pid,)).fetchone()
-    if not p:
-        conn.close()
-        raise HTTPException(404, "Payout not found")
-    if p["status"] != "requested":
-        conn.close()
-        raise HTTPException(400, f"Already {p['status']}")
-    # AI review
-    review = _ai_review_payout(p["driver_id"], p["amount"])
-    if not review["ok"]:
-        conn.close()
-        raise HTTPException(400, "AI blocked: " + "; ".join(review["reasons"]))
-    d = conn.execute("SELECT * FROM drivers WHERE id=?", (p["driver_id"],)).fetchone()
-    # Try Stripe Connect if active
-    if CONNECT_ENABLED and d["stripe_account_id"]:
-        try:
-            import stripe
-            # Idempotency: don't double-pay
-            transfer = stripe.Transfer.create(
-                amount=int(p["amount"] * 100),
-                currency="usd",
-                destination=d["stripe_account_id"],
-                metadata={"payout_id": str(pid), "driver_id": str(p["driver_id"])},
-                idempotency_key=f"payout_{pid}",
-            )
-            conn.execute(
-                "UPDATE payouts SET status='paid', stripe_transfer_id=?, paid_at=? WHERE id=?",
-                (transfer.id, now_iso(), pid))
-            conn.commit()
-            # Ledger entry
-            conn.execute(
-                "INSERT INTO payment_ledger(txn_id, entry_type, driver_id, amount, direction,"
-                " category, provider, provider_ref, status, created_at)"
-                " VALUES(?,?,?,?,?,?,?,?,?,?)",
-                (f"payout_{pid}", "payout", p["driver_id"], p["amount"],
-                 "out", "driver_payout", "stripe", transfer.id, "completed", now_iso()))
-            conn.commit()
-            conn.close()
-            audit("operator", "payout_auto_paid", "payout", pid,
-                  f"${p['amount']:.2f} to driver {p['driver_id']} via Stripe")
-            log_event("payment", f"💸 Auto-payout ${p['amount']:.2f}",
-                      f"Driver #{p['driver_id']} via Stripe Connect")
-            return {"ok": True, "method": "stripe", "transfer_id": transfer.id}
-        except Exception as e:
-            conn.execute("UPDATE payouts SET status='failed', note=? WHERE id=?",
-                         (f"Stripe error: {str(e)[:200]}", pid))
-            conn.commit()
-            conn.close()
-            raise HTTPException(500, f"Stripe failed: {str(e)[:200]}")
-    else:
-        # Manual mode: mark as processing, Ken sends via his method, taps "Mark paid"
-        conn.execute("UPDATE payouts SET status='processing' WHERE id=?", (pid,))
-        conn.commit()
-        conn.close()
-        audit("operator", "payout_queued", "payout", pid,
-              f"${p['amount']:.2f} validated by AI, awaiting manual send")
-        return {"ok": True, "method": "manual",
-                "message": f"AI validated ✓. Send ${p['amount']:.2f} to {d['name']} via your preferred method, then tap Mark Paid.",
-                "ai_checks": review["reasons"]}
-
-
 @app.post("/api/investors/interest")
 async def investor_interest(req: Request):
     """Investor lead form. This collects interest only — actual investment
@@ -6246,11 +3245,8 @@ async def op_add_restaurant(req: Request, x_pin: str = Header(default="")):
         raise HTTPException(400, "Name required")
     conn = db()
     cur = conn.execute(
-        "INSERT INTO restaurants(name, cuisine, emoji, address, city, state, phone, open, sample)"
-        " VALUES(?,?,?,?,?,?,?,?,1,0)",
-        (name, (body.get("cuisine") or "").strip(), (body.get("emoji") or "🍽️").strip(),
-         (body.get("address") or "").strip(), (body.get("city") or "").strip(),
-         (body.get("state") or "").strip(), (body.get("phone") or "").strip()))
+        "INSERT INTO restaurants(name, cuisine, emoji, open, sample) VALUES(?,?,?,1,0)",
+        (name, (body.get("cuisine") or "").strip(), (body.get("emoji") or "🍽️").strip()))
     rid = cur.lastrowid
     conn.commit()
     conn.close()
@@ -6378,161 +3374,6 @@ def home():
 def courierpage():
     with open(os.path.join(BASE, "static", "courier.html")) as f:
         return f.read()
-
-
-@app.get("/pickup.html", response_class=HTMLResponse)
-def pickuppage():
-    with open(os.path.join(BASE, "static", "pickup.html")) as f:
-        return f.read()
-
-
-@app.get("/drop.html", response_class=HTMLResponse)
-def droppage():
-    with open(os.path.join(BASE, "static", "drop.html")) as f:
-        return f.read()
-
-
-@app.post("/api/drop/request")
-async def drop_request(req: Request):
-    """Unified Drop request: pick up anything from anywhere, deliver anywhere."""
-    import math
-    body = await req.json()
-    what = (body.get("what") or "").strip()[:200]
-    pickup_addr = (body.get("pickup_address") or "").strip()[:200]
-    delivery_addr = (body.get("delivery_address") or "").strip()[:200]
-    details = (body.get("details") or "").strip()[:300]
-    name = (body.get("customer_name") or "").strip()[:80]
-    phone = (body.get("phone") or "").strip()[:30]
-    quoted = float(body.get("quoted_price") or 0)
-    if not what or not pickup_addr or not delivery_addr or not name:
-        raise HTTPException(400, "What, both addresses, and your name are required")
-    # Geocode both for distance + driver matching
-    plat, plng, dlat, dlng = 0.0, 0.0, 0.0, 0.0
-    try:
-        import urllib.request, urllib.parse, json
-        for addr, which in ((pickup_addr, "p"), (delivery_addr, "d")):
-            url = f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(addr)}&format=json&limit=1"
-            rq = urllib.request.Request(url, headers={"User-Agent": "DropApp/1.0"})
-            geo = json.loads(urllib.request.urlopen(rq, timeout=10).read())
-            if geo:
-                if which == "p":
-                    plat, plng = float(geo[0]["lat"]), float(geo[0]["lon"])
-                else:
-                    dlat, dlng = float(geo[0]["lat"]), float(geo[0]["lon"])
-    except Exception:
-        pass
-    # Price: $1.50/mile, min $3.99
-    miles = math.hypot(dlat - plat, dlng - plng) * 69 if all([plat, plng, dlat, dlng]) else 0
-    fee = round(max(3.99, miles * 1.50), 2) if miles > 0 else (quoted if quoted > 0 else 3.99)
-    conn = db()
-    cur = conn.execute(
-        """INSERT INTO orders(restaurant_id, items_json, customer_name, phone, address,
-                              notes, food_total, delivery_fee, tip, total, status,
-                              stripe_status, created_at, updated_at, kind,
-                              pickup_name, pickup_address, pickup_lat, pickup_lng,
-                              cust_lat, cust_lng)
-           VALUES(0, '[]', ?, ?, ?, ?, 0, ?, 0, ?, 'new', 'pending', ?, ?, 'drop',
-                   ?, ?, ?, ?, ?, ?)""",
-        (name, phone, delivery_addr,
-         f"{what}. {details}",
-         fee, fee, now_iso(), now_iso(),
-         what, pickup_addr, plat, plng, dlat, dlng))
-    oid = cur.lastrowid
-    # Check for nearby available drivers (within 15 miles) BEFORE closing
-    drivers_available = 0
-    if plat and plng:
-        import math
-        try:
-            drivers = conn.execute(
-                "SELECT lat, lng FROM drivers WHERE status='approved' AND lat != 0").fetchall()
-            for d in drivers:
-                dist = math.hypot(d["lat"] - plat, d["lng"] - plng) * 69
-                if dist <= 15:
-                    drivers_available += 1
-        except Exception:
-            pass
-    conn.commit()
-    conn.close()
-    log_event("order", f"📦 Drop request #{oid}", f"{what[:40]} — ${fee:.2f}")
-    # Notify Ken
-    try:
-        topic = get_setting("ntfy_topic")
-        if topic:
-            import urllib.request, urllib.parse, threading
-            msg = f"📦 DROP #{oid}\n{what[:50]}\n${fee:.2f}"
-            r2 = urllib.request.Request(
-                f"https://ntfy.sh/{urllib.parse.quote(topic)}",
-                data=msg.encode(), headers={"Title": "Drop request"}, method="POST")
-            threading.Thread(
-                target=lambda: urllib.request.urlopen(r2, timeout=5).read(),
-                daemon=True).start()
-    except Exception:
-        pass
-    return {"ok": True, "order_id": oid, "fee": fee, "drivers_available": drivers_available,
-            "no_drivers": drivers_available == 0}
-
-
-@app.get("/watch.html", response_class=HTMLResponse)
-def watchpage():
-    with open(os.path.join(BASE, "static", "watch.html")) as f:
-        return f.read()
-
-@app.post("/api/pickup/request")
-async def pickup_request(req: Request):
-    """Customer already ordered food, Drop just picks it up and delivers. Works anywhere."""
-    body = await req.json()
-    restaurant = (body.get("restaurant") or "").strip()[:100]
-    pickup_addr = (body.get("pickup_address") or "").strip()[:200]
-    delivery_addr = (body.get("delivery_address") or "").strip()[:200]
-    order_details = (body.get("order_details") or "").strip()[:300]
-    name = (body.get("customer_name") or "").strip()[:80]
-    phone = (body.get("phone") or "").strip()[:30]
-    if not restaurant or not pickup_addr or not delivery_addr or not name:
-        raise HTTPException(400, "Restaurant, both addresses, and your name are required")
-    # Geocode pickup for driver matching
-    lat, lng = 0.0, 0.0
-    try:
-        import urllib.request, urllib.parse, json
-        geo_url = f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(pickup_addr)}&format=json&limit=1"
-        geo_req = urllib.request.Request(geo_url, headers={"User-Agent": "DropApp/1.0"})
-        geo = json.loads(urllib.request.urlopen(geo_req, timeout=10).read())
-        if geo:
-            lat, lng = float(geo[0]["lat"]), float(geo[0]["lon"])
-    except Exception:
-        pass
-    fee = float(get_setting("delivery_fee") or 3.99)
-    conn = db()
-    # Create as a courier-type order (food already paid, just pickup + deliver)
-    cur = conn.execute(
-        """INSERT INTO orders(restaurant_id, items_json, customer_name, phone, address,
-                              notes, food_total, delivery_fee, tip, total, status,
-                              stripe_status, created_at, updated_at, kind,
-                              pickup_name, pickup_address, pickup_lat, pickup_lng)
-           VALUES(0, '[]', ?, ?, ?, ?, 0, ?, 0, ?, 'new', 'pending', ?, ?, 'pickup',
-                   ?, ?, ?, ?)""",
-        (name, phone, delivery_addr,
-         f"Pickup from {restaurant}. {order_details}",
-         fee, fee, now_iso(), now_iso(),
-         restaurant, pickup_addr, lat, lng))
-    oid = cur.lastrowid
-    conn.commit()
-    conn.close()
-    log_event("order", f"🛵 Pickup request #{oid}", f"{restaurant} → {delivery_addr[:40]}")
-    # Notify Ken
-    try:
-        topic = get_setting("ntfy_topic")
-        if topic:
-            import urllib.request, urllib.parse, threading
-            msg = f"🛵 PICKUP #{oid}\n{restaurant}\n→ {delivery_addr[:60]}"
-            r2 = urllib.request.Request(
-                f"https://ntfy.sh/{urllib.parse.quote(topic)}",
-                data=msg.encode(), headers={"Title": "Drop pickup request"}, method="POST")
-            threading.Thread(
-                target=lambda: urllib.request.urlopen(r2, timeout=5).read(),
-                daemon=True).start()
-    except Exception:
-        pass
-    return {"ok": True, "order_id": oid}
 
 
 @app.get("/partner.html", response_class=HTMLResponse)
