@@ -4645,6 +4645,12 @@ def tpage():
         return f.read()
 
 
+@app.get("/rides.html", response_class=HTMLResponse)
+def ridespage():
+    with open(os.path.join(BASE, "static", "rides.html")) as f:
+        return f.read()
+
+
 @app.get("/login.html", response_class=HTMLResponse)
 def loginpage():
     with open(os.path.join(BASE, "static", "login.html")) as f:
