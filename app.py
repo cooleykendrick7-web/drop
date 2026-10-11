@@ -41,7 +41,7 @@ if STRIPE_LIVE:
 STATUSES = ["placed", "confirmed", "picked_up", "on_the_way", "delivered", "cancelled"]
 STATUS_LABELS = {
     "placed": "Order placed",
-    "confirmed": "Confirmed by Ken",
+    "confirmed": "Confirmed by your driver",
     "picked_up": "Picked up from restaurant",
     "on_the_way": "On the way to you",
     "delivered": "Delivered",
