@@ -8838,3 +8838,54 @@ def ride_dev_pay(rid: int):
 
 
 # ---------------- Rides (passenger) quote ----------------
+
+
+def auto_assign_driver(ride_id):
+    """Pick the best available driver for a ride. Returns driver or None."""
+    conn = db()
+    # prefer online drivers, then by fewest deliveries (round-robin)
+    drivers = conn.execute(
+        """SELECT * FROM drivers WHERE status='approved'
+           ORDER BY is_online DESC, deliveries ASC LIMIT 5""").fetchall()
+    if not drivers:
+        conn.close()
+        return None
+    # pick the first online one, or just the first
+    drv = None
+    for d in drivers:
+        if d["is_online"]:
+            drv = d
+            break
+    if not drv:
+        drv = drivers[0]
+    drv = dict(drv)
+
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        "UPDATE rides SET driver_id=?, driver_name=?, status='assigned', updated_at=?"
+        " WHERE id=?", (drv["id"], drv["name"], now, ride_id))
+    conn.commit()
+    r = conn.execute("SELECT * FROM rides WHERE id=?", (ride_id,)).fetchone()
+    conn.close()
+
+    # notify the driver
+    try:
+        if drv.get("ntfy_topic"):
+            send_ntfy(drv["ntfy_topic"], "🚗 New ride assigned!",
+                      f"Pickup: {r['pickup_address']}\nDropoff: {r['dropoff_address']}\n"
+                      f"You earn: ${r['driver_pay']:.2f}")
+    except Exception:
+        pass
+    # notify Ken
+    try:
+        topic = get_setting("ntfy_topic").strip()
+        if topic:
+            send_ntfy(topic, f"👨‍✈️ Driver {drv['name']} auto-assigned to ride #{ride_id}",
+                      f"{r['pickup_address']} → {r['dropoff_address']}")
+    except Exception:
+        pass
+    log_event("ride", f"👨‍✈️ Auto-assigned {drv['name']} to ride #{ride_id}", "")
+    return drv
+
+
+# ---------------- Ride Stripe checkout ----------------
