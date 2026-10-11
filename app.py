@@ -421,8 +421,7 @@ def init_db():
     }
     for k, v in defaults.items():
         c.execute("INSERT OR IGNORE INTO settings(key, value) VALUES(?, ?)", (k, v))
-    # operator PIN updated to 5984 (2026-10-11)
-    c.execute("UPDATE settings SET value='5984' WHERE key='pin' AND value IN ('1234','9584')")
+    # operator PIN is 9584 (Ken's choice 2026-10-11) — do not auto-change it
     conn.commit()
     conn.close()
 
