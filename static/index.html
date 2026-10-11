@@ -53,13 +53,15 @@
 
   <div style="border:1px solid var(--line);border-radius:10px;padding:12px;margin:8px 0">
     <b class="small">📍 PICKUP — where are you?</b>
+    <button class="btn ghost small" id="f-gps" style="width:auto;margin-left:8px;padding:6px 12px">📍 Use my location</button>
     <div class="addr-grid" style="margin-top:8px">
-      <div class="full"><label>Street address *</label><input id="f-pickup-street" placeholder="123 Main St"></div>
+      <div class="full"><label>Street address <span class="small">(optional if using GPS)</span></label><input id="f-pickup-street" placeholder="123 Main St — or tap 📍 above"></div>
       <div><label>Apt / Unit <span class="small">(optional)</span></label><input id="f-pickup-apt" placeholder="Apt 4B"></div>
-      <div><label>City *</label><input id="f-pickup-city" placeholder="Bismarck" value="Bismarck"></div>
-      <div><label>State *</label><input id="f-pickup-state" placeholder="ND" maxlength="2" value="ND" style="text-transform:uppercase"></div>
+      <div><label>City</label><input id="f-pickup-city" placeholder="Bismarck" value="Bismarck"></div>
+      <div><label>State</label><input id="f-pickup-state" placeholder="ND" maxlength="2" value="ND" style="text-transform:uppercase"></div>
       <div><label>ZIP</label><input id="f-pickup-zip" placeholder="58501" inputmode="numeric"></div>
     </div>
+    <p class="small" id="f-gps-msg" style="margin:4px 0 0"></p>
   </div>
 
   <div style="border:1px solid var(--line);border-radius:10px;padding:12px;margin:8px 0">
@@ -120,13 +122,33 @@ function buildAddr(p){
   return out;
 }
 
+// GPS for homepage pickup — optional, fills in location automatically
+let fGps=null;
+$('f-gps').onclick=()=>{
+  const msg=$('f-gps-msg');
+  if(!navigator.geolocation){msg.textContent='GPS not supported on this device.';return;}
+  msg.textContent='Getting your location…';
+  navigator.geolocation.getCurrentPosition(pos=>{
+    fGps={lat:pos.coords.latitude,lng:pos.coords.longitude};
+    msg.innerHTML='✅ Location found! <span style="opacity:.7">Address fields optional now.</span>';
+    msg.style.color='#4ade80';
+  },err=>{
+    msg.textContent='Could not get location. Please type your address.';
+    msg.style.color='#f66';
+  },{timeout:10000});
+};
+
 $('calc-fare').onclick=async()=>{
-  const from=buildAddr('f-pickup-'), to=buildAddr('f-drop-');
+  const from=buildAddr('f-pickup-')||(fGps?'📍 Your current location':null);
+  const to=buildAddr('f-drop-');
   const out=$('fareout');
-  if(!from||!to){out.innerHTML='<p class="small" style="color:#f66">Fill in street, city, and state for both pickup and dropoff.</p>';return;}
+  if(!from){out.innerHTML='<p class="small" style="color:#f66">Enter your pickup address — or tap 📍 Use my location.</p>';return;}
+  if(!to){out.innerHTML='<p class="small" style="color:#f66">Fill in street, city, and state for dropoff.</p>';return;}
   out.innerHTML='<p class="small">Calculating your fare…</p>';
   try{
-    const r=await(await fetch(`/api/rides/quote?pickup_address=${encodeURIComponent(from)}&dropoff_address=${encodeURIComponent(to)}`)).json();
+    let url=`/api/rides/quote?pickup_address=${encodeURIComponent(from)}&dropoff_address=${encodeURIComponent(to)}`;
+    if(fGps)url+=`&plat=${fGps.lat}&plng=${fGps.lng}`;
+    const r=await(await fetch(url)).json();
     if(r.detail){out.innerHTML=`<p class="small" style="color:#f66">${r.detail}</p>`;return;}
     out.innerHTML=`<div class="fare-result">
       <div class="price">$${r.total.toFixed(2)}</div>

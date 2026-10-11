@@ -55,11 +55,34 @@
 <div class="lux-card" id="calc-card">
   <h2>💰 Fare calculator</h2>
   <p class="small">Real pricing, right now. This is exactly what you'll pay.</p>
-  <label>Pickup address</label>
-  <div style="display:flex;gap:8px"><input class="lux-input" id="c-from" placeholder="Where do we get you?" style="flex:1">
-  <button class="lux-btn ghost" id="c-loc" style="width:auto;padding:12px 14px;white-space:nowrap" title="Use my current location">📍</button></div>
-  <label>Dropoff address</label>
-  <input class="lux-input" id="c-to" placeholder="Where are you headed?">
+
+  <div style="border:1px solid #333;border-radius:10px;padding:10px;margin:8px 0">
+    <b class="small">📍 PICKUP</b> <span class="small" style="opacity:.6">(type it, or tap 📍 to use your GPS)</span>
+    <label>Street address <span class="small">(optional if using GPS)</span></label>
+    <div style="display:flex;gap:8px"><input class="lux-input" id="c-from-street" placeholder="123 Main St" style="flex:1">
+    <button class="lux-btn ghost" id="c-loc" style="width:auto;padding:12px 14px;white-space:nowrap" title="Use my current location">📍</button></div>
+    <label>Apt / Unit / Suite <span class="small">(optional)</span></label>
+    <input class="lux-input" id="c-from-apt" placeholder="Apt 4B">
+    <div style="display:grid;grid-template-columns:2fr 1fr 1.2fr;gap:8px">
+      <div><label>City <span class="small">(opt.)</span></label><input class="lux-input" id="c-from-city" placeholder="City"></div>
+      <div><label>State <span class="small">(opt.)</span></label><input class="lux-input" id="c-from-state" placeholder="ST" maxlength="2" style="text-transform:uppercase"></div>
+      <div><label>ZIP</label><input class="lux-input" id="c-from-zip" placeholder="ZIP" inputmode="numeric"></div>
+    </div>
+  </div>
+
+  <div style="border:1px solid #333;border-radius:10px;padding:10px;margin:8px 0">
+    <b class="small">🏠 DROPOFF</b>
+    <label>Street address *</label>
+    <input class="lux-input" id="c-to-street" placeholder="456 Oak Ave">
+    <label>Apt / Unit / Suite <span class="small">(optional)</span></label>
+    <input class="lux-input" id="c-to-apt" placeholder="Suite 200">
+    <div style="display:grid;grid-template-columns:2fr 1fr 1.2fr;gap:8px">
+      <div><label>City *</label><input class="lux-input" id="c-to-city" placeholder="City"></div>
+      <div><label>State *</label><input class="lux-input" id="c-to-state" placeholder="ST" maxlength="2" style="text-transform:uppercase"></div>
+      <div><label>ZIP</label><input class="lux-input" id="c-to-zip" placeholder="ZIP" inputmode="numeric"></div>
+    </div>
+  </div>
+
   <button class="lux-btn ghost" id="c-go">Calculate my fare</button>
   <div id="c-out" style="margin-top:12px"></div>
 </div>
@@ -75,11 +98,31 @@
 <div class="lux-card" id="book-card" style="display:none">
   <h2>🚗 Book your ride</h2>
   <div id="book-form">
-    <label>Pickup address</label>
-    <div style="display:flex;gap:8px"><input class="lux-input" id="b-from" placeholder="Where do we get you?" style="flex:1">
-    <button class="lux-btn ghost" id="b-loc" style="width:auto;padding:12px 14px;white-space:nowrap" title="Use my current location">📍</button></div>
-    <label>Dropoff address</label>
-    <input class="lux-input" id="b-to" placeholder="Where are you headed?">
+    <div style="border:1px solid #333;border-radius:10px;padding:10px;margin:8px 0">
+      <b class="small">📍 PICKUP</b> <span class="small" style="opacity:.6">(type it, or tap 📍 to use your GPS)</span>
+      <label>Street address <span class="small">(optional if using GPS)</span></label>
+      <div style="display:flex;gap:8px"><input class="lux-input" id="b-from-street" placeholder="123 Main St" style="flex:1">
+      <button class="lux-btn ghost" id="b-loc" style="width:auto;padding:12px 14px;white-space:nowrap" title="Use my current location">📍</button></div>
+      <label>Apt / Unit / Suite <span class="small">(optional)</span></label>
+      <input class="lux-input" id="b-from-apt" placeholder="Apt 4B">
+      <div style="display:grid;grid-template-columns:2fr 1fr 1.2fr;gap:8px">
+        <div><label>City <span class="small">(opt.)</span></label><input class="lux-input" id="b-from-city" placeholder="City"></div>
+        <div><label>State <span class="small">(opt.)</span></label><input class="lux-input" id="b-from-state" placeholder="ST" maxlength="2" style="text-transform:uppercase"></div>
+        <div><label>ZIP</label><input class="lux-input" id="b-from-zip" placeholder="ZIP" inputmode="numeric"></div>
+      </div>
+    </div>
+    <div style="border:1px solid #333;border-radius:10px;padding:10px;margin:8px 0">
+      <b class="small">🏠 DROPOFF</b>
+      <label>Street address *</label>
+      <input class="lux-input" id="b-to-street" placeholder="456 Oak Ave">
+      <label>Apt / Unit / Suite <span class="small">(optional)</span></label>
+      <input class="lux-input" id="b-to-apt" placeholder="Suite 200">
+      <div style="display:grid;grid-template-columns:2fr 1fr 1.2fr;gap:8px">
+        <div><label>City *</label><input class="lux-input" id="b-to-city" placeholder="City"></div>
+        <div><label>State *</label><input class="lux-input" id="b-to-state" placeholder="ST" maxlength="2" style="text-transform:uppercase"></div>
+        <div><label>ZIP</label><input class="lux-input" id="b-to-zip" placeholder="ZIP" inputmode="numeric"></div>
+      </div>
+    </div>
     <label>Your name</label>
     <input class="lux-input" id="b-name" placeholder="Your name">
     <label>Your phone</label>
@@ -122,11 +165,11 @@ function locStatus(key, msg, ok){
   if(!el){
     el=document.createElement('p'); el.className='small';
     el.id=key==='cFrom'?'c-locmsg':'b-locmsg';
-    document.getElementById(key==='cFrom'?'c-from':'b-from').after(el);
+    document.getElementById(key==='cFrom'?'c-from-street':'b-from-street').after(el);
   }
   el.textContent=msg; el.style.color=ok?'#4ade80':'#fbbf24';
 }
-async function useMyLocation(inputId, key){
+async function useMyLocation(prefix, key){
   const btn=document.getElementById(key==='cFrom'?'c-loc':'b-loc');
   locStatus(key,'');
   if(!navigator.geolocation){
@@ -147,9 +190,15 @@ async function useMyLocation(inputId, key){
     gps[key]={lat,lng};
     if(key==='cFrom') ac.cFrom=null; if(key==='bFrom') ac.bFrom=null;
     try{
-      const r=await(await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`,{headers:{'User-Agent':'DropApp'}})).json();
-      document.getElementById(inputId).value=r.display_name?r.display_name.split(',').slice(0,3).join(','):`${lat.toFixed(5)}, ${lng.toFixed(5)}`;
-    }catch(e){ document.getElementById(inputId).value=`${lat.toFixed(5)}, ${lng.toFixed(5)}`; }
+      const r=await(await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1`,{headers:{'User-Agent':'DropApp'}})).json();
+      const a=r.address||{};
+      // fill the structured fields from the reverse geocode
+      const num=a.house_number||'', road=a.road||'';
+      document.getElementById(prefix+'street').value=(num+' '+road).trim()||'';
+      document.getElementById(prefix+'city').value=a.city||a.town||a.village||'';
+      document.getElementById(prefix+'state').value=(a.state_code||a.state||'').slice(0,2).toUpperCase();
+      document.getElementById(prefix+'zip').value=a.postcode||'';
+    }catch(e){}
     btn.textContent='✅';
     locStatus(key,`✅ GPS locked (±${Math.round(pos.coords.accuracy||0)}m) — most accurate fare.`,true);
   }, err=>{
@@ -162,10 +211,10 @@ async function useMyLocation(inputId, key){
     locStatus(key,`❌ GPS ${why}. You can also just type the address.`);
   }, {enableHighAccuracy:true, timeout:10000, maximumAge:60000});
 }
-document.getElementById('c-loc').onclick=()=>useMyLocation('c-from','cFrom');
-document.getElementById('b-loc').onclick=()=>useMyLocation('b-from','bFrom');
-document.getElementById('c-from').oninput=()=>{gps.cFrom=null;document.getElementById('c-loc').textContent='📍';};
-document.getElementById('b-from').oninput=()=>{gps.bFrom=null;document.getElementById('b-loc').textContent='📍';};
+document.getElementById('c-loc').onclick=()=>useMyLocation('c-from-','cFrom');
+document.getElementById('b-loc').onclick=()=>useMyLocation('b-from-','bFrom');
+document.getElementById('c-from-street').oninput=()=>{gps.cFrom=null;document.getElementById('c-loc').textContent='📍';};
+document.getElementById('b-from-street').oninput=()=>{gps.bFrom=null;document.getElementById('b-loc').textContent='📍';};
 
 // countdown
 function tick(){
@@ -191,6 +240,21 @@ document.querySelectorAll('.tipbtn').forEach(b=>{
     b.style.borderColor='#f6e27a'; renderQuote(); };
 });
 
+// Build a full address string from structured fields
+function buildAddr(prefix){
+  const street=$(prefix+'street').value.trim();
+  const apt=$(prefix+'apt').value.trim();
+  const city=$(prefix+'city').value.trim();
+  const state=$(prefix+'state').value.trim().toUpperCase();
+  const zip=$(prefix+'zip').value.trim();
+  if(!street||!city||!state) return null;
+  let s=street;
+  if(apt) s+=', '+apt;
+  s+=`, ${city}, ${state}`;
+  if(zip) s+=' '+zip;
+  return s;
+}
+
 async function getQuote(from,to,pCoords,dCoords){
   let url=`/api/rides/quote?pickup_address=${encodeURIComponent(from)}&dropoff_address=${encodeURIComponent(to)}`;
   if(pCoords) url+=`&plat=${pCoords.lat}&plng=${pCoords.lng}`;
@@ -206,7 +270,7 @@ function wireAC(id,key){
   if(!el) return;
   attachAutocomplete(el, pick=>{ ac[key]=pick; });
 }
-['c-from|-|cFrom','c-to|-|cTo','b-from|-|bFrom','b-to|-|bTo'].forEach(s=>{
+['c-from-street|-|cFrom','c-to-street|-|cTo','b-from-street|-|bFrom','b-to-street|-|bTo'].forEach(s=>{
   const [id,,key]=s.split('|'); wireAC(id,key);
 });
 
@@ -222,23 +286,29 @@ function fareHTML(q, showTip){
 }
 
 $('c-go').onclick=async()=>{
-  const f=$('c-from').value.trim(), t=$('c-to').value.trim();
+  const pGps=ac.cFrom||gps.cFrom;
+  const dGps=ac.cTo;
+  const f=buildAddr('c-from-')||(pGps?'📍 Your current location':null);
+  const t=buildAddr('c-to-');
   if(!f){$('c-out').innerHTML='<p class="small">⚠️ Enter your pickup address — or tap 📍 to use your GPS location.</p>';return;}
-  if(!t){$('c-out').innerHTML='<p class="small">Enter the dropoff address.</p>';return;}
+  if(!t){$('c-out').innerHTML='<p class="small">⚠️ Fill in dropoff street, city, and state.</p>';return;}
   $('c-out').innerHTML='<p class="small">Calculating…</p>';
   try{
-    const q=await getQuote(f,t,ac.cFrom||gps.cFrom,ac.cTo);
+    const q=await getQuote(f,t,pGps,dGps);
     $('c-out').innerHTML=fareHTML(q,false);
   }catch(e){$('c-out').innerHTML=`<p class="small">Error: ${e.message}</p>`;}
 };
 
 $('b-quote-btn').onclick=async()=>{
-  const f=$('b-from').value.trim(), t=$('b-to').value.trim();
+  const pGps=ac.bFrom||gps.bFrom;
+  const dGps=ac.bTo;
+  const f=buildAddr('b-from-')||(pGps?'📍 Your current location':null);
+  const t=buildAddr('b-to-');
   if(!f){$('b-msg').textContent='⚠️ Enter your pickup address — or tap 📍 to use your GPS location.';return;}
-  if(!t){$('b-msg').textContent='Enter the dropoff address.';return;}
+  if(!t){$('b-msg').textContent='⚠️ Fill in dropoff street, city, and state.';return;}
   $('b-quote').innerHTML='<p class="small">Calculating…</p>';
   try{
-    lastQuote=await getQuote(f,t,ac.bFrom||gps.bFrom,ac.bTo);
+    lastQuote=await getQuote(f,t,pGps,dGps);
     renderQuote();
     $('b-go').style.display=lastQuote.too_far?'none':'block';
   }catch(e){$('b-msg').textContent='Error: '+e.message;}
@@ -251,10 +321,13 @@ function renderQuote(){
 
 $('b-go').onclick=async()=>{
   if(!$('b-wait-ok').checked){$('b-msg').textContent='Please accept the wait-time terms first.';return;}
+  const pGps=ac.bFrom||gps.bFrom;
+  const f=buildAddr('b-from-')||(pGps?'📍 Your current location':null);
+  const t=buildAddr('b-to-');
   const body={
-    pickup_address:$('b-from').value.trim(),
-    dropoff_address:$('b-to').value.trim(),
-    ...((ac.bFrom||gps.bFrom)?{pickup_lat:(ac.bFrom||gps.bFrom).lat, pickup_lng:(ac.bFrom||gps.bFrom).lng}:{}),
+    pickup_address:f,
+    dropoff_address:t,
+    ...(pGps?{pickup_lat:pGps.lat, pickup_lng:pGps.lng}:{}),
     ...(ac.bTo?{dropoff_lat:ac.bTo.lat, dropoff_lng:ac.bTo.lng}:{}),
     customer_name:$('b-name').value.trim(),
     phone:$('b-phone').value.trim(),
@@ -262,7 +335,7 @@ $('b-go').onclick=async()=>{
     tip:tip,
   };
   if(!body.pickup_address||!body.dropoff_address||!body.customer_name){
-    $('b-msg').textContent='Pickup, dropoff, and your name are required.';return;
+    $('b-msg').textContent='Pickup (or tap 📍 for GPS), dropoff, and your name are required.';return;
   }
   $('b-go').disabled=true; $('b-go').textContent='Sending…';
   try{
