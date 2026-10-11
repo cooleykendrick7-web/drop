@@ -54,6 +54,16 @@
 <div class="section-title" id="restaurants">
   <h2>Order near you</h2><span id="count"></span>
 </div>
+<div class="card" style="margin-bottom:14px">
+  <b>🔍 Find restaurants anywhere</b>
+  <p class="small">Type any city + state — we'll show the hot spots there.</p>
+  <div style="display:flex;gap:8px">
+    <input id="scity" placeholder="City" style="flex:2">
+    <input id="sstate" placeholder="ST" maxlength="2" style="flex:1;text-transform:uppercase">
+    <button class="btn small" id="sgo" style="width:auto">Search</button>
+  </div>
+  <div id="sout" style="margin-top:8px"></div>
+</div>
 <div id="list"></div>
 
 <div class="section-title" style="margin-top:34px"><h2>Why people love Drop</h2></div>
@@ -122,6 +132,36 @@ document.getElementById('resetbtn').onclick=()=>{
   Object.keys(localStorage).filter(k=>k.startsWith('drop')).forEach(k=>localStorage.removeItem(k));
   sessionStorage.clear();
   location.reload();
+};
+
+// city search — any city, any state
+document.getElementById('sgo').onclick=async()=>{
+  const city=document.getElementById('scity').value.trim();
+  const state=document.getElementById('sstate').value.trim().toUpperCase();
+  const out=document.getElementById('sout');
+  if(!city){out.innerHTML='<p class="small">Type a city first.</p>';return;}
+  out.innerHTML='<p class="small">🔍 Searching '+city.replace(/</g,'&lt;')+'…</p>';
+  try{
+    const r=await(await fetch(`/api/search-city?city=${encodeURIComponent(city)}&state=${encodeURIComponent(state)}`)).json();
+    if(!r.restaurants.length){
+      out.innerHTML='<p class="small">No restaurants found there. Try another city.</p>';return;
+    }
+    const tag=r.source==='live'?'🌐 Live results':'📍 On Drop';
+    out.innerHTML=`<p class="small"><b>${tag}</b> — ${r.restaurants.length} spots in ${r.city.replace(/</g,'&lt;')}</p>`+
+      r.restaurants.map(x=>`
+      <div class="card rest" style="margin:8px 0;${x.source==='live'?'opacity:.85':''}">
+        <div class="rbody">
+          <div class="emoji">${x.emoji||'🍽️'}</div>
+          <div class="meta"><b>${x.name.replace(/</g,'&lt;')}</b>
+            <span>${(x.cuisine||'').replace(/</g,'&lt;')}${x.address?' · '+x.address.replace(/</g,'&lt;'):''}</span>
+            ${x.source==='live'?'<span class="small" style="color:#fbbf24">📞 Call to order — not on Drop yet</span>':''}
+          </div>
+          ${x.source==='drop'?`<a class="btn small" href="/restaurant.html?id=${x.id}" style="width:auto;text-decoration:none">Order →</a>`:''}
+        </div>
+      </div>`).join('');
+  }catch(e){
+    out.innerHTML='<p class="small">Search failed. Try again.</p>';
+  }
 };
 
 async function load(){
