@@ -10,6 +10,7 @@
 </head><body>
 <header class="topbar">
   <a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg" alt="Drop"><b>Drop</b><span class="tag" id="headcity" style="display:none"></span></a>
+  <a href="/rides.html" style="color:#d4af37;text-decoration:none;font-weight:700;font-size:.9rem">🚗 Rides</a>
   <a class="acct" href="/account.html">👤 Account</a>
 </header>
 
@@ -42,6 +43,13 @@
 <a href="/courier.html" style="text-decoration:none"><div class="card" style="background:linear-gradient(135deg,#1a0f00,#2a1a05);border:1px solid var(--acc);margin:18px 0">
   <div class="row"><div><b style="font-size:1.2rem">📦 Drop <span style="color:var(--acc)">More</span></b><br>
   <span class="small">Auto parts · Clothing · Supplies · Documents — we pick it up, we drop it off. Tap to request a pickup →</span></div></div>
+</div></a>
+
+<a href="/rides.html" style="text-decoration:none"><div class="card" style="background:linear-gradient(135deg,#0d0d10,#1a1405);border:1px solid #d4af37;margin:18px 0;text-align:center">
+  <div style="font-size:.7rem;letter-spacing:3px;color:#d4af37">DROP&nbsp;RIDES</div>
+  <div style="font-size:1.4rem;margin:6px 0">🚗 <b>Coming soon</b></div>
+  <div class="small" id="rides-cd" style="color:#d4af37">Launching in …</div>
+  <div class="small" style="margin-top:6px">Your ride, your way — upfront pricing, no surge games. Tap to see fares →</div>
 </div></a>
 
 <div class="section-title" id="restaurants">
@@ -228,5 +236,17 @@ function renderRestaurants(q){
     </a>`).join('') || '<p>No restaurants found. Try a different search.</p>';
 }
 load();
+(function(){
+  const LAUNCH=new Date('2026-10-13T10:00:00-05:00').getTime();
+  const el=document.getElementById('rides-cd');
+  if(!el)return;
+  function t(){
+    const d=LAUNCH-Date.now();
+    if(d<=0){el.textContent='🚗 LIVE NOW — book your ride';return;}
+    const dd=Math.floor(d/86400000),hh=Math.floor(d%86400000/3600000),mm=Math.floor(d%3600000/60000);
+    el.textContent=`Launching in ${dd}d ${hh}h ${mm}m`;
+  }
+  setInterval(t,30000);t();
+})();
 </script><script src="/static/drop-live.js"></script>
 </body></html>

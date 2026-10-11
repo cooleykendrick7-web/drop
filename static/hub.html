@@ -222,7 +222,7 @@ async function loadOrders(){
              :'<p class="small">No deliveries assigned right now. New orders will appear here.</p>');
   const poolHtml=!IS_OWNER?'':('<h2 style="margin-top:18px">📦 Available deliveries ('+pool.length+')</h2>'+
     (pool.map(o=>`<div class="card order">
-      <div class="row"><b>#${o.id} · ${o.kind==='courier'?'📦 Courier':'🍔 Food'}</b>
+      <div class="row"><b>#${o.id} · ${o.kind==='ride'?'🚗 Ride':o.kind==='courier'?'📦 Courier':'🍔 Food'}</b>
         <span class="badge">${o.status_label}</span></div>
       <p><b>Pick up:</b> ${o.pickup_label}<br><span class="small">📍 ${o.pickup_addr||''}</span></p>
       <p><b>Deliver to:</b> ${o.customer_name}<br><span class="small">🏠 ${o.address}</span></p>
@@ -239,7 +239,49 @@ async function releaseOrder(oid){
   const r=await(await fetch('/api/drivers/release/'+oid,{method:'POST'})).json();
   if(r.ok){ loadOrders(); } else alert(r.detail||'Could not release');
 }
+async function rideWait(id,action){
+  const r=await fetch(`/api/rides/${id}/wait-${action}`,{method:'POST'});
+  const j=await r.json();
+  if(!r.ok){alert('Error: '+(j.detail||'failed'));return;}
+  if(action==='stop'&&j.wait_fee>0){
+    alert(`⏳ Waited ${j.waited_min} min (${j.free_min} free). Wait fee: $${j.wait_fee.toFixed(2)} — Ken will send the customer a payment link.`);
+  }
+  loadOrders();
+}
+function rideCard(o){
+    const pk=o.plat?`${o.plat},${o.plng}`:encodeURIComponent(o.pickup_addr||'');
+    const dp=o.cust_lat?`${o.cust_lat},${o.cust_lng}`:encodeURIComponent(o.address||'');
+    const waiting=o.status==='waiting';
+    return `<div class="card order" style="border-color:#d4af37">
+      <div class="row"><b>🚗 Ride #${o.id} · ${o.customer_name}</b>
+        <span class="badge">${o.status_label}</span></div>
+      <p><b>Pick up:</b><br><span class="small">📍 ${o.pickup_addr||''}</span></p>
+      <p><b>Drop off:</b><br><span class="small">🏁 ${o.address||''}</span></p>
+      <p class="small">🛣️ ${o.distance_miles||'?'} mi · 💵 $${(o.total||0).toFixed(2)}${o.wait_fee?` (incl. $${o.wait_fee.toFixed(2)} wait)`:''}
+        <br>📞 <a href="tel:${o.phone}">${o.phone}</a>${o.notes?`<br>📝 ${o.notes}`:''}</p>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <a class="btn small" href="https://www.google.com/maps/dir/?api=1&destination=${pk}" target="_blank" style="flex:1;text-decoration:none;text-align:center">🧭 To pickup</a>
+        <a class="btn small" href="https://www.google.com/maps/dir/?api=1&destination=${dp}" target="_blank" style="flex:1;text-decoration:none;text-align:center">🏁 To dropoff</a>
+      </div>
+      <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+        ${o.status==='accepted'&&!waiting?`<button class="btn small" onclick="rideWait(${o.id},'start')">📍 Arrived — start waiting</button>`:''}
+        ${waiting?`<button class="btn small" onclick="rideWait(${o.id},'stop')">✅ Rider aboard — stop waiting</button>`:''}
+        ${!waiting?`<button class="btn small" onclick="setStatus(${o.id},'on_the_way')">🚗 Start trip</button>`:''}
+        ${o.status==='on_the_way'?`<button class="btn small" onclick="setStatus(${o.id},'delivered')">🏁 Complete ride</button>`:''}
+      </div>
+      ${waiting?'<p class="small" style="color:#d4af37">⏳ Wait timer running — first 5 min free, then $0.50/min.</p>':''}
+      <div style="margin-top:8px">
+        <button class="btn small ghost" style="width:100%" onclick="toggleChat(${o.id})">💬 Chat with rider</button>
+        <div id="chat-${o.id}" style="display:none;margin-top:8px">
+          <div id="chatlog-${o.id}" style="max-height:180px;overflow-y:auto;background:#141419;border-radius:10px;padding:8px;margin-bottom:6px"><p class="small">Loading…</p></div>
+          <div class="row"><input id="chatin-${o.id}" placeholder="Message rider…" style="flex:1;margin-right:6px">
+          <button class="btn small" style="width:auto" onclick="sendChat(${o.id})">➤</button></div>
+        </div>
+      </div>
+    </div>`;
+}
 function orderCard(o){
+    if(o.kind==='ride') return rideCard(o);
     const restDest=o.plat?`${o.plat},${o.plng}`:encodeURIComponent(o.pickup_addr||'');
     const custDest=o.cust_lat?`${o.cust_lat},${o.cust_lng}`:encodeURIComponent(o.address||'');
     return `<div class="card order">

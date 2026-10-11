@@ -44,6 +44,7 @@ STATUS_LABELS = {
     "confirmed": "Confirmed by your driver",
     "picked_up": "Picked up from restaurant",
     "on_the_way": "On the way to you",
+    "waiting": "Driver is waiting",
     "delivered": "Delivered",
     "cancelled": "Cancelled",
 }
@@ -289,6 +290,26 @@ def init_db():
     if "gas_fee" not in ocols_g:
         c.execute("ALTER TABLE orders ADD COLUMN gas_fee REAL DEFAULT 0")
     c.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('gas_pct', '10')")
+    # Drop Rides (2026-10-11): ride-hailing. Rides live in orders with kind='ride'.
+    ocols2 = [r[1] for r in c.execute("PRAGMA table_info(orders)").fetchall()]
+    for _col, _ddl in (("distance_miles", "REAL DEFAULT 0"),
+                       ("wait_minutes", "REAL DEFAULT 0"),
+                       ("wait_fee", "REAL DEFAULT 0"),
+                       ("wait_started_at", "TEXT DEFAULT ''")):
+        if _col not in ocols2:
+            c.execute(f"ALTER TABLE orders ADD COLUMN {_col} {_ddl}")
+    dcols2 = [r[1] for r in c.execute("PRAGMA table_info(drivers)").fetchall()]
+    for _col, _ddl in (("wants_rides", "INTEGER DEFAULT 0"),
+                       ("rides_approved", "INTEGER DEFAULT 0"),
+                       ("rideshare_insurance", "TEXT DEFAULT ''"),
+                       ("rides_waiver", "INTEGER DEFAULT 0")):
+        if _col not in dcols2:
+            c.execute(f"ALTER TABLE drivers ADD COLUMN {_col} {_ddl}")
+    for _k, _v in (("ride_base_fare", "4.99"), ("ride_per_mile", "2.00"),
+                   ("ride_wait_per_min", "0.50"), ("ride_wait_free_min", "5"),
+                   ("ride_driver_base", "4.00"), ("ride_driver_per_mile", "1.50"),
+                   ("rides_launch_at", "2026-10-13T10:00:00-05:00")):
+        c.execute("INSERT OR IGNORE INTO settings(key, value) VALUES(?, ?)", (_k, _v))
     # Business accounts (Drop More B2B)
     c.execute("""CREATE TABLE IF NOT EXISTS business_accounts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2281,7 +2302,7 @@ async def checkout(req: Request):
         line_items.append({
                 "price_data": {
                     "currency": "usd",
-                    "product_data": {"name": "Drop pickup + delivery fee"},
+                    "product_data": {"name": "Drop Ride fare" if (o["kind"] or "") == "ride" else "Drop pickup + delivery fee"},
                     "unit_amount": int(round(o["delivery_fee"] * 100)),
                 },
                 "quantity": 1,
@@ -2631,6 +2652,10 @@ def op_get_settings(x_pin: str = Header(default="")):
             "owner_pin": get_setting("owner_pin") or "",
             "ntfy_topic": get_setting("ntfy_topic"),
             "gas_pct": float(get_setting("gas_pct") or 10),
+            "ride_base_fare": float(get_setting("ride_base_fare") or 4.99),
+            "ride_per_mile": float(get_setting("ride_per_mile") or 2.00),
+            "ride_wait_per_min": float(get_setting("ride_wait_per_min") or 0.50),
+            "ride_wait_free_min": int(get_setting("ride_wait_free_min") or 5),
             "tagline": get_setting("tagline")}
 
 
@@ -2683,6 +2708,16 @@ async def op_put_settings(req: Request, x_pin: str = Header(default="")):
         gp = max(0, min(50, float(body["gas_pct"])))
         set_setting("gas_pct", str(gp))
         out["gas_pct"] = gp
+    for _k, _lo, _hi in (("ride_base_fare", 0, 50), ("ride_per_mile", 0, 20),
+                         ("ride_wait_per_min", 0, 10)):
+        if _k in body:
+            _v = round(max(_lo, min(_hi, float(body[_k]))), 2)
+            set_setting(_k, str(_v))
+            out[_k] = _v
+    if "ride_wait_free_min" in body:
+        _w = max(0, min(60, int(body["ride_wait_free_min"])))
+        set_setting("ride_wait_free_min", str(_w))
+        out["ride_wait_free_min"] = _w
     if "tagline" in body:
         set_setting("tagline", str(body["tagline"]).strip()[:80])
         out["tagline"] = "updated"
@@ -3469,11 +3504,16 @@ async def driver_apply(req: Request):
     if conn.execute("SELECT id FROM drivers WHERE phone=?", (phone,)).fetchone():
         conn.close()
         raise HTTPException(400, "This phone number already has an application")
+    wants_rides = 1 if body.get("wants_rides") else 0
+    if wants_rides and not body.get("rides_waiver"):
+        conn.close()
+        raise HTTPException(400, "The Drop Rides liability waiver must be accepted")
     cur = conn.execute(
         """INSERT INTO drivers(name, phone, email, password_hash, license_number, license_state,
                                insurance, vehicle_make, vehicle_model, vehicle_year, vehicle_color,
-                               availability, background_consent, experience, status, created_at)
-           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending',?)""",
+                               availability, background_consent, experience, status, created_at,
+                               wants_rides, rideshare_insurance, rides_waiver)
+           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,'pending',?,?,?,?)""",
         (name, phone, email, hash_pw(password),
          (body.get("license_number") or "").strip()[:40],
          (body.get("license_state") or "").strip()[:10],
@@ -3483,7 +3523,9 @@ async def driver_apply(req: Request):
          (body.get("vehicle_year") or "").strip()[:10],
          (body.get("vehicle_color") or "").strip()[:30],
          (body.get("availability") or "").strip()[:200],
-         1, (body.get("experience") or "").strip()[:500], now_iso()))
+         1, (body.get("experience") or "").strip()[:500], now_iso(),
+         wants_rides, (body.get("rideshare_insurance") or "").strip()[:120],
+         1 if body.get("rides_waiver") else 0))
     did = cur.lastrowid
     conn.commit()
     conn.close()
@@ -3507,7 +3549,7 @@ async def driver_apply(req: Request):
 def op_list_drivers(x_pin: str = Header(default=""), status: str = ""):
     check_pin(x_pin)
     conn = db()
-    q = "SELECT id, name, phone, email, license_number, license_state, insurance, vehicle_make, vehicle_model, vehicle_year, vehicle_color, availability, experience, status, deliveries, on_time, created_at FROM drivers"
+    q = "SELECT id, name, phone, email, license_number, license_state, insurance, vehicle_make, vehicle_model, vehicle_year, vehicle_color, availability, experience, status, deliveries, on_time, created_at, wants_rides, rides_approved, rideshare_insurance, rides_waiver, selfie_photo, car_photo FROM drivers"
     if status:
         q += " WHERE status=?"
         rows = conn.execute(q + " ORDER BY id DESC", (status,)).fetchall()
@@ -3516,6 +3558,48 @@ def op_list_drivers(x_pin: str = Header(default=""), status: str = ""):
     out = [dict(r) for r in rows]
     conn.close()
     return out
+
+
+@app.post("/api/operator/drivers/{did}/rides")
+async def op_driver_rides(did: int, req: Request, x_pin: str = Header(default="")):
+    """Ken approves or declines a driver for Drop Rides specifically.
+    Requires: approved driver + insurance + selfie + car photo + waiver."""
+    check_pin(x_pin)
+    body = await req.json()
+    action = (body.get("action") or "").strip()  # approve | decline
+    conn = db()
+    d = conn.execute("SELECT * FROM drivers WHERE id=?", (did,)).fetchone()
+    if not d:
+        conn.close()
+        raise HTTPException(404, "Driver not found")
+    if action == "approve":
+        if d["status"] != "approved":
+            conn.close()
+            raise HTTPException(400, "Approve the driver for Drop first, then enable rides.")
+        missing = []
+        if not (d["insurance"] or "").strip():
+            missing.append("insurance info")
+        if not (d["selfie_photo"] or "").strip():
+            missing.append("photo of themselves")
+        if not (d["car_photo"] or "").strip():
+            missing.append("photo of their car")
+        if not d["rides_waiver"]:
+            missing.append("signed rides waiver")
+        if missing:
+            conn.close()
+            raise HTTPException(400, "Cannot approve for rides — missing: " + ", ".join(missing))
+        conn.execute("UPDATE drivers SET rides_approved=1 WHERE id=?", (did,))
+        conn.commit()
+        conn.close()
+        log_event("driver", f"🚗 Driver #{did} approved for Drop Rides", d["name"])
+        return {"ok": True, "rides_approved": True}
+    elif action == "decline":
+        conn.execute("UPDATE drivers SET rides_approved=0, wants_rides=0 WHERE id=?", (did,))
+        conn.commit()
+        conn.close()
+        return {"ok": True, "rides_approved": False}
+    conn.close()
+    raise HTTPException(400, "action must be approve or decline")
 
 
 @app.post("/api/operator/drivers/{did}/approve")
@@ -6314,6 +6398,15 @@ def ensure_driver_pay(oid):
         conn.close()
         return
     kind = o["kind"] or "food"
+    if kind == "ride":
+        # Rides use their own driver rates: base + per-mile
+        miles = o["distance_miles"] or 0
+        dpay = round(float(get_setting("ride_driver_base") or 4.00)
+                     + miles * float(get_setting("ride_driver_per_mile") or 1.50), 2)
+        conn.execute("UPDATE orders SET driver_pay=? WHERE id=?", (dpay, oid))
+        conn.commit()
+        conn.close()
+        return
     if kind == "courier":
         plat, plng = o["pickup_lat"] or 0, o["pickup_lng"] or 0
     else:
@@ -6957,6 +7050,299 @@ def watchpage():
     with open(os.path.join(BASE, "static", "watch.html")) as f:
         return f.read()
 
+def _geocode(addr):
+    """Return (lat, lng) or (0.0, 0.0). Shared by courier + rides."""
+    try:
+        import urllib.request, urllib.parse, json
+        url = f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(addr)}&format=json&limit=1"
+        rq = urllib.request.Request(url, headers={"User-Agent": "DropApp/1.0"})
+        geo = json.loads(urllib.request.urlopen(rq, timeout=10).read())
+        if geo:
+            return float(geo[0]["lat"]), float(geo[0]["lon"])
+    except Exception:
+        pass
+    return 0.0, 0.0
+
+
+def rides_open():
+    """True once the launch countdown has passed."""
+    try:
+        import datetime
+        launch = datetime.datetime.fromisoformat(get_setting("rides_launch_at") or "2026-10-13T10:00:00-05:00")
+        now = datetime.datetime.now(datetime.timezone.utc).astimezone(launch.tzinfo)
+        return now >= launch
+    except Exception:
+        return True
+
+
+def ride_fare_quote(pickup_addr, dropoff_addr):
+    """Shared fare math for quotes and requests. Returns dict with full breakdown."""
+    import math
+    plat, plng = _geocode(pickup_addr)
+    dlat, dlng = _geocode(dropoff_addr)
+    miles = math.hypot(dlat - plat, dlng - plng) * 69 if all([plat, plng, dlat, dlng]) else 0
+    base = float(get_setting("ride_base_fare") or 4.99)
+    per_mile = float(get_setting("ride_per_mile") or 2.00)
+    mileage_charge = round(miles * per_mile, 2)
+    fare = round(base + mileage_charge, 2)
+    gas_pct = float(get_setting("gas_pct") or 10)
+    gas_fee = round(fare * gas_pct / 100, 2)
+    # AI profit check: is this ride worth it for the company?
+    d_base = float(get_setting("ride_driver_base") or 4.00)
+    d_per_mile = float(get_setting("ride_driver_per_mile") or 1.50)
+    driver_pay = round(d_base + miles * d_per_mile, 2)
+    stripe_est = round((fare + gas_fee) * 0.029 + 0.30, 2)
+    profit = round(fare + gas_fee - driver_pay - stripe_est, 2)
+    try:
+        min_p = float(get_setting("min_profit") or 1.00)
+    except Exception:
+        min_p = 1.00
+    ai_note = ("✅ Good fare — healthy margin." if profit >= min_p
+               else f"⚠️ Thin margin (${profit:.2f}). Consider a higher per-mile rate.")
+    return {"miles": round(miles, 1), "base_fare": base, "per_mile": per_mile,
+            "mileage_charge": mileage_charge, "fare": fare,
+            "gas_pct": gas_pct, "gas_fee": gas_fee,
+            "total": round(fare + gas_fee, 2),
+            "driver_pay_est": driver_pay, "company_profit_est": profit,
+            "ai_note": ai_note, "geocoded": bool(miles),
+            "plat": plat, "plng": plng, "dlat": dlat, "dlng": dlng}
+
+
+@app.get("/api/rides/quote")
+def rides_quote(pickup_address: str = "", dropoff_address: str = ""):
+    """Public fare calculator: distance + base + gas + AI profit note."""
+    if not pickup_address.strip() or not dropoff_address.strip():
+        raise HTTPException(400, "Pickup and dropoff addresses are required")
+    q = ride_fare_quote(pickup_address.strip()[:200], dropoff_address.strip()[:200])
+    q["rides_open"] = rides_open()
+    return q
+
+
+@app.post("/api/rides/request")
+async def rides_request(req: Request):
+    """Customer books a Drop Ride. Launches when the countdown ends."""
+    if not rides_open():
+        raise HTTPException(403, "Drop Rides hasn't launched yet — check the countdown!")
+    body = await req.json()
+    pickup_addr = (body.get("pickup_address") or "").strip()[:200]
+    dropoff_addr = (body.get("dropoff_address") or "").strip()[:200]
+    name = (body.get("customer_name") or "").strip()[:80]
+    phone = (body.get("phone") or "").strip()[:30]
+    notes = (body.get("notes") or "").strip()[:300]
+    try:
+        tip = round(max(0.0, min(100.0, float(body.get("tip", 0)))), 2)
+    except (TypeError, ValueError):
+        tip = 0.0
+    if not pickup_addr or not dropoff_addr or not name:
+        raise HTTPException(400, "Pickup, dropoff, and your name are required")
+    q = ride_fare_quote(pickup_addr, dropoff_addr)
+    total = round(q["total"] + tip, 2)
+    me = get_session_user(req)
+    user_id = me["id"] if me else 0
+    conn = db()
+    cur = conn.execute(
+        """INSERT INTO orders(restaurant_id, items_json, customer_name, phone, address,
+                              notes, food_total, delivery_fee, gas_fee, tip, total, status,
+                              stripe_status, created_at, updated_at, kind, user_id,
+                              pickup_name, pickup_address, pickup_lat, pickup_lng,
+                              cust_lat, cust_lng, distance_miles)
+           VALUES(0, '[]', ?, ?, ?, ?, 0, ?, ?, ?, ?, 'new',
+                   'pending', ?, ?, 'ride', ?,
+                   'Drop Ride', ?, ?, ?, ?, ?, ?)""",
+        (name, phone, dropoff_addr, notes,
+         q["fare"], q["gas_fee"], tip, total, now_iso(), now_iso(), user_id,
+         pickup_addr, q["plat"], q["plng"], q["dlat"], q["dlng"], q["miles"]))
+    oid = cur.lastrowid
+    conn.commit()
+    conn.close()
+    log_event("order", f"🚗 Ride request #{oid}", f"{pickup_addr[:30]} → {dropoff_addr[:30]} — ${total:.2f}")
+    try:
+        topic = get_setting("ntfy_topic")
+        if topic:
+            import urllib.request, urllib.parse, threading
+            msg = f"🚗 RIDE #{oid}\n{pickup_addr[:50]}\n→ {dropoff_addr[:50]}\n${total:.2f} ({q['miles']} mi)"
+            r2 = urllib.request.Request(
+                f"https://ntfy.sh/{urllib.parse.quote(topic)}",
+                data=msg.encode(), headers={"Title": "Drop ride request"}, method="POST")
+            threading.Thread(
+                target=lambda: urllib.request.urlopen(r2, timeout=5).read(),
+                daemon=True).start()
+    except Exception:
+        pass
+    return {"ok": True, "order_id": oid, "total": total, "fare": q["fare"],
+            "gas_fee": q["gas_fee"], "tip": tip, "miles": q["miles"],
+            "ai_note": q["ai_note"]}
+
+
+@app.get("/api/operator/rides")
+def op_list_rides(x_pin: str = Header(default=""), status: str = ""):
+    """Ken's ride board: all Drop Rides, optionally filtered by status."""
+    check_pin(x_pin)
+    conn = db()
+    if status:
+        rows = conn.execute(
+            "SELECT * FROM orders WHERE kind='ride' AND status=? ORDER BY id DESC",
+            (status,)).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM orders WHERE kind='ride' ORDER BY id DESC LIMIT 100").fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        if d.get("driver_id"):
+            drv = conn.execute("SELECT name, phone FROM drivers WHERE id=?",
+                               (d["driver_id"],)).fetchone()
+            d["driver_name"] = drv["name"] if drv else ""
+        out.append(d)
+    conn.close()
+    return {"rides": out, "rides_open": rides_open(),
+            "launch_at": get_setting("rides_launch_at")}
+
+
+@app.post("/api/operator/rides/{rid}/decision")
+async def op_ride_decision(rid: int, req: Request, x_pin: str = Header(default="")):
+    """Ken accepts (assigns driver) or declines a ride request."""
+    check_pin(x_pin)
+    body = await req.json()
+    action = (body.get("action") or "").strip()  # accept | decline
+    driver_id = int(body.get("driver_id") or 0)
+    conn = db()
+    o = conn.execute("SELECT * FROM orders WHERE id=? AND kind='ride'", (rid,)).fetchone()
+    if not o:
+        conn.close()
+        raise HTTPException(404, "Ride not found")
+    if action == "accept":
+        if driver_id:
+            d = conn.execute("SELECT * FROM drivers WHERE id=?", (driver_id,)).fetchone()
+            if not d or d["status"] != "approved" or not d["rides_approved"]:
+                conn.close()
+                raise HTTPException(400, "Driver not approved for rides")
+        conn.execute("UPDATE orders SET status='accepted', driver_id=?, updated_at=? WHERE id=?",
+                     (driver_id, now_iso(), rid))
+        conn.commit()
+        conn.close()
+        ensure_driver_pay(rid)
+        log_event("order", f"🚗 Ride #{rid} accepted", f"driver={driver_id}")
+        # notify driver
+        try:
+            if driver_id:
+                dd = db()
+                drv = dd.execute("SELECT ntfy_topic FROM drivers WHERE id=?", (driver_id,)).fetchone()
+                dd.close()
+                if drv and drv["ntfy_topic"]:
+                    import urllib.request, urllib.parse, threading
+                    msg = f"🚗 New ride assigned! #{rid} — check your hub."
+                    r2 = urllib.request.Request(
+                        f"https://ntfy.sh/{urllib.parse.quote(drv['ntfy_topic'])}",
+                        data=msg.encode(), headers={"Title": "Drop ride assigned"}, method="POST")
+                    threading.Thread(target=lambda: urllib.request.urlopen(r2, timeout=5).read(),
+                                     daemon=True).start()
+        except Exception:
+            pass
+        return {"ok": True, "status": "accepted"}
+    elif action == "decline":
+        conn.execute("UPDATE orders SET status='cancelled', updated_at=? WHERE id=?",
+                     (now_iso(), rid))
+        conn.commit()
+        conn.close()
+        log_event("order", f"🚗 Ride #{rid} declined", "")
+        return {"ok": True, "status": "cancelled"}
+    conn.close()
+    raise HTTPException(400, "action must be accept or decline")
+
+
+@app.post("/api/rides/{rid}/wait-start")
+def ride_wait_start(rid: int, req: Request):
+    """Driver arrived and is waiting on the customer. Free minutes first, then per-min fee."""
+    d = get_driver(req)
+    if not d:
+        raise HTTPException(401, "Driver login required")
+    conn = db()
+    o = conn.execute("SELECT * FROM orders WHERE id=? AND kind='ride'", (rid,)).fetchone()
+    if not o:
+        conn.close()
+        raise HTTPException(404, "Ride not found")
+    if not d.get("is_owner") and o["driver_id"] != d["id"]:
+        conn.close()
+        raise HTTPException(403, "Not your ride")
+    conn.execute("UPDATE orders SET wait_started_at=?, status='waiting', updated_at=? WHERE id=?",
+                 (now_iso(), now_iso(), rid))
+    conn.commit()
+    conn.close()
+    return {"ok": True, "waiting_since": now_iso()}
+
+
+@app.post("/api/rides/{rid}/wait-stop")
+def ride_wait_stop(rid: int, req: Request):
+    """Driver stops the wait timer. Wait fee = (minutes - free) × per-min rate."""
+    d = get_driver(req)
+    if not d:
+        raise HTTPException(401, "Driver login required")
+    conn = db()
+    o = conn.execute("SELECT * FROM orders WHERE id=? AND kind='ride'", (rid,)).fetchone()
+    if not o:
+        conn.close()
+        raise HTTPException(404, "Ride not found")
+    if not d.get("is_owner") and o["driver_id"] != d["id"]:
+        conn.close()
+        raise HTTPException(403, "Not your ride")
+    if not o["wait_started_at"]:
+        conn.close()
+        raise HTTPException(400, "Wait timer was never started")
+    import datetime
+    start = datetime.datetime.fromisoformat(o["wait_started_at"])
+    mins = max(0.0, (datetime.datetime.now(datetime.timezone.utc) - start).total_seconds() / 60)
+    free = float(get_setting("ride_wait_free_min") or 5)
+    per_min = float(get_setting("ride_wait_per_min") or 0.50)
+    billable = max(0.0, mins - free)
+    fee = round(billable * per_min, 2)
+    new_wait_mins = round((o["wait_minutes"] or 0) + mins, 1)
+    new_wait_fee = round((o["wait_fee"] or 0) + fee, 2)
+    new_total = round((o["total"] or 0) + fee, 2)
+    conn.execute("""UPDATE orders SET wait_minutes=?, wait_fee=?, total=?,
+                    wait_started_at='', status='accepted', updated_at=? WHERE id=?""",
+                 (new_wait_mins, new_wait_fee, new_total, now_iso(), rid))
+    conn.commit()
+    conn.close()
+    return {"ok": True, "waited_min": round(mins, 1), "free_min": free,
+            "billable_min": round(billable, 1), "wait_fee": fee,
+            "total_wait_fee": new_wait_fee}
+
+
+@app.post("/api/operator/rides/{rid}/wait-charge")
+def op_ride_wait_charge(rid: int, x_pin: str = Header(default="")):
+    """Ken creates a Stripe payment link for an unpaid wait fee. Customer pays the link."""
+    check_pin(x_pin)
+    if not STRIPE_LIVE:
+        raise HTTPException(400, "Stripe is not live — can't create a charge link")
+    conn = db()
+    o = conn.execute("SELECT * FROM orders WHERE id=? AND kind='ride'", (rid,)).fetchone()
+    conn.close()
+    if not o:
+        raise HTTPException(404, "Ride not found")
+    wf = o["wait_fee"] or 0
+    if wf <= 0:
+        raise HTTPException(400, "No wait fee on this ride")
+    session = stripe.checkout.Session.create(
+        mode="payment",
+        line_items=[{
+            "price_data": {
+                "currency": "usd",
+                "product_data": {"name": f"Drop Ride #{rid} — wait time fee ({o['wait_minutes'] or 0} min)"},
+                "unit_amount": int(round(wf * 100)),
+            },
+            "quantity": 1,
+        }],
+        success_url=f"https://drop-52yj.onrender.com/track.html?id={rid}",
+        metadata={"drop_order_id": str(rid), "kind": "wait_fee"},
+    )
+    conn = db()
+    conn.execute("UPDATE orders SET stripe_payment_id=? WHERE id=?", (session.id, rid))
+    conn.commit()
+    conn.close()
+    return {"ok": True, "url": session.url, "amount": wf}
+
+
 @app.post("/api/pickup/request")
 async def pickup_request(req: Request):
     """Courier model: customer ordered food directly from the restaurant,
@@ -7036,6 +7422,12 @@ async def pickup_request(req: Request):
             "gas_pct": gas_pct, "tip": tip, "total": total, "miles": round(miles, 1)}
 
 
+
+
+@app.get("/rides.html", response_class=HTMLResponse)
+def ridespage():
+    with open(os.path.join(BASE, "static", "rides.html")) as f:
+        return f.read()
 
 
 @app.get("/partner.html", response_class=HTMLResponse)

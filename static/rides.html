@@ -1,0 +1,213 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Drop Rides — Coming Soon</title>
+<meta name="description" content="Drop Rides: your local ride, pickup to dropoff. Upfront pricing, no surge games. Launching soon.">
+<link rel="icon" href="/static/logo-mark.jpg">
+<link rel="stylesheet" href="/static/styles.css">
+<style>
+  body{background:#0a0a0c;color:#f5f0e6}
+  .gold{color:#d4af37}
+  .lux-hero{text-align:center;padding:48px 20px 24px;position:relative;overflow:hidden}
+  .lux-hero::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse at 50% 0%,rgba(212,175,55,.14),transparent 60%);pointer-events:none}
+  .lux-badge{display:inline-block;border:1px solid #d4af37;color:#d4af37;border-radius:20px;padding:4px 16px;font-size:.75rem;letter-spacing:3px;margin-bottom:16px}
+  .lux-hero h1{font-size:2.6rem;margin:8px 0;letter-spacing:1px}
+  .lux-hero h1 .gold{background:linear-gradient(135deg,#f6e27a,#d4af37,#b8860b);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+  .lux-sub{opacity:.75;max-width:440px;margin:0 auto}
+  .countdown{display:flex;gap:10px;justify-content:center;margin:28px 0}
+  .cd-cell{background:#141416;border:1px solid #2a2a2e;border-radius:12px;min-width:72px;padding:12px 6px}
+  .cd-cell b{font-size:1.9rem;color:#d4af37;display:block}
+  .cd-cell span{font-size:.7rem;opacity:.6;letter-spacing:2px}
+  .lux-card{background:#121214;border:1px solid #26262b;border-radius:16px;max-width:520px;margin:18px auto;padding:22px}
+  .lux-card h2{margin-top:0;color:#d4af37}
+  .fare-row{display:flex;justify-content:space-between;padding:6px 0;font-size:.95rem}
+  .fare-total{border-top:1px solid #2a2a2e;margin-top:8px;padding-top:10px;font-size:1.15rem}
+  .lux-input{background:#0a0a0c;border:1px solid #2a2a2e;color:#f5f0e6;border-radius:10px;padding:12px;width:100%;margin:6px 0;font-size:1rem;box-sizing:border-box}
+  .lux-input:focus{outline:none;border-color:#d4af37}
+  label{font-size:.85rem;opacity:.8}
+  .lux-btn{background:linear-gradient(135deg,#f6e27a,#d4af37);color:#111;border:none;border-radius:12px;padding:14px;font-size:1.05rem;font-weight:700;width:100%;cursor:pointer;margin-top:10px}
+  .lux-btn:disabled{opacity:.5;cursor:default}
+  .lux-btn.ghost{background:transparent;border:1px solid #d4af37;color:#d4af37}
+  .step{display:flex;gap:12px;margin:12px 0;text-align:left}
+  .step .n{background:#d4af37;color:#111;width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;flex-shrink:0}
+  .small{opacity:.65;font-size:.85rem}
+  .ai-note{border-left:3px solid #d4af37;padding:8px 12px;margin:10px 0;background:rgba(212,175,55,.06);font-size:.9rem}
+  .topbar{background:#0a0a0c;border-bottom:1px solid #1e1e22}
+</style>
+</head><body>
+<header class="topbar">
+  <a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg" alt="Drop"><b>Drop</b></a>
+  <a class="acct" href="/account.html">👤 Account</a>
+</header>
+
+<div class="lux-hero">
+  <div class="lux-badge">DROP&nbsp;RIDES</div>
+  <h1>Your ride, <span class="gold">your way.</span></h1>
+  <p class="lux-sub">Pickup to dropoff. Upfront price before you book — no surge games, no surprises. Launching in:</p>
+  <div class="countdown" id="cd">
+    <div class="cd-cell"><b id="cd-d">–</b><span>DAYS</span></div>
+    <div class="cd-cell"><b id="cd-h">–</b><span>HOURS</span></div>
+    <div class="cd-cell"><b id="cd-m">–</b><span>MINUTES</span></div>
+    <div class="cd-cell"><b id="cd-s">–</b><span>SECONDS</span></div>
+  </div>
+  <p class="small" id="launch-label"></p>
+</div>
+
+<div class="lux-card" id="calc-card">
+  <h2>💰 Fare calculator</h2>
+  <p class="small">Real pricing, right now. This is exactly what you'll pay.</p>
+  <label>Pickup address</label>
+  <input class="lux-input" id="c-from" placeholder="Where do we get you?">
+  <label>Dropoff address</label>
+  <input class="lux-input" id="c-to" placeholder="Where are you headed?">
+  <button class="lux-btn ghost" id="c-go">Calculate my fare</button>
+  <div id="c-out" style="margin-top:12px"></div>
+</div>
+
+<div class="lux-card">
+  <h2>✨ How it works</h2>
+  <div class="step"><div class="n">1</div><div><b>Request your ride.</b><br><span class="small">Enter pickup + dropoff. See your exact price upfront.</span></div></div>
+  <div class="step"><div class="n">2</div><div><b>Pay on the site.</b><br><span class="small">Secure checkout. Your driver heads out once it's confirmed.</span></div></div>
+  <div class="step"><div class="n">3</div><div><b>Get dropped off.</b><br><span class="small">Track your driver live. Running late? First 5 minutes of wait time are free.</span></div></div>
+  <p class="small" style="margin-top:12px">Need the driver to wait longer? It's a small per-minute fee after the free 5 — agreed upfront, no surprises.</p>
+</div>
+
+<div class="lux-card" id="book-card" style="display:none">
+  <h2>🚗 Book your ride</h2>
+  <div id="book-form">
+    <label>Pickup address</label>
+    <input class="lux-input" id="b-from" placeholder="Where do we get you?">
+    <label>Dropoff address</label>
+    <input class="lux-input" id="b-to" placeholder="Where are you headed?">
+    <label>Your name</label>
+    <input class="lux-input" id="b-name" placeholder="Your name">
+    <label>Your phone</label>
+    <input class="lux-input" id="b-phone" placeholder="For driver updates" inputmode="tel">
+    <label>Notes <span class="small">(optional — landmarks, gate codes)</span></label>
+    <input class="lux-input" id="b-notes" placeholder="Anything your driver should know">
+    <label>Tip your driver <span class="small">(100% goes to them)</span></label>
+    <div class="row" style="gap:8px;margin:6px 0" id="tips">
+      <button class="lux-btn ghost tipbtn" data-t="0" style="width:auto;padding:8px 16px">$0</button>
+      <button class="lux-btn ghost tipbtn" data-t="1" style="width:auto;padding:8px 16px">$1</button>
+      <button class="lux-btn ghost tipbtn" data-t="3" style="width:auto;padding:8px 16px">$3</button>
+      <button class="lux-btn ghost tipbtn" data-t="5" style="width:auto;padding:8px 16px">$5</button>
+    </div>
+    <div id="b-quote" style="margin:12px 0"></div>
+    <button class="lux-btn ghost" id="b-quote-btn">Get my price</button>
+    <button class="lux-btn" id="b-go" style="display:none">Pay &amp; Request Ride →</button>
+    <p class="small" id="b-msg"></p>
+    <label style="display:flex;gap:8px;align-items:flex-start;margin-top:10px">
+      <input type="checkbox" id="b-wait-ok" style="margin-top:4px">
+      <span class="small">I understand: after 5 free minutes of wait time, a small per-minute wait fee applies if my driver has to wait on me.</span>
+    </label>
+  </div>
+</div>
+
+<div class="lux-card" style="text-align:center">
+  <h2>🪪 Drive for Drop Rides</h2>
+  <p class="small">Your car. Your schedule. Your money.<br>Valid license + insurance + a photo of you and your ride — that's the application.</p>
+  <a href="/drive.html?rides=1" class="lux-btn ghost" style="display:inline-block;text-decoration:none;margin-top:8px">Apply as a rides driver →</a>
+</div>
+
+<script>
+const LAUNCH_AT = new Date('2026-10-13T10:00:00-05:00').getTime();
+const $=id=>document.getElementById(id);
+let tip=0, lastQuote=null;
+
+// countdown
+function tick(){
+  const diff = LAUNCH_AT - Date.now();
+  if(diff<=0){
+    $('cd').style.display='none';
+    $('launch-label').innerHTML='<b class="gold">🚗 Drop Rides is LIVE — book below.</b>';
+    $('book-card').style.display='block';
+    $('calc-card').style.display='none';
+    return;
+  }
+  const d=Math.floor(diff/86400000), h=Math.floor(diff%86400000/3600000),
+        m=Math.floor(diff%3600000/60000), s=Math.floor(diff%60000/1000);
+  $('cd-d').textContent=d; $('cd-h').textContent=String(h).padStart(2,'0');
+  $('cd-m').textContent=String(m).padStart(2,'0'); $('cd-s').textContent=String(s).padStart(2,'0');
+  $('launch-label').textContent='Launching Tuesday, October 13 at 10:00 AM CT';
+}
+setInterval(tick,1000); tick();
+
+document.querySelectorAll('.tipbtn').forEach(b=>{
+  b.onclick=()=>{ tip=parseFloat(b.dataset.t);
+    document.querySelectorAll('.tipbtn').forEach(x=>x.style.borderColor='');
+    b.style.borderColor='#f6e27a'; renderQuote(); };
+});
+
+async function getQuote(from,to){
+  const r=await(await fetch(`/api/rides/quote?pickup_address=${encodeURIComponent(from)}&dropoff_address=${encodeURIComponent(to)}`)).json();
+  if(!r.fare && r.detail) throw new Error(r.detail);
+  return r;
+}
+
+function fareHTML(q, showTip){
+  return `<div class="fare-row"><span>Base fare</span><b>$${q.base_fare.toFixed(2)}</b></div>
+    <div class="fare-row"><span class="small">${q.miles} mi × $${q.per_mile.toFixed(2)}/mi</span><b>$${q.mileage_charge.toFixed(2)}</b></div>
+    <div class="fare-row"><span class="small">⛽ Gas fund (${q.gas_pct}%)</span><b>$${q.gas_fee.toFixed(2)}</b></div>
+    ${showTip?`<div class="fare-row"><span class="small">Driver tip</span><b>$${tip.toFixed(2)}</b></div>`:''}
+    <div class="fare-row fare-total"><span><b>You'll pay</b></span><b class="gold">$${(q.total+(showTip?tip:0)).toFixed(2)}</b></div>
+    ${q.ai_note?`<div class="ai-note">🤖 ${q.ai_note}</div>`:''}
+    ${!q.geocoded?`<p class="small">⚠️ Couldn't map one address — price shown is the base estimate.</p>`:''}`;
+}
+
+$('c-go').onclick=async()=>{
+  const f=$('c-from').value.trim(), t=$('c-to').value.trim();
+  if(!f||!t){$('c-out').innerHTML='<p class="small">Enter both addresses.</p>';return;}
+  $('c-out').innerHTML='<p class="small">Calculating…</p>';
+  try{
+    const q=await getQuote(f,t);
+    $('c-out').innerHTML=fareHTML(q,false);
+  }catch(e){$('c-out').innerHTML=`<p class="small">Error: ${e.message}</p>`;}
+};
+
+$('b-quote-btn').onclick=async()=>{
+  const f=$('b-from').value.trim(), t=$('b-to').value.trim();
+  if(!f||!t){$('b-msg').textContent='Enter pickup and dropoff first.';return;}
+  $('b-quote').innerHTML='<p class="small">Calculating…</p>';
+  try{
+    lastQuote=await getQuote(f,t);
+    renderQuote();
+    $('b-go').style.display='block';
+  }catch(e){$('b-msg').textContent='Error: '+e.message;}
+};
+
+function renderQuote(){
+  if(!lastQuote)return;
+  $('b-quote').innerHTML=fareHTML(lastQuote,true);
+}
+
+$('b-go').onclick=async()=>{
+  if(!$('b-wait-ok').checked){$('b-msg').textContent='Please accept the wait-time terms first.';return;}
+  const body={
+    pickup_address:$('b-from').value.trim(),
+    dropoff_address:$('b-to').value.trim(),
+    customer_name:$('b-name').value.trim(),
+    phone:$('b-phone').value.trim(),
+    notes:$('b-notes').value.trim(),
+    tip:tip,
+  };
+  if(!body.pickup_address||!body.dropoff_address||!body.customer_name){
+    $('b-msg').textContent='Pickup, dropoff, and your name are required.';return;
+  }
+  $('b-go').disabled=true; $('b-go').textContent='Sending…';
+  try{
+    const r=await(await fetch('/api/rides/request',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+    if(!r.ok&&r.order_id===undefined){throw new Error(r.detail||'Failed');}
+    const c=await(await fetch('/api/checkout',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({order_id:r.order_id})})).json();
+    if(c.url){location.href=c.url;}
+    else if(c.dev){location.href=c.pay_url;}
+    else if(c.track_url){location.href=c.track_url;}
+    else{location.href='/track.html?id='+r.order_id;}
+  }catch(e){
+    $('b-msg').textContent='Error: '+(e.message||'network error');
+    $('b-go').disabled=false; $('b-go').textContent='Pay & Request Ride →';
+  }
+};
+</script>
+<script src="/static/drop-live.js"></script>
+</body></html>
