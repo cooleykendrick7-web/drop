@@ -18,7 +18,7 @@
   <div class="orb o2" aria-hidden="true"></div>
   <img class="logo-full" src="/static/logo.jpg" alt="Drop — Pick up. Deliver. Done.">
   <h1>Your favorite food,<br><span class="hl">dropped at your door.</span></h1>
-  <p class="tagline" id="tagline">One flat $3.99 fee. Real-time tracking.</p>
+  <p class="tagline" id="tagline">We drop it at your door.</p>
   <div style="margin:0 0 14px"><select id="citypick" style="max-width:280px;margin:0 auto;font-weight:700"></select></div>
   <p class="small" id="gpsnote" style="margin:-6px 0 12px"></p>
   <div class="row" style="justify-content:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
@@ -41,7 +41,7 @@
   </div>
   <div class="trust">
     <span class="pill">🔒 Secure checkout</span>
-    <span class="pill">🛵 <b>$3.99</b> flat delivery</span>
+    <span class="pill">🛵 <b id="feepill">$3.99</b> delivery</span>
     <span class="pill">📍 <span id="zonepill">Locating you…</span></span>
   </div>
   <div id="openstat" class="small" style="margin-top:10px"></div>
@@ -108,6 +108,7 @@ async function load(){
   const cfg = await (await fetch('/api/config')).json();
   if(cfg.tagline) document.getElementById('tagline').textContent = cfg.tagline;
   if(cfg.delivery_zone) document.getElementById('zonepill').textContent = cfg.delivery_zone;
+  if(cfg.delivery_fee) document.getElementById('feepill').textContent = '$'+Number(cfg.delivery_fee).toFixed(2);
   const os=document.getElementById('openstat');
   os.innerHTML = cfg.open_now
     ? `🟢 <b>Open now</b> · ${cfg.hours_label} · delivering in ${cfg.delivery_zone}`
