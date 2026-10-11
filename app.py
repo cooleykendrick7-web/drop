@@ -7712,6 +7712,59 @@ async def watcher_send_msg(req: Request, x_pin: str = Header(default="")):
         pass
     return {"ok": True}
 
+# ---- transplanted: structured fare quote ----
+@app.post("/api/fare-quote")
+async def fare_quote(req: Request):
+    """Accurate upfront fare estimate. Takes structured from/to addresses,
+    geocodes both, calculates REAL driving distance, returns the price."""
+    body = await req.json()
+    frm = body.get("from") or {}
+    to = body.get("to") or {}
+    kind = body.get("kind", "courier")
+
+    # validate required fields
+    for label, a in (("pickup", frm), ("delivery", to)):
+        if not a.get("street") or not a.get("city") or not a.get("state"):
+            raise HTTPException(400, f"{label}: street, city, and state required")
+
+    def full_addr(a):
+        s = a["street"].strip()
+        if a.get("apt"):
+            s += ", " + a["apt"].strip()
+        s += f", {a['city'].strip()}, {a['state'].strip().upper()}"
+        if a.get("zip"):
+            s += " " + a["zip"].strip()
+        return s
+
+    from_full = full_addr(frm)
+    to_full = full_addr(to)
+
+    # geocode both with structured parts for max accuracy
+    flat, flng = geocode(from_full, frm)
+    tlat, tlng = geocode(to_full, to)
+    if not flat or not tlat:
+        raise HTTPException(400,
+            "Couldn't find one of those addresses. Double-check street, city, state.")
+
+    # real driving distance
+    miles = driving_miles(flat, flng, tlat, tlng)
+    q = calc_quote(flat, flng, tlat, tlng, kind)
+
+    return {
+        "from": from_full, "to": to_full,
+        "distance_miles": miles,
+        "delivery_fee": q["delivery_fee"],
+        "driver_pay": q["driver_pay"],
+        "warnings": q["warnings"],
+        "from_lat": flat, "from_lng": flng,
+        "to_lat": tlat, "to_lng": tlng,
+    }
+
+
+# ---------------- Watcher mode (PIN 5683): read-only live view + chat ----------------
+WATCHER_PIN = "5683"
+
+
 @app.get("/api/rides/quote")
 def rides_quote(pickup_address: str = "", dropoff_address: str = "",
                 plat: float = None, plng: float = None,
