@@ -21,7 +21,9 @@
 <div id="cancelwrap" style="margin-top:12px"></div>
 <script>
 const oid = new URLSearchParams(location.search).get('id');
-const FLOW=[['placed','Order placed','Your order was received'],['confirmed','Confirmed','Your driver is heading to the restaurant'],['picked_up','Picked up','Your driver has your food'],['on_the_way','On the way','Your driver is on the way to you'],['delivered','Delivered','Enjoy!']];
+const FLOW_FOOD=[['placed','Order placed','Your order was received'],['confirmed','Confirmed','Your driver is heading to the restaurant'],['picked_up','Picked up','Your driver has your food'],['on_the_way','On the way','Your driver is on the way to you'],['delivered','Delivered','Enjoy!']];
+const FLOW_COURIER=[['placed','Request received','Your pickup request was received'],['confirmed','Confirmed','Your driver is heading to the pickup'],['picked_up','Picked up','Your driver has your items'],['on_the_way','On the way','Your driver is on the way to you'],['delivered','Delivered','Enjoy!']];
+let FLOW=FLOW_FOOD;
 let map=null, driverMarker=null;
 const emojiIcon=e=>L.divIcon({className:'leaflet-divicon',html:e,iconSize:[30,30],iconAnchor:[15,15]});
 function drawMap(o){
@@ -36,7 +38,7 @@ function drawMap(o){
       {attribution:'© OpenStreetMap © CARTO',maxZoom:19}).addTo(map);
   }
   if(o.restaurant_lat && !map._restM){
-    map._restM=L.marker([o.restaurant_lat,o.restaurant_lng],{icon:emojiIcon('🍔')})
+    map._restM=L.marker([o.restaurant_lat,o.restaurant_lng],{icon:emojiIcon(o.kind==='courier'?'📦':'🍔')})
       .addTo(map).bindPopup('<b>'+o.restaurant+'</b><br>'+(o.restaurant_address||''));
   }
   if(o.cust_lat && !map._custM){
@@ -61,6 +63,7 @@ function drawMap(o){
 }
 async function poll(){
   const o = await (await fetch('/api/orders/'+oid+'/public')).json();
+  FLOW = o.kind==='courier' ? FLOW_COURIER : FLOW_FOOD;
   if(o.id===undefined){document.body.innerHTML='<p>Order not found.</p>';return;}
   document.getElementById('oid').textContent='#'+o.id;
   document.getElementById('rname').textContent=o.restaurant+' · '+(o.paid?'Paid ✓':'Payment pending');
