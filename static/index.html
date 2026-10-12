@@ -1,10 +1,10 @@
 <!DOCTYPE html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Drop — Your Ride in Bismarck & Mandan</title>
-<meta name="description" content="Drop is Bismarck-Mandan's rideshare. Enter pickup + dropoff, see your exact fare, pay on the site, track your driver live.">
-<meta property="og:title" content="Drop — Your Ride in Bismarck & Mandan">
-<meta property="og:image" content="/static/logo.jpg">
-<link rel="icon" href="/static/logo-mark.jpg">
+<title>Drop — Your Ride, Anywhere</title>
+<meta name="description" content="Drop is your local rideshare. Enter pickup + dropoff, see your exact fare, pay on the site, track your driver live.">
+<meta property="og:title" content="Drop — Your Ride, Anywhere">
+<meta property="og:image" content="/static/logo.jpg?v=2">
+<link rel="icon" href="/static/logo-mark.jpg?v=2">
 <link rel="stylesheet" href="/static/styles.css">
 <style>
 .hero{text-align:center;padding:40px 20px;background:linear-gradient(135deg,#1a0f00,#0a0a0c);border-radius:20px;margin:16px 0}
@@ -38,13 +38,13 @@
 </head><body>
 
 <header class="topbar">
-  <a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg" alt="Drop"><b>Drop</b></a>
+  <a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg?v=2" alt="Drop"><b>Drop</b></a>
   <a class="acct" href="/account.html">👤 Account</a>
 </header>
 
 <div class="hero">
   <h1>Welcome to Drop.<br><span class="hl">Choose your destination today.</span></h1>
-  <p class="tagline">Bismarck & Mandan's rideshare. Real drivers, upfront pricing, live tracking.</p>
+  <p class="tagline">Your local rideshare. Real drivers, upfront pricing, live tracking.</p>
 </div>
 
 <div class="farebox" id="book">
@@ -52,14 +52,16 @@
   <p class="small">Enter where you're going — see your exact price before you ride.</p>
 
   <div style="border:1px solid var(--line);border-radius:10px;padding:12px;margin:8px 0">
-    <b class="small">📍 PICKUP — where are you?</b>
-    <button class="btn ghost small" id="f-gps" style="width:auto;margin-left:8px;padding:6px 12px">📍 Use my location</button>
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+      <b class="small">📍 PICKUP — where are you?</b>
+      <button class="btn" id="f-gps" style="width:auto;padding:10px 18px;font-size:.95rem">📍 Use my GPS location</button>
+    </div>
     <div class="addr-grid" style="margin-top:8px">
       <div class="full"><label>Street address <span class="small">(optional if using GPS)</span></label><input id="f-pickup-street" placeholder="123 Main St — or tap 📍 above"></div>
       <div><label>Apt / Unit <span class="small">(optional)</span></label><input id="f-pickup-apt" placeholder="Apt 4B"></div>
-      <div><label>City</label><input id="f-pickup-city" placeholder="Bismarck" value="Bismarck"></div>
-      <div><label>State</label><input id="f-pickup-state" placeholder="ND" maxlength="2" value="ND" style="text-transform:uppercase"></div>
-      <div><label>ZIP</label><input id="f-pickup-zip" placeholder="58501" inputmode="numeric"></div>
+      <div><label>City</label><input id="f-pickup-city" placeholder="Your city"></div>
+      <div><label>State</label><input id="f-pickup-state" placeholder="ST" maxlength="2" style="text-transform:uppercase"></div>
+      <div><label>ZIP</label><input id="f-pickup-zip" placeholder="ZIP" inputmode="numeric"></div>
     </div>
     <p class="small" id="f-gps-msg" style="margin:4px 0 0"></p>
   </div>
@@ -69,9 +71,9 @@
     <div class="addr-grid" style="margin-top:8px">
       <div class="full"><label>Street address *</label><input id="f-drop-street" placeholder="456 Oak Ave"></div>
       <div><label>Apt / Unit <span class="small">(optional)</span></label><input id="f-drop-apt" placeholder="Suite 200"></div>
-      <div><label>City *</label><input id="f-drop-city" placeholder="Mandan" value="Mandan"></div>
-      <div><label>State *</label><input id="f-drop-state" placeholder="ND" maxlength="2" value="ND" style="text-transform:uppercase"></div>
-      <div><label>ZIP</label><input id="f-drop-zip" placeholder="58554" inputmode="numeric"></div>
+      <div><label>City *</label><input id="f-drop-city" placeholder="Destination city"></div>
+      <div><label>State *</label><input id="f-drop-state" placeholder="ST" maxlength="2" style="text-transform:uppercase"></div>
+      <div><label>ZIP</label><input id="f-drop-zip" placeholder="ZIP" inputmode="numeric"></div>
     </div>
   </div>
 
@@ -91,7 +93,7 @@
 </div>
 
 <div class="card">
-  <b>📍 Serving Bismarck & Mandan, ND</b>
+  <b>📍 Serving your city — wherever our drivers are</b>
   <p class="small">Local drivers. Upfront prices. No surge nonsense.</p>
   <div style="margin-top:8px"><a href="/#book">🚗 Book a ride</a> · <a href="/drive.html">🚗 Drive for Drop</a> · <a href="/investors.html">💰 Investors</a> · <a href="/terms">Terms</a></div>
 </div>
@@ -158,19 +160,84 @@ $('calc-fare').onclick=async()=>{
       <div class="price">$${r.total.toFixed(2)}</div>
       <div class="small">${r.miles} miles · Base $${r.base_fare.toFixed(2)} + $${r.mileage_charge.toFixed(2)} mileage</div>
       <div style="margin-top:16px;text-align:left">
-        <label style="display:block;font-size:.85rem;font-weight:700;margin:8px 0 4px">Your name *</label>
-        <input id="h-name" placeholder="Your name" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--line);background:#0a0a0c;color:#fff;box-sizing:border-box">
-        <label style="display:block;font-size:.85rem;font-weight:700;margin:8px 0 4px">Your phone *</label>
-        <input id="h-phone" placeholder="(701) 555-1234" inputmode="tel" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--line);background:#0a0a0c;color:#fff;box-sizing:border-box">
+        <div style="display:flex;gap:8px;margin-bottom:12px">
+          <button class="btn ghost small htab on" data-mode="guest" style="flex:1">👤 Book as guest</button>
+          <button class="btn ghost small htab" data-mode="login" style="flex:1">🔑 Log in & book</button>
+        </div>
+        <div id="h-guest-form">
+          <label style="display:block;font-size:.85rem;font-weight:700;margin:8px 0 4px">Your name *</label>
+          <input id="h-name" placeholder="Your name" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--line);background:#0a0a0c;color:#fff;box-sizing:border-box">
+          <label style="display:block;font-size:.85rem;font-weight:700;margin:8px 0 4px">Your phone *</label>
+          <input id="h-phone" placeholder="(701) 555-1234" inputmode="tel" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--line);background:#0a0a0c;color:#fff;box-sizing:border-box">
+        </div>
+        <div id="h-login-form" style="display:none">
+          <label style="display:block;font-size:.85rem;font-weight:700;margin:8px 0 4px">Phone *</label>
+          <input id="h-li-phone" placeholder="(701) 555-1234" inputmode="tel" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--line);background:#0a0a0c;color:#fff;box-sizing:border-box">
+          <label style="display:block;font-size:.85rem;font-weight:700;margin:8px 0 4px">Password *</label>
+          <input id="h-li-pw" type="password" placeholder="Your password" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--line);background:#0a0a0c;color:#fff;box-sizing:border-box">
+          <button class="btn ghost small" id="h-li-go" style="width:100%;margin-top:8px">Log in</button>
+          <p class="small" id="h-li-msg" style="text-align:center"></p>
+        </div>
         <label style="display:block;font-size:.85rem;font-weight:700;margin:8px 0 4px">Tip your driver <span class="small">(100% to them)</span></label>
         <div style="display:flex;gap:8px;margin:4px 0">
           ${[0,1,3,5].map(t=>`<button class="btn ghost small htip" data-t="${t}" style="flex:1;padding:8px">$${t}</button>`).join('')}
+        </div>
+        <div style="display:flex;gap:8px;margin:12px 0 4px">
+          <button class="btn ghost small hwhen on" data-w="now" style="flex:1">⚡ Ride now</button>
+          <button class="btn ghost small hwhen" data-w="later" style="flex:1">📅 Schedule for later</button>
+        </div>
+        <div id="h-sched-wrap" style="display:none">
+          <label style="display:block;font-size:.85rem;font-weight:700;margin:8px 0 4px">Pickup date & time *</label>
+          <input type="datetime-local" id="h-sched-dt" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--line);background:#0a0a0c;color:#fff;box-sizing:border-box">
+          <p class="small" style="opacity:.7">Book up to 30 days ahead · pay now, price is locked in</p>
         </div>
         <button class="btn" id="h-book" style="width:100%;margin-top:12px">🚗 Book Now →</button>
         <p class="small" id="h-msg" style="text-align:center"></p>
         <p class="small" style="opacity:.6;text-align:center">🔒 Secure payment via Stripe · Driver auto-assigned</p>
       </div>
     </div>`;
+    // tab switching
+    let bookMode='guest';
+    document.querySelectorAll('.htab').forEach(t=>{
+      t.onclick=()=>{
+        bookMode=t.dataset.mode;
+        document.querySelectorAll('.htab').forEach(x=>x.classList.remove('on'));
+        t.classList.add('on');
+        $('h-guest-form').style.display=bookMode==='guest'?'block':'none';
+        $('h-login-form').style.display=bookMode==='login'?'block':'none';
+      };
+    });
+    // ride now vs schedule for later
+    document.querySelectorAll('.hwhen').forEach(t=>{
+      t.onclick=()=>{
+        document.querySelectorAll('.hwhen').forEach(x=>x.classList.remove('on'));
+        t.classList.add('on');
+        const later=t.dataset.w==='later';
+        $('h-sched-wrap').style.display=later?'block':'none';
+        $('h-book').textContent=later?'📅 Schedule & Pay →':'🚗 Book Now →';
+      };
+    });
+    // login handler
+    $('h-li-go').onclick=async()=>{
+      const phone=$('h-li-phone').value.trim(), pw=$('h-li-pw').value;
+      if(!phone||!pw){$('h-li-msg').textContent='Enter phone and password.';return;}
+      try{
+        const r=await(await fetch('/api/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({phone,password:pw})})).json();
+        if(r.ok){
+          // switch to guest form with pre-filled name/phone
+          bookMode='guest';
+          document.querySelectorAll('.htab').forEach(x=>x.classList.remove('on'));
+          document.querySelector('.htab[data-mode="guest"]').classList.add('on');
+          $('h-guest-form').style.display='block';
+          $('h-login-form').style.display='none';
+          $('h-name').value=r.user.name||'';
+          $('h-phone').value=r.user.phone||'';
+          $('h-li-msg').textContent='✅ Logged in as '+r.user.name;
+          $('h-li-msg').style.color='#4ade80';
+        } else { $('h-li-msg').textContent='❌ '+(r.detail||'Login failed'); }
+      }catch(e){ $('h-li-msg').textContent='❌ Connection error.'; }
+    };
     document.querySelectorAll('.htip').forEach(b=>{
       b.onclick=()=>{ homeTip=parseFloat(b.dataset.t);
         document.querySelectorAll('.htip').forEach(x=>x.style.borderColor='');
@@ -184,6 +251,14 @@ async function bookHomeRide(){
   const name=$('h-name').value.trim(), phone=$('h-phone').value.trim();
   if(!name||!phone){$('h-msg').textContent='⚠️ Name and phone required.';return;}
   if(!homeQuote||!homeAddrs){$('h-msg').textContent='⚠️ Calculate your fare first.';return;}
+  // schedule mode?
+  const schedMode=document.querySelector('.hwhen[data-w="later"]')?.classList.contains('on');
+  let schedAt=null;
+  if(schedMode){
+    const v=$('h-sched-dt').value;
+    if(!v){$('h-msg').textContent='⚠️ Pick a date and time for your ride.';return;}
+    schedAt=new Date(v).toISOString();
+  }
   $('h-book').disabled=true; $('h-book').textContent='Processing…';
   try{
     const body={
@@ -191,14 +266,24 @@ async function bookHomeRide(){
       ...(homeAddrs.pGps?{pickup_lat:homeAddrs.pGps.lat, pickup_lng:homeAddrs.pGps.lng}:{}),
       customer_name:name, phone:phone, tip:homeTip,
     };
-    const r=await(await fetch('/api/rides/checkout',{method:'POST',
+    const endpoint=schedMode?'/api/rides/schedule':'/api/rides/checkout';
+    if(schedMode) body.scheduled_at=schedAt;
+    const r=await(await fetch(endpoint,{method:'POST',
       headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
     if(r.url){ location.href=r.url; return; }
-    if(r.dev){ location.href=r.pay_url; return; }
+    if(r.dev){
+      // scheduled dev pay → confirm payment then go to scheduled page
+      if(schedMode){
+        const p=await(await fetch(r.pay_url,{method:'POST'})).json();
+        if(p.ok){ location.href=p.track_url; return; }
+      } else { location.href=r.pay_url; return; }
+    }
     throw new Error(r.detail||'Checkout failed');
   }catch(e){
     $('h-msg').textContent='❌ '+(e.message||'Payment failed.');
-    $('h-book').disabled=false; $('h-book').textContent='🚗 Book Now →';
+    $('h-book').disabled=false;
+    const later=document.querySelector('.hwhen[data-w="later"]')?.classList.contains('on');
+    $('h-book').textContent=later?'📅 Schedule & Pay →':'🚗 Book Now →';
   }
 }
 
@@ -230,7 +315,7 @@ async function dropperReply(q){
     return "Fares are simple: $4.99 base + $2.00 per mile. Use the calculator above to see your exact price before you book — no surprises!";
   }
   if(l.includes('where')||l.includes('area')||l.includes('city')){
-    return "We serve Bismarck and Mandan, North Dakota. More cities coming soon!";
+    return "We serve any city where our drivers are available. Enter your trip to check!";
   }
   // fallback to server AI
   try{
@@ -250,8 +335,8 @@ $('dropper-send').onclick=async()=>{
 $('dropper-text').addEventListener('keypress',e=>{if(e.key==='Enter')$('dropper-send').click();});
 </script>
 <footer style="text-align:center;padding:24px 16px 32px;margin-top:32px;border-top:1px solid #1e1e22">
-  <p class="small" style="opacity:.5;margin-bottom:12px">© 2026 Drop Services LLC · Bismarck & Mandan, ND</p>
+  <p class="small" style="opacity:.5;margin-bottom:12px">© 2026 Drop Services LLC</p>
   <a href="/dash.html" style="display:inline-block;padding:12px 24px;border:1px solid #333;border-radius:10px;color:#888;text-decoration:none;font-size:.85rem">🔐 Operator Portal</a>
 </footer>
-<script src="/static/seasons.js"></script>
+<script src="/static/seasonal.js"></script>
 </body></html>

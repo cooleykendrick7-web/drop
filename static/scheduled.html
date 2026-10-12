@@ -1,0 +1,91 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Drop — Scheduled Ride</title>
+<link rel="icon" href="/static/logo-mark.jpg?v=2">
+<link rel="stylesheet" href="/static/styles.css">
+<style>
+.countdown{font-size:2rem;font-weight:900;text-align:center;margin:12px 0;color:var(--acc)}
+.detail{background:#141416;border:1px solid var(--line);border-radius:14px;padding:14px;margin:10px 0}
+</style>
+</head><body>
+<header class="topbar"><a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg?v=2" alt="Drop"><b>Drop</b></a>
+<a href="/account.html" style="font-size:.85rem">My account</a></header>
+<div style="max-width:560px;margin:16px auto;padding:0 16px" id="wrap"><p>Loading…</p></div>
+<script>
+const $=id=>document.getElementById(id);
+const sid=new URLSearchParams(location.search).get('id');
+let ride=null;
+
+async function load(){
+  try{
+    ride=await(await fetch('/api/rides/scheduled/'+sid)).json();
+    if(ride.detail){$('wrap').innerHTML='<p>Ride not found.</p>';return;}
+    render();
+  }catch(e){$('wrap').innerHTML='<p>Could not load. Check your connection.</p>';}
+}
+
+function render(){
+  const when=new Date(ride.scheduled_at);
+  const paid=ride.payment_status==='paid';
+  const claimed=!!ride.driver_name;
+  $('wrap').innerHTML=`
+    <h1>📅 ${paid?'Ride scheduled!':'Complete payment'}</h1>
+    ${paid?`<div class="countdown" id="cd">—</div>
+    <p class="small" style="text-align:center">until your driver heads your way</p>`:
+    `<div class="card" style="border-color:#f66"><b>⚠️ Payment pending</b><br>
+     <span class="small">This ride isn't booked until it's paid.</span></div>`}
+    <div class="detail">
+      <div><b>📍 Pickup:</b> ${ride.pickup_address}</div>
+      <div style="margin-top:6px"><b>🏠 Dropoff:</b> ${ride.dropoff_address}</div>
+      <div style="margin-top:6px"><b>🕐 When:</b> ${when.toLocaleString()}</div>
+      <div style="margin-top:6px"><b>💰 Total paid:</b> $${ride.total.toFixed(2)}</div>
+      <div style="margin-top:6px"><b>👨‍✈️ Driver:</b> ${claimed?ride.driver_name:'Will be assigned before your ride'}</div>
+    </div>
+    ${ride.status==='activated'&&ride.activated_ride_id?
+      `<a href="/track-ride.html?id=${ride.activated_ride_id}" class="btn" style="display:block;text-align:center;text-decoration:none">🚗 Track your ride →</a>`:''}
+    ${(ride.status==='scheduled'||ride.status==='claimed')?`
+    <div class="card">
+      <h3 style="margin-top:0">Change plans?</h3>
+      <label class="small">New date/time</label>
+      <input type="datetime-local" id="newdt" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--line);background:#0a0a0c;color:#fff;box-sizing:border-box">
+      <button class="btn ghost" id="resched" style="width:100%;margin-top:8px">📅 Reschedule</button>
+      <button class="btn ghost" id="cancel" style="width:100%;margin-top:8px;border-color:#f66;color:#f66">Cancel ride</button>
+      <p class="small" style="opacity:.7">Free cancellation up to 2 hours before pickup. Inside 2 hours, 50% cancellation fee applies.</p>
+      <p class="small" id="msg" style="text-align:center"></p>
+    </div>`:''}
+    ${ride.status==='cancelled'?'<div class="card" style="border-color:#f66"><b>Cancelled.</b> Refund processed if you paid.</div>':''}
+  `;
+  // countdown
+  if(paid){
+    const tick=()=>{
+      const el=$('cd'); if(!el)return;
+      const ms=new Date(ride.scheduled_at)-Date.now();
+      if(ms<=0){el.textContent='🚗 Any moment now!';return;}
+      const h=Math.floor(ms/3600000), m=Math.floor(ms%3600000/60000), s=Math.floor(ms%60000/1000);
+      const d=Math.floor(h/24);
+      el.textContent=d>0?`${d}d ${h%24}h ${m}m`:`${h}h ${m}m ${s}s`;
+    };
+    tick(); setInterval(tick,1000);
+  }
+  const rs=$('resched');
+  if(rs) rs.onclick=async()=>{
+    const v=$('newdt').value;
+    if(!v){$('msg').textContent='Pick a new date/time.';return;}
+    const r=await(await fetch('/api/rides/scheduled/'+sid+'/reschedule',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({scheduled_at:new Date(v).toISOString()})})).json();
+    if(r.ok){$('msg').textContent='✅ Rescheduled!';load();}
+    else $('msg').textContent='❌ '+(r.detail||'Failed');
+  };
+  const cb=$('cancel');
+  if(cb) cb.onclick=async()=>{
+    if(!confirm('Cancel this scheduled ride?'))return;
+    const r=await(await fetch('/api/rides/scheduled/'+sid+'/cancel',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({})})).json();
+    if(r.ok){$('msg').textContent=`✅ Cancelled. Refunded $${r.refunded.toFixed(2)}${r.fee?` (fee $${r.fee.toFixed(2)})`:''}`;load();}
+    else $('msg').textContent='❌ '+(r.detail||'Failed');
+  };
+}
+load();
+</script>
+<script src="/static/seasonal.js"></script>
+</body></html>

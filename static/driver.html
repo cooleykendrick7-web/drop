@@ -1,11 +1,11 @@
 <!DOCTYPE html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Dropper Portal — Drive for Drop</title>
-<link rel="icon" href="/static/logo-mark.jpg">
+<link rel="icon" href="/static/logo-mark.jpg?v=2">
 <link rel="stylesheet" href="/static/styles.css">
 <style>.tabs{display:flex;gap:6px;margin:10px 0}.tabs button{flex:1;background:#2a2a33;color:#fff;border:0;border-radius:10px;padding:11px 4px;font-weight:700}.tabs button.on{background:var(--acc)}.tab{display:none}.tab.on{display:block}</style>
 </head><body>
-<header class="topbar"><a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg" alt="Drop"><b>Drop</b><span class="tag">dropper</span></a><span class="small" id="dname"></span></header>
+<header class="topbar"><a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg?v=2" alt="Drop"><b>Drop</b><span class="tag">dropper</span></a><span class="small" id="dname"></span></header>
 
 <div id="login" class="card">
   <h1>Dropper login</h1>
@@ -37,6 +37,7 @@
 
   <div class="tabs">
     <button class="on" data-t="avail">Available</button>
+    <button data-t="sched">📅 Scheduled</button>
     <button data-t="del">My deliveries</button>
     <button data-t="msg">Inbox <span id="msgbadge"></span></button>
     <button data-t="earn">Earnings</button>
@@ -44,6 +45,7 @@
   </div>
 
   <div class="tab on" id="t-avail"><div id="alist"><p class="small">Go online to see available pickups.</p></div></div>
+  <div class="tab" id="t-sched"><div id="schedlist"><p class="small">Loading scheduled rides…</p></div></div>
   <div class="tab" id="t-del"><div id="olist"><p class="small">Loading…</p></div></div>
 
   <div class="tab" id="t-msg">
@@ -94,6 +96,7 @@ document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
   b.classList.add('on'); $('t-'+b.dataset.t).classList.add('on');
   if(b.dataset.t==='earn') loadEarn(); if(b.dataset.t==='me') loadMe();
   if(b.dataset.t==='msg') loadMsgs(); if(b.dataset.t==='avail') loadAvail();
+  if(b.dataset.t==='sched') loadSched();
 });
 
 // online/offline + stats
@@ -123,9 +126,9 @@ async function loadAvail(){
   const a=await (await fetch('/api/drivers/available')).json();
   $('alist').innerHTML='<h2>Available pickups ('+a.length+')</h2>'+(a.map(o=>`
     <div class="card order">
-      <div class="row"><b>#${o.id} · ${o.kind==='courier'?'📦 Pickup':'🚗 Ride'}</b>
+      <div class="row"><b>#${o.id} · ${o.kind==='courier'?'📦 Pickup':'🍔 Food'}</b>
         <b>$${((o.delivery_fee||0)+(o.tip||0)).toFixed(2)}</b></div>
-      <p><b>Pick up:</b> ${o.pickup_name||''}<br>
+      <p><b>Pick up:</b> ${o.kind==='courier'?(o.pickup_name||''):o.restaurant_name||''}<br>
         <span class="small">📍 ${o.kind==='courier'?(o.pickup_address||''):''}</span></p>
       <p><b>Drop at:</b> ${o.customer_name}<br><span class="small">🏠 ${o.address||''}</span></p>
       <p class="small">Fee $${(o.delivery_fee||0).toFixed(2)} + tip $${(o.tip||0).toFixed(2)}</p>
@@ -134,6 +137,29 @@ async function loadAvail(){
         <button class="btn small ghost" style="flex:1" onclick="declineOrder(${o.id})">❌ Decline</button>
       </div>
     </div>`).join('')||'<p class="small">No pickups available right now. Stay online!</p>');
+}
+async function loadSched(){
+  try{
+    const r=await(await fetch('/api/rides/scheduled/available')).json();
+    $('schedlist').innerHTML='<h2>📅 Upcoming scheduled rides ('+r.rides.length+')</h2>'+
+      '<p class="small">Claim a ride ahead of time — you get notified 1 hour and 15 minutes before pickup.</p>'+
+      (r.rides.map(s=>{
+        const when=new Date(s.scheduled_at);
+        return `<div class="card" style="border-color:var(--acc);margin:10px 0">
+          <div class="row"><b>📅 ${when.toLocaleDateString()} ${when.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}</b>
+            <b style="color:#4ade80">$${s.driver_pay.toFixed(2)}</b></div>
+          <p class="small">📍 ${s.pickup_address}<br>🏠 ${s.dropoff_address}</p>
+          <p class="small">${s.miles.toFixed(1)} miles · paid ✅</p>
+          <button class="btn small" style="width:100%" onclick="claimSched(${s.id})">✅ Claim this ride</button>
+        </div>`;
+      }).join('')||'<p class="small">No scheduled rides to claim right now.</p>');
+  }catch(e){$('schedlist').innerHTML='<p class="small">Could not load. Log in as a driver first.</p>';}
+}
+async function claimSched(id){
+  if(!confirm('Claim this scheduled ride? You\'ll be notified before pickup.'))return;
+  const r=await(await fetch('/api/rides/scheduled/'+id+'/claim',{method:'POST'})).json();
+  if(r.ok){alert('✅ Ride claimed!');loadSched();}
+  else alert('❌ '+(r.detail||'Could not claim'));
 }
 async function acceptOrder(id){
   const r=await fetch('/api/drivers/orders/'+id+'/accept',{method:'POST'});
@@ -168,7 +194,7 @@ async function loadOrders(){
     const restDest=o.plat?`${o.plat},${o.plng}`:encodeURIComponent(o.pickup_addr||'');
     const custDest=o.cust_lat?`${o.cust_lat},${o.cust_lng}`:encodeURIComponent(o.address||'');
     return `<div class="card order">
-      <div class="row"><b>#${o.id} · ${o.kind==='courier'?'📦 Courier':'🚗 Ride'}</b>
+      <div class="row"><b>#${o.id} · ${o.kind==='courier'?'📦 Courier':'🍔 Food'}</b>
         <span class="badge">${o.status_label}</span></div>
       <p><b>Pick up:</b> ${o.pickup_label}<br><span class="small">📍 ${o.pickup_addr||''}</span></p>
       ${o.kind==='courier'?`<p><b>Items:</b> ${o.items.map(i=>i.name).join(', ')}</p>`:o.items.map(i=>`<div class="row small"><span>${i.qty}× ${i.name}</span></div>`).join('')}
@@ -263,5 +289,5 @@ $('locToggle').onclick=()=>{
 
 setInterval(()=>{ if($('app').style.display!=='none') loadOrders(); },10000);
 </script>
-<script src="/static/seasons.js"></script>
-<script src="/static/chat.js"></script></body></html>
+<script src="/static/chat.js"></script><script src="/static/seasonal.js"></script>
+</body></html>
