@@ -50,6 +50,10 @@
 <div class="farebox" id="book">
   <h2 style="margin-top:0">💰 Ride fare calculator</h2>
   <p class="small">Enter where you're going — see your exact price before you ride.</p>
+  <div id="saved-chips" style="display:none;margin:8px 0">
+    <div class="small" style="font-weight:700;margin-bottom:6px">⭐ Your saved places</div>
+    <div id="saved-chips-row" style="display:flex;gap:8px;flex-wrap:wrap"></div>
+  </div>
 
   <div style="border:1px solid var(--line);border-radius:10px;padding:12px;margin:8px 0">
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
@@ -126,6 +130,31 @@ function buildAddr(p){
 
 // GPS for homepage pickup — optional, fills in location automatically
 let fGps=null;
+
+// saved places quick-pick
+(async()=>{
+  try{
+    const r=await(await fetch('/api/places/mine')).json();
+    if(r.places&&r.places.length){
+      $('saved-chips').style.display='block';
+      $('saved-chips-row').innerHTML=r.places.map(p=>
+        `<button class="btn ghost small" data-pid="${p.id}" style="width:auto;padding:8px 14px">⭐ ${p.label}</button>`
+      ).join('');
+      document.querySelectorAll('#saved-chips-row button').forEach(b=>{
+        b.onclick=()=>{
+          const p=r.places.find(x=>x.id==b.dataset.pid);
+          if(!p)return;
+          // fill dropoff with saved place (most common use)
+          const parts=p.address.split(',');
+          $('f-drop-street').value=(parts[0]||'').trim();
+          $('f-drop-city').value=(parts[1]||'').trim();
+          $('f-drop-state').value=(parts[2]||'').trim().split(' ')[0]||'';
+          document.getElementById('book').scrollIntoView({behavior:'smooth'});
+        };
+      });
+    }
+  }catch(e){}
+})();
 $('f-gps').onclick=()=>{
   const msg=$('f-gps-msg');
   if(!navigator.geolocation){msg.textContent='GPS not supported on this device.';return;}

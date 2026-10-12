@@ -1,0 +1,191 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Drop — Track Your Ride</title>
+<link rel="icon" href="/static/logo-mark.jpg?v=2">
+<link rel="stylesheet" href="/static/styles.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+#map{height:300px;border-radius:16px;margin:12px 0;z-index:0}
+.leaflet-divicon{background:none;border:none;font-size:28px;text-align:center}
+.statuscard{background:#141416;border:1px solid var(--line);border-radius:16px;padding:20px;margin:12px 0;text-align:center}
+.statuscard .big{font-size:1.4rem;font-weight:800;margin:8px 0}
+.drivercard{background:#141416;border:1px solid var(--acc);border-radius:16px;padding:16px;margin:12px 0}
+.step{display:flex;gap:12px;margin:10px 0;align-items:center}
+.step .dot{width:32px;height:32px;border-radius:50%;background:#222;display:flex;align-items:center;justify-content:center;font-size:1.1rem;flex-shrink:0}
+.step.done .dot{background:var(--acc)}
+.step .lbl{font-weight:700}
+.step .sub{font-size:.85rem;opacity:.7}
+</style>
+</head><body>
+<header class="topbar"><a class="brand" href="/"><img class="brandmark" src="/static/logo-mark.jpg?v=2" alt="Drop"><b>Drop</b></a></header>
+<div style="max-width:560px;margin:16px auto;padding:0 16px">
+  <h1>🚗 Ride <span id="rid"></span></h1>
+  <div class="statuscard" id="status"><p>Loading…</p></div>
+  <div id="map"></div>
+  <div class="drivercard" id="driver" style="display:none"></div>
+  <div id="steps"></div>
+  <div id="actions" style="margin:16px 0"></div>
+  <button id="sosbtn" style="width:100%;margin:8px 0;padding:14px;border-radius:12px;border:2px solid #f66;background:#2a0a0a;color:#f66;font-weight:900;font-size:1rem">🆘 EMERGENCY SOS</button>
+  <p class="small" style="text-align:center;opacity:.6">Only tap in a real emergency. Alerts Drop immediately with your location.</p>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+const rid=new URLSearchParams(location.search).get('id');
+$('rid').textContent='#'+rid;
+let map, markers={};
+
+const FLOW=[
+  ['requested','📋 Ride booked','Looking for your driver…'],
+  ['assigned','👨‍✈️ Driver assigned','Your driver is on the way to you'],
+  ['in_progress','🚗 On the way','You\'re headed to your destination'],
+  ['completed','✅ Arrived','Thanks for riding with Drop!'],
+];
+
+async function load(){
+  try{
+    const r=await(await fetch('/api/rides/'+rid)).json();
+    if(r.detail){document.body.innerHTML='<p style="padding:20px">Ride not found.</p>';return;}
+    render(r);
+    // get driver location if assigned
+    if(r.driver_id){
+      try{
+        const d=await(await fetch('/api/rides/'+rid+'/driver-loc')).json();
+        if(d.lat) updateDriverLoc(d.lat, d.lng, r);
+      }catch(e){}
+    }
+  }catch(e){}
+}
+
+function render(r){
+  // status
+  const idx=FLOW.findIndex(s=>s[0]===r.status);
+  $('status').innerHTML=`
+    <div style="font-size:2.5rem">${FLOW[Math.max(0,idx)][0]==='completed'?'✅':FLOW[Math.max(0,idx)][0]==='in_progress'?'🚗':FLOW[Math.max(0,idx)][0]==='assigned'?'👨‍✈️':'📋'}</div>
+    <div class="big">${FLOW[Math.max(0,idx)][1]}</div>
+    <div class="small">${FLOW[Math.max(0,idx)][2]}</div>
+    <div class="small" style="margin-top:8px;opacity:.7">$${r.total.toFixed(2)} · ${r.miles.toFixed(1)} miles</div>`;
+
+  // map
+  if(!map){
+    map=L.map('map').setView([r.pickup_lat||46.81, r.pickup_lng||-100.78], 13);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);
+  }
+  // pickup pin
+  if(r.pickup_lat && !markers.pickup){
+    markers.pickup=L.marker([r.pickup_lat,r.pickup_lng],{icon:L.divIcon({html:'📍',className:'leaflet-divicon'})}).addTo(map).bindPopup('Pickup');
+  }
+  // dropoff pin
+  if(r.dropoff_lat && !markers.drop){
+    markers.drop=L.marker([r.dropoff_lat,r.dropoff_lng],{icon:L.divIcon({html:'🏠',className:'leaflet-divicon'})}).addTo(map).bindPopup('Dropoff');
+  }
+  if(markers.pickup&&markers.drop){
+    map.fitBounds(L.latLngBounds([markers.pickup.getLatLng(),markers.drop.getLatLng()]).pad(0.3));
+  }
+
+  // driver info + car
+  if(r.driver_name){
+    $('driver').style.display='block';
+    $('driver').innerHTML=`
+      <b>👨‍✈️ Your driver: ${r.driver_name}</b><br>
+      <span class="small" id="eta">Calculating ETA…</span>
+      <div class="small" id="carinfo" style="margin-top:6px">Loading car info…</div>`;
+    // car details so rider spots the right vehicle
+    fetch('/api/rides/'+rid+'/car').then(x=>x.json()).then(c=>{
+      const el=$('carinfo');
+      if(!el)return;
+      if(c.car&&(c.car.make||c.car.plate)){
+        el.innerHTML=`🚗 <b>${c.car.color} ${c.car.year} ${c.car.make} ${c.car.model}</b>`+
+          (c.car.plate?`<br>🔢 Plate: <b>${c.car.plate}</b>`:'');
+      } else el.textContent='';
+    }).catch(()=>{});
+  }
+
+  // steps
+  $('steps').innerHTML='<div class="card"><h3 style="margin-top:0">Your trip</h3>'+FLOW.map((s,i)=>{
+    const done=i<=idx;
+    return `<div class="step ${done?'done':''}"><div class="dot">${done?'✓':['📋','👨‍✈️','🚗','✅'][i]}</div><div><div class="lbl">${s[1]}</div><div class="sub">${s[2]}</div></div></div>`;
+  }).join('')+'</div>';
+
+  // actions
+  let html='';
+  if(r.status==='assigned'){
+    html+=`<button class="btn" id="incar" style="width:100%">✅ I'm in the car</button>
+      <p class="small" style="text-align:center">Tap when your driver picks you up</p>`;
+  }
+  if(r.status==='completed' && !r.rating){
+    html+=`<div class="card"><h3>Rate your driver</h3>
+      <div style="display:flex;gap:8px;justify-content:center;margin:12px 0" id="stars">
+        ${[1,2,3,4,5].map(n=>`<button class="btn ghost" data-s="${n}" style="font-size:1.5rem;width:auto;padding:8px 12px">⭐</button>`).join('')}
+      </div>
+      <button class="btn ghost" id="tipbtn" style="width:100%">💰 Add a tip</button></div>`;
+  }
+  $('actions').innerHTML=html;
+
+  const ib=$('incar');
+  if(ib) ib.onclick=async()=>{
+    await fetch('/api/rides/'+rid+'/rider-in-car',{method:'POST'});
+    load();
+  };
+  document.querySelectorAll('#stars button').forEach(b=>{
+    b.onclick=async()=>{
+      await(await fetch('/api/rides/'+rid+'/rate',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({rating:parseInt(b.dataset.s)})})).json();
+      load();
+    };
+  });
+  const tb=$('tipbtn');
+  if(tb) tb.onclick=()=>{
+    const t=prompt('Tip amount ($):','3');
+    if(t&&parseFloat(t)>0){
+      fetch('/api/rides/'+rid+'/rate',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({rating:5, tip:parseFloat(t)})}).then(()=>load());
+    }
+  };
+}
+
+function updateDriverLoc(lat,lng,r){
+  if(!map) return;
+  if(markers.driver){
+    markers.driver.setLatLng([lat,lng]);
+  }else{
+    markers.driver=L.marker([lat,lng],{icon:L.divIcon({html:'🚗',className:'leaflet-divicon'})}).addTo(map).bindPopup(r.driver_name||'Your driver');
+  }
+  // ETA: distance from driver to pickup (or dropoff if in progress)
+  const destLat=r.status==='in_progress'?r.dropoff_lat:r.pickup_lat;
+  const destLng=r.status==='in_progress'?r.dropoff_lng:r.pickup_lng;
+  if(destLat){
+    const miles=haversine(lat,lng,destLat,destLng);
+    const mins=Math.max(1,Math.round(miles/30*60)); // ~30mph avg
+    const el=$('eta');
+    if(el) el.textContent=`📍 ${miles.toFixed(1)} miles away · ~${mins} min`;
+  }
+}
+
+function haversine(lat1,lon1,lat2,lon2){
+  const R=3959, dLa=(lat2-lat1)*Math.PI/180, dLo=(lon2-lon1)*Math.PI/180;
+  const a=Math.sin(dLa/2)**2+Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLo/2)**2;
+  return R*2*Math.asin(Math.sqrt(a));
+}
+
+load();
+setInterval(load, 15000); // refresh every 15 seconds
+
+// SOS emergency
+$('sosbtn').onclick=()=>{
+  if(!confirm('🆘 EMERGENCY?\n\nThis alerts Drop immediately with your live location.\nOnly tap if you are in danger.'))return;
+  $('sosbtn').disabled=true; $('sosbtn').textContent='Sending alert…';
+  const send=(lat,lng)=>{
+    fetch('/api/rides/'+rid+'/sos',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({lat,lng})}).then(()=>{
+        $('sosbtn').textContent='✅ Alert sent — help is on the way';
+      }).catch(()=>{ $('sosbtn').disabled=false; $('sosbtn').textContent='🆘 EMERGENCY SOS'; });
+  };
+  if(navigator.geolocation){
+    navigator.geolocation.getCurrentPosition(p=>send(p.coords.latitude,p.coords.longitude),
+      ()=>send(0,0),{timeout:8000});
+  } else send(0,0);
+};
+</script>
+<script src="/static/seasonal.js"></script>
+</body></html>

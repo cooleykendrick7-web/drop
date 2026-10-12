@@ -43,6 +43,41 @@ async function load(){
       ? `<a href="/driver.html" class="bigbtn drivebtn">👨‍✈️ Open driver portal</a>`
       : `<a href="/drive.html" class="bigbtn drivebtn">💰 Become a Drop driver</a>
          <p class="small" style="text-align:center">Earn money driving in Bismarck & Mandan.<br>Valid license + insurance + photos — that's the application.</p>`}
+    <h2>⭐ Saved places</h2>
+    <div id="places"><p class="small">Loading…</p></div>
+    <div class="card">
+      <h3 style="margin-top:0">Add a place</h3>
+      <div style="display:flex;gap:8px">
+        <input id="pl-label" placeholder="Home / Work" style="flex:1">
+        <input id="pl-addr" placeholder="123 Main St, Bismarck, ND" style="flex:2">
+        <button class="btn small" id="pl-add" style="width:auto">Add</button>
+      </div>
+      <p class="small" id="pl-msg"></p>
+    </div>
+    <h2>🔁 Recurring rides</h2>
+    <div id="recur"><p class="small">Loading…</p></div>
+    <div class="card">
+      <h3 style="margin-top:0">Set up a repeating ride</h3>
+      <p class="small">e.g. work every weekday at 8am. Rides are created 7 days ahead — pay from your upcoming rides to confirm each one.</p>
+      <label class="small">Pickup address *</label>
+      <input id="rc-pickup" placeholder="123 Main St, Bismarck, ND" style="width:100%;box-sizing:border-box">
+      <label class="small">Dropoff address *</label>
+      <input id="rc-drop" placeholder="456 Oak Ave, Mandan, ND" style="width:100%;box-sizing:border-box">
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <select id="rc-type" style="flex:1;padding:10px;border-radius:8px;background:#0a0a0c;color:#fff;border:1px solid var(--line)">
+          <option value="weekdays">Weekdays (Mon–Fri)</option>
+          <option value="daily">Every day</option>
+          <option value="weekly">Weekly</option>
+        </select>
+        <select id="rc-day" style="flex:1;padding:10px;border-radius:8px;background:#0a0a0c;color:#fff;border:1px solid var(--line);display:none">
+          <option value="0">Monday</option><option value="1">Tuesday</option><option value="2">Wednesday</option>
+          <option value="3">Thursday</option><option value="4">Friday</option><option value="5">Saturday</option><option value="6">Sunday</option>
+        </select>
+        <input id="rc-time" type="time" value="08:00" style="flex:1">
+      </div>
+      <button class="btn" id="rc-add" style="width:100%;margin-top:8px">🔁 Start recurring rides</button>
+      <p class="small" id="rc-msg" style="text-align:center"></p>
+    </div>
     <h2>📅 Upcoming scheduled rides</h2>
     <div id="sched"><p class="small">Loading…</p></div>
     <h2>🧾 My rides</h2>
@@ -56,6 +91,67 @@ async function load(){
       <p class="small" id="ntfymsg"></p></div>
     <button class="btn ghost" id="logout" style="margin-top:14px">Log out</button>`;
   $('logout').onclick=async()=>{await fetch('/api/auth/logout',{method:'POST'});location.href='/';};
+  // saved places
+  async function loadPlaces(){
+    try{
+      const r=await(await fetch('/api/places/mine')).json();
+      $('places').innerHTML=r.places.map(p=>
+        `<div class="card" style="margin:6px 0"><div class="row"><b>⭐ ${p.label}</b>
+         <button class="btn ghost small" style="width:auto" onclick="delPlace(${p.id})">✕</button></div>
+         <span class="small">${p.address}</span></div>`
+      ).join('')||'<p class="small">No saved places yet.</p>';
+    }catch(e){$('places').innerHTML='<p class="small">No saved places yet.</p>';}
+  }
+  window.delPlace=async(id)=>{
+    await fetch('/api/places/'+id,{method:'DELETE'});
+    loadPlaces();
+  };
+  $('pl-add').onclick=async()=>{
+    const label=$('pl-label').value.trim(), addr=$('pl-addr').value.trim();
+    if(!label||!addr){$('pl-msg').textContent='Enter a label and address.';return;}
+    const r=await(await fetch('/api/places',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({label,address:addr})})).json();
+    $('pl-msg').textContent=r.ok?'✅ Saved!':'❌ Failed';
+    if(r.ok){$('pl-label').value='';$('pl-addr').value='';loadPlaces();}
+  };
+  loadPlaces();
+
+  // recurring rides
+  $('rc-type').onchange=()=>{ $('rc-day').style.display=$('rc-type').value==='weekly'?'block':'none'; };
+  async function loadRecur(){
+    try{
+      const r=await(await fetch('/api/rides/recurring/mine')).json();
+      $('recur').innerHTML=r.recurring.map(x=>{
+        const lbl=x.schedule_type==='weekly'
+          ?['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][x.weekday]+'s'
+          :x.schedule_type==='daily'?'Every day':'Weekdays';
+        return `<div class="card" style="margin:6px 0"><div class="row"><b>🔁 ${lbl} at ${x.ride_time}</b>
+          <button class="btn ghost small" style="width:auto" onclick="delRecur(${x.id})">Stop</button></div>
+          <span class="small">📍 ${x.pickup_address}<br>🏠 ${x.dropoff_address}</span></div>`;
+      }).join('')||'<p class="small">No recurring rides. Set one up below — perfect for work commutes.</p>';
+    }catch(e){$('recur').innerHTML='<p class="small">No recurring rides.</p>';}
+  }
+  window.delRecur=async(id)=>{
+    if(!confirm('Stop these recurring rides? Future unpaid ones will be cancelled.'))return;
+    await fetch('/api/rides/recurring/'+id+'/cancel',{method:'POST'});
+    loadRecur();
+  };
+  $('rc-add').onclick=async()=>{
+    const pickup=$('rc-pickup').value.trim(), dropoff=$('rc-drop').value.trim();
+    if(!pickup||!dropoff){$('rc-msg').textContent='Enter pickup and dropoff.';return;}
+    $('rc-msg').textContent='Setting up…';
+    try{
+      const r=await(await fetch('/api/rides/recurring',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({pickup_address:pickup,dropoff_address:dropoff,
+          schedule_type:$('rc-type').value,weekday:parseInt($('rc-day').value),
+          ride_time:$('rc-time').value})})).json();
+      if(r.ok){$('rc-msg').textContent='✅ Recurring rides started! Pay for each from your upcoming rides.';
+        $('rc-pickup').value='';$('rc-drop').value='';loadRecur();}
+      else $('rc-msg').textContent='❌ '+(r.detail||'Failed');
+    }catch(e){$('rc-msg').textContent='❌ Connection error.';}
+  };
+  loadRecur();
+
   // load scheduled rides
   try{
     const sr=await(await fetch('/api/rides/scheduled/mine')).json();
