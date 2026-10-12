@@ -235,6 +235,8 @@ $('calc-fare').onclick=async()=>{
         t.classList.add('on');
         $('h-guest-form').style.display=bookMode==='guest'?'block':'none';
         $('h-login-form').style.display=bookMode==='login'?'block':'none';
+        // focus first field so the tab visibly does something
+        try{ (bookMode==='guest'?$('h-name'):$('h-li-phone')).focus({preventScroll:false}); }catch(e){}
       };
     });
     // ride now vs schedule for later
@@ -245,6 +247,8 @@ $('calc-fare').onclick=async()=>{
         const later=t.dataset.w==='later';
         $('h-sched-wrap').style.display=later?'block':'none';
         $('h-book').textContent=later?'📅 Schedule & Pay →':'🚗 Book Now →';
+        // focus datetime picker when scheduling so the button visibly does something
+        if(later){ try{ $('h-sched-dt').focus({preventScroll:false}); }catch(e){} }
       };
     });
     // login handler
