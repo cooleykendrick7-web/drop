@@ -3687,6 +3687,412 @@ def ride_dev_pay(rid: int):
     return {"ok": True, "ride_id": rid}
 
 
+# ---------------- Safety + saved places + recurring rides ----------------
+
+def init_safety_tables():
+    conn = db()
+    # saved places
+    conn.execute("""CREATE TABLE IF NOT EXISTS saved_places (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_phone TEXT NOT NULL, label TEXT NOT NULL,
+        address TEXT NOT NULL, lat REAL DEFAULT 0, lng REAL DEFAULT 0,
+        created_at TEXT NOT NULL)""")
+    # SOS alerts
+    conn.execute("""CREATE TABLE IF NOT EXISTS sos_alerts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ride_id INTEGER DEFAULT 0, rider_name TEXT DEFAULT '',
+        rider_phone TEXT DEFAULT '', lat REAL DEFAULT 0, lng REAL DEFAULT 0,
+        status TEXT DEFAULT 'open', created_at TEXT NOT NULL)""")
+    # recurring ride templates
+    conn.execute("""CREATE TABLE IF NOT EXISTS recurring_rides (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        rider_name TEXT NOT NULL, rider_phone TEXT NOT NULL,
+        pickup_address TEXT NOT NULL, pickup_lat REAL, pickup_lng REAL,
+        dropoff_address TEXT NOT NULL, dropoff_lat REAL, dropoff_lng REAL,
+        miles REAL DEFAULT 0, fare REAL DEFAULT 0, tip REAL DEFAULT 0,
+        schedule_type TEXT NOT NULL DEFAULT 'weekdays',
+        weekday INTEGER DEFAULT -1,
+        ride_time TEXT NOT NULL DEFAULT '08:00',
+        active INTEGER DEFAULT 1,
+        last_generated TEXT DEFAULT '',
+        created_at TEXT NOT NULL)""")
+    # no-driver warning flag on scheduled_rides
+    tables = [r[0] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
+    if "scheduled_rides" in tables:
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(scheduled_rides)").fetchall()]
+        if "warned_no_driver" not in cols:
+            conn.execute("ALTER TABLE scheduled_rides ADD COLUMN warned_no_driver INTEGER DEFAULT 0")
+    conn.commit()
+    conn.close()
+
+
+init_safety_tables()
+
+
+# --- Car info on ride details ---
+@app.get("/api/rides/{ride_id}/car")
+def ride_car_info(ride_id: int):
+    """Driver's car details so the rider can spot the right vehicle."""
+    conn = db()
+    r = conn.execute("SELECT driver_id FROM rides WHERE id=?", (ride_id,)).fetchone()
+    if not r or not r["driver_id"]:
+        conn.close()
+        return {"car": None}
+    d = conn.execute(
+        """SELECT name, vehicle_make, vehicle_model, vehicle_year, vehicle_color,
+                  license_plate FROM drivers WHERE id=?""",
+        (r["driver_id"],)).fetchone()
+    conn.close()
+    if not d:
+        return {"car": None}
+    return {"car": {
+        "driver_name": d["name"],
+        "make": d["vehicle_make"] or "", "model": d["vehicle_model"] or "",
+        "year": d["vehicle_year"] or "", "color": d["vehicle_color"] or "",
+        "plate": d["license_plate"] or "",
+    }}
+
+
+# --- SOS emergency ---
+@app.post("/api/rides/{ride_id}/sos")
+async def ride_sos(ride_id: int, req: Request):
+    """Rider hits the SOS button. Alerts Ken immediately with live location."""
+    body = {}
+    try:
+        body = await req.json()
+    except Exception:
+        pass
+    lat = float(body.get("lat") or 0)
+    lng = float(body.get("lng") or 0)
+    conn = db()
+    r = conn.execute("SELECT * FROM rides WHERE id=?", (ride_id,)).fetchone()
+    if not r:
+        conn.close()
+        raise HTTPException(404, "Ride not found")
+    r = dict(r)
+    now_s = now_iso()
+    conn.execute(
+        """INSERT INTO sos_alerts (ride_id, rider_name, rider_phone, lat, lng, created_at)
+           VALUES (?,?,?,?,?,?)""",
+        (ride_id, r["rider_name"], r["rider_phone"], lat, lng, now_s))
+    conn.commit()
+    conn.close()
+    log_event("ride", f"🆘 SOS — ride #{ride_id} ({r['rider_name']})", "")
+    # alert Ken LOUD
+    try:
+        topic = get_setting("ntfy_topic").strip()
+        if topic:
+            maps = f"https://maps.google.com/?q={lat},{lng}" if lat else "no GPS"
+            send_ntfy(topic, f"🆘🆘 SOS — RIDER EMERGENCY — ride #{ride_id}",
+                      f"{r['rider_name']} ({r['rider_phone']}) hit SOS!\n"
+                      f"Driver: {r['driver_name']}\n"
+                      f"Location: {maps}\n"
+                      f"CALL THEM NOW.")
+    except Exception:
+        pass
+    return {"ok": True}
+
+
+@app.get("/api/operator/sos")
+def operator_sos(req: Request, x_pin: str = Header(default="")):
+    """Open SOS alerts for Ken."""
+    if x_pin != get_setting("pin"):
+        raise HTTPException(401, "Bad PIN")
+    conn = db()
+    alerts = conn.execute(
+        "SELECT * FROM sos_alerts WHERE status='open' ORDER BY id DESC LIMIT 20"
+    ).fetchall()
+    conn.close()
+    return {"alerts": [dict(a) for a in alerts]}
+
+
+# --- Saved places ---
+@app.get("/api/places/mine")
+def my_places(req: Request, phone: str = ""):
+    me = get_session_user(req)
+    ph = (me.get("phone", "") if me else "") or phone.strip()
+    if not ph:
+        raise HTTPException(401, "Not logged in")
+    conn = db()
+    places = conn.execute(
+        "SELECT * FROM saved_places WHERE user_phone=? ORDER BY id ASC",
+        (ph,)).fetchall()
+    conn.close()
+    return {"places": [dict(p) for p in places]}
+
+
+@app.post("/api/places")
+async def add_place(req: Request):
+    body = await req.json()
+    me = get_session_user(req)
+    phone = (me.get("phone", "") if me else "") or (body.get("phone") or "").strip()
+    label = (body.get("label") or "").strip()
+    address = (body.get("address") or "").strip()
+    if not phone or not label or not address:
+        raise HTTPException(400, "Phone, label, and address required")
+    lat = float(body.get("lat") or 0)
+    lng = float(body.get("lng") or 0)
+    conn = db()
+    # upsert by label
+    ex = conn.execute(
+        "SELECT id FROM saved_places WHERE user_phone=? AND label=?",
+        (phone, label)).fetchone()
+    if ex:
+        conn.execute(
+            "UPDATE saved_places SET address=?, lat=?, lng=? WHERE id=?",
+            (address, lat, lng, ex["id"]))
+        pid = ex["id"]
+    else:
+        cur = conn.execute(
+            "INSERT INTO saved_places (user_phone, label, address, lat, lng, created_at)"
+            " VALUES (?,?,?,?,?,?)",
+            (phone, label, address, lat, lng, now_iso()))
+        pid = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return {"ok": True, "id": pid}
+
+
+@app.delete("/api/places/{pid}")
+async def delete_place(pid: int, req: Request):
+    me = get_session_user(req)
+    phone = (me.get("phone", "") if me else "").strip()
+    conn = db()
+    p = conn.execute("SELECT * FROM saved_places WHERE id=?", (pid,)).fetchone()
+    if not p:
+        conn.close()
+        raise HTTPException(404, "Not found")
+    if phone and p["user_phone"] != phone:
+        conn.close()
+        raise HTTPException(403, "Not yours")
+    conn.execute("DELETE FROM saved_places WHERE id=?", (pid,))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+# --- Recurring rides ---
+@app.post("/api/rides/recurring")
+async def create_recurring(req: Request):
+    """Set up a repeating ride (daily, weekdays, or weekly)."""
+    body = await req.json()
+    me = get_session_user(req)
+    name = (body.get("customer_name") or "").strip() or (me.get("name", "") if me else "")
+    phone = (body.get("phone") or "").strip() or (me.get("phone", "") if me else "")
+    pickup = (body.get("pickup_address") or "").strip()
+    dropoff = (body.get("dropoff_address") or "").strip()
+    schedule_type = (body.get("schedule_type") or "weekdays").strip()  # daily|weekdays|weekly
+    weekday = int(body.get("weekday") if body.get("weekday") is not None else -1)
+    ride_time = (body.get("ride_time") or "08:00").strip()  # HH:MM
+    tip = float(body.get("tip") or 0)
+
+    if not name or not phone:
+        raise HTTPException(400, "Name and phone required")
+    if not pickup or not dropoff:
+        raise HTTPException(400, "Pickup and dropoff required")
+    if schedule_type not in ("daily", "weekdays", "weekly"):
+        raise HTTPException(400, "Bad schedule type")
+    if schedule_type == "weekly" and not (0 <= weekday <= 6):
+        raise HTTPException(400, "Pick a weekday (0=Mon..6=Sun)")
+
+    p_lat = float(body.get("pickup_lat") or 0)
+    p_lng = float(body.get("pickup_lng") or 0)
+    d_lat = float(body.get("dropoff_lat") or 0)
+    d_lng = float(body.get("dropoff_lng") or 0)
+    try:
+        if not p_lat:
+            p_lat, p_lng = geocode(pickup, {})
+        if not d_lat:
+            d_lat, d_lng = geocode(dropoff, {})
+    except Exception:
+        pass
+    if not p_lat or not d_lat:
+        raise HTTPException(400, "Could not find those addresses.")
+
+    f = _sched_fare(p_lat, p_lng, d_lat, d_lng)
+    conn = db()
+    cur = conn.execute(
+        """INSERT INTO recurring_rides
+           (rider_name, rider_phone, pickup_address, pickup_lat, pickup_lng,
+            dropoff_address, dropoff_lat, dropoff_lng, miles, fare, tip,
+            schedule_type, weekday, ride_time, created_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (name, phone, pickup, p_lat, p_lng, dropoff, d_lat, d_lng,
+         f["miles"], f["fare"], tip, schedule_type, weekday, ride_time,
+         now_iso()))
+    rid = cur.lastrowid
+    conn.commit()
+    conn.close()
+    # generate the first batch right away
+    try:
+        _generate_recurring(rid)
+    except Exception as e:
+        log_event("ride", f"⚠️ Recurring #{rid} created but generation failed: {e}", "")
+    log_event("ride", f"🔁 Recurring ride #{rid} set up ({schedule_type} {ride_time})", "")
+    return {"ok": True, "recurring_id": rid}
+
+
+def _recurring_due_dates(rr, days_ahead=7):
+    """Yield datetimes (UTC) for upcoming occurrences within days_ahead."""
+    from datetime import timedelta as td
+    tz = timezone(td(hours=-5))  # America/Chicago
+    now_local = datetime.now(tz)
+    try:
+        hh, mm = map(int, rr["ride_time"].split(":"))
+    except Exception:
+        hh, mm = 8, 0
+    out = []
+    for i in range(1, days_ahead + 1):
+        day = now_local + td(days=i)
+        wd = day.weekday()  # 0=Mon
+        st = rr["schedule_type"]
+        if st == "daily":
+            ok = True
+        elif st == "weekdays":
+            ok = wd < 5
+        else:  # weekly
+            ok = wd == rr["weekday"]
+        if ok:
+            dt_local = day.replace(hour=hh, minute=mm, second=0, microsecond=0)
+            if dt_local > now_local + td(minutes=SCHED_MIN_LEAD_MIN):
+                out.append(dt_local.astimezone(timezone.utc))
+    return out
+
+
+def _generate_recurring(rid):
+    """Create scheduled_rides for upcoming occurrences of a template."""
+    conn = db()
+    rr = conn.execute("SELECT * FROM recurring_rides WHERE id=?",
+                      (rid,)).fetchone()
+    if not rr or not rr["active"]:
+        conn.close()
+        return 0
+    rr = dict(rr)
+    made = 0
+    for dt_utc in _recurring_due_dates(rr):
+        # skip if one already exists for this rider+time (within 30 min)
+        lo = (dt_utc - timedelta(minutes=30)).isoformat()
+        hi = (dt_utc + timedelta(minutes=30)).isoformat()
+        ex = conn.execute(
+            """SELECT id FROM scheduled_rides WHERE rider_phone=?
+               AND scheduled_at BETWEEN ? AND ? AND status != 'cancelled'""",
+            (rr["rider_phone"], lo, hi)).fetchone()
+        if ex:
+            continue
+        total = round(rr["fare"] + rr["fare"] * fin_setting("ride_gas_pct", 10.0) / 100 + rr["tip"], 2)
+        driver_pay = round(rr["fare"] * 0.70 + rr["tip"], 2)
+        company_profit = round(total - driver_pay - (total - rr["fare"] - rr["tip"]), 2)
+        now_s = now_iso()
+        conn.execute(
+            """INSERT INTO scheduled_rides
+               (rider_name, rider_phone, pickup_address, pickup_lat, pickup_lng,
+                dropoff_address, dropoff_lat, dropoff_lng, miles, fare, tip, total,
+                driver_pay, company_profit, scheduled_at, notes,
+                created_at, updated_at, payment_status, status)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (rr["rider_name"], rr["rider_phone"], rr["pickup_address"],
+             rr["pickup_lat"], rr["pickup_lng"], rr["dropoff_address"],
+             rr["dropoff_lat"], rr["dropoff_lng"], rr["miles"], rr["fare"],
+             rr["tip"], total, driver_pay, company_profit,
+             dt_utc.isoformat(),
+             f"[recurring #{rr['id']}] Pay from your upcoming rides to confirm.",
+             now_s, now_s, "pending", "scheduled"))
+        made += 1
+    conn.execute("UPDATE recurring_rides SET last_generated=? WHERE id=?",
+                 (now_iso(), rid))
+    conn.commit()
+    conn.close()
+    # nudge the rider to pay for new ones
+    if made:
+        try:
+            conn2 = db()
+            u = conn2.execute(
+                "SELECT ntfy_topic FROM users WHERE phone=?",
+                (rr["rider_phone"],)).fetchone()
+            conn2.close()
+            if u and u["ntfy_topic"]:
+                send_ntfy(u["ntfy_topic"], "🔁 New recurring ride ready",
+                          f"{made} upcoming ride(s) booked. Open Drop → upcoming rides to pay and confirm.")
+        except Exception:
+            pass
+    return made
+
+
+@app.get("/api/rides/recurring/mine")
+def my_recurring(req: Request, phone: str = ""):
+    me = get_session_user(req)
+    ph = (me.get("phone", "") if me else "") or phone.strip()
+    if not ph:
+        raise HTTPException(401, "Not logged in")
+    conn = db()
+    rows = conn.execute(
+        "SELECT * FROM recurring_rides WHERE rider_phone=? AND active=1 ORDER BY id DESC",
+        (ph,)).fetchall()
+    conn.close()
+    return {"recurring": [dict(r) for r in rows]}
+
+
+@app.post("/api/rides/recurring/{rid}/cancel")
+async def cancel_recurring(rid: int, req: Request):
+    me = get_session_user(req)
+    phone = (me.get("phone", "") if me else "").strip()
+    conn = db()
+    rr = conn.execute("SELECT * FROM recurring_rides WHERE id=?", (rid,)).fetchone()
+    if not rr:
+        conn.close()
+        raise HTTPException(404, "Not found")
+    if phone and rr["rider_phone"] != phone:
+        conn.close()
+        raise HTTPException(403, "Not yours")
+    conn.execute("UPDATE recurring_rides SET active=0 WHERE id=?", (rid,))
+    # cancel future unpaid scheduled rides from this template
+    conn.execute(
+        """UPDATE scheduled_rides SET status='cancelled', updated_at=?
+           WHERE notes LIKE ? AND status='scheduled' AND payment_status='pending'
+             AND scheduled_at > ?""",
+        (now_iso(), f"[recurring #{rid}]%", datetime.now(timezone.utc).isoformat()))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+# --- No-driver early warning (called from tick) ---
+def _warn_no_driver(conn, now):
+    """2h before a paid scheduled ride: if no drivers online, alert Ken."""
+    cutoff = (now + timedelta(hours=2)).isoformat()
+    now_s = now.isoformat()
+    rides = conn.execute(
+        """SELECT * FROM scheduled_rides
+           WHERE status IN ('scheduled','claimed') AND payment_status='paid'
+             AND warned_no_driver=0 AND scheduled_at <= ?
+             AND scheduled_at > ?""",
+        (cutoff, now_s)).fetchall()
+    if not rides:
+        return []
+    online = conn.execute(
+        "SELECT COUNT(*) c FROM drivers WHERE status='approved' AND is_online=1"
+    ).fetchone()["c"]
+    warned = []
+    for r in rides:
+        r = dict(r)
+        conn.execute("UPDATE scheduled_rides SET warned_no_driver=1 WHERE id=?",
+                     (r["id"],))
+        if online == 0 and not r["driver_id"]:
+            warned.append(r["id"])
+            try:
+                topic = get_setting("ntfy_topic").strip()
+                if topic:
+                    send_ntfy(topic, f"⚠️ No drivers for scheduled ride #{r['id']}",
+                              f"Pickup in ~2h: {r['scheduled_at']}\n"
+                              f"{r['pickup_address']} → {r['dropoff_address']}\n"
+                              f"No drivers online! Find coverage or warn the rider.")
+            except Exception:
+                pass
+    conn.commit()
+    return warned
+
+
 # ---------------- Scheduled rides ----------------
 # Riders book a ride for a future date/time and pay upfront.
 # 30 min before pickup, the scheduled ride becomes a real ride and a driver is assigned.
@@ -3715,6 +4121,7 @@ def init_scheduled_rides_table():
         stripe_payment_intent TEXT DEFAULT '',
         reminded_1h INTEGER DEFAULT 0,
         reminded_15m INTEGER DEFAULT 0,
+        warned_no_driver INTEGER DEFAULT 0,
         activated_ride_id INTEGER DEFAULT 0,
         cancel_fee REAL DEFAULT 0,
         notes TEXT DEFAULT '',
@@ -3936,7 +4343,21 @@ def scheduled_tick():
     now = datetime.now(timezone.utc)
     now_s = now.isoformat()
     conn = db()
-    out = {"activated": [], "reminded": []}
+    out = {"activated": [], "reminded": [], "warned": [], "recurring": 0}
+
+    # 0) generate upcoming rides from recurring templates
+    try:
+        for rr in conn.execute(
+                "SELECT id FROM recurring_rides WHERE active=1").fetchall():
+            out["recurring"] += _generate_recurring(rr["id"]) or 0
+    except Exception as e:
+        log_event("ride", f"⚠️ Recurring generation failed: {e}", "")
+
+    # 0b) warn Ken 2h before if no drivers are online
+    try:
+        out["warned"] = _warn_no_driver(conn, now)
+    except Exception as e:
+        log_event("ride", f"⚠️ No-driver warning failed: {e}", "")
 
     # 1) activate rides starting within 30 min
     activate_before = (now + timedelta(minutes=SCHED_ACTIVATE_MIN)).isoformat()
