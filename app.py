@@ -8889,3 +8889,23 @@ def auto_assign_driver(ride_id):
 
 
 # ---------------- Ride Stripe checkout ----------------
+
+
+@app.get("/api/rides/{ride_id}/driver-loc")
+def ride_driver_loc(ride_id: int):
+    """Get the assigned driver's live location for tracking."""
+    conn = db()
+    r = conn.execute("SELECT driver_id FROM rides WHERE id=?", (ride_id,)).fetchone()
+    if not r or not r["driver_id"]:
+        conn.close()
+        return {"lat": 0, "lng": 0}
+    d = conn.execute("SELECT last_lat, last_lng, last_gps_at, name FROM drivers WHERE id=?",
+                     (r["driver_id"],)).fetchone()
+    conn.close()
+    if not d:
+        return {"lat": 0, "lng": 0}
+    return {"lat": d["last_lat"] or 0, "lng": d["last_lng"] or 0,
+            "updated": d["last_gps_at"] or "", "name": d["name"]}
+
+
+# ---------------- Ride Stripe checkout ----------------
