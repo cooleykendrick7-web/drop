@@ -577,14 +577,42 @@ def check_pin(x_pin: str = Header(default="")):
         raise HTTPException(status_code=401, detail="Bad PIN")
 
 
+_GEOCODE_CACHE = {}  # addr_key -> (expires_ts, lat, lng)
+_GEOCODE_TTL = 24 * 3600
+
+
+def _geocode_fetch(url, timeout_s):
+    """Fetch JSON from a geocoder; returns parsed JSON, or None on any failure."""
+    try:
+        req = urllib.request.Request(
+            url, headers={"User-Agent": "DropDelivery/1.0 (wearedropservicesllc@gmail.com)"})
+        return json.load(urllib.request.urlopen(req, timeout=timeout_s))
+    except Exception:
+        return None
+
+
 def geocode(address, parts=None):
-    """Best-effort address -> (lat, lng) via Nominatim (OpenStreetMap, free).
-    When structured parts are given (street/city/state/zip), uses the structured
-    search API for much higher accuracy. Returns (0.0, 0.0) when it can't find
-    it. Never raises."""
+    """Best-effort address -> (lat, lng).
+    Primary: Nominatim (OpenStreetMap, free) with 2 attempts — structured
+    search when street/city/state/zip parts are given (much more accurate).
+    Fallback: Photon (komoot, free, no key) — covers the case where the
+    hosting egress IP gets throttled/blocked by Nominatim (quotes kept
+    failing while Nominatim worked fine from elsewhere).
+    Results are cached in-process for 24h to cut repeat lookups.
+    Returns (0.0, 0.0) when it can't find it. Never raises."""
+    key = (address or "").strip().lower()
+    if parts:
+        key += "|" + "|".join(str(parts.get(k, "")).strip().lower()
+                              for k in ("street", "city", "state", "zip"))
+    now = time.time()
+    hit = _GEOCODE_CACHE.get(key)
+    if hit and hit[0] > now:
+        return hit[1], hit[2]
+
+    lat = lng = 0.0
+    # Primary: Nominatim (structured search when parts given)
     try:
         if parts and parts.get("city") and parts.get("state"):
-            # Structured search — far more accurate than free-text
             params = {
                 "street": parts.get("street", ""),
                 "city": parts.get("city", ""),
@@ -600,15 +628,40 @@ def geocode(address, parts=None):
             url = f"https://nominatim.openstreetmap.org/search?{qs}"
         else:
             q = urllib.parse.quote(address)
-            url = f"https://nominatim.openstreetmap.org/search?q={q}&format=json&limit=1"
-        req = urllib.request.Request(
-            url, headers={"User-Agent": "DropDelivery/1.0 (wearedropservicesllc@gmail.com)"})
-        data = json.load(urllib.request.urlopen(req, timeout=8))
-        if data:
-            return float(data[0]["lat"]), float(data[0]["lon"])
+            url = (f"https://nominatim.openstreetmap.org/search?"
+                   f"q={q}&format=json&limit=1")
+        for _ in range(2):
+            data = _geocode_fetch(url, 8)
+            if data:
+                lat, lng = float(data[0]["lat"]), float(data[0]["lon"])
+                break
     except Exception:
         pass
-    return 0.0, 0.0
+    # Fallback: Photon (free, no key) when Nominatim fails/returns nothing
+    if not lat and not lng:
+        try:
+            if parts and (parts.get("city") or parts.get("street")):
+                qtxt = ", ".join(
+                    s for s in (parts.get("street", ""), parts.get("city", ""),
+                                parts.get("state", ""), parts.get("zip", ""))
+                    if str(s).strip())
+            else:
+                qtxt = address or ""
+            q = urllib.parse.quote(qtxt)
+            purl = f"https://photon.komoot.io/api/?q={q}&limit=1"
+            for _ in range(2):
+                pdata = _geocode_fetch(purl, 8)
+                feats = (pdata or {}).get("features") or []
+                if feats:
+                    lon, pla = feats[0]["geometry"]["coordinates"]
+                    lat, lng = float(pla), float(lon)
+                    break
+        except Exception:
+            pass
+    _GEOCODE_CACHE[key] = (now + _GEOCODE_TTL, lat, lng)
+    if len(_GEOCODE_CACHE) > 2000:  # bound memory; cache is just a speedup
+        _GEOCODE_CACHE.clear()
+    return lat, lng
 
 
 # ---------------- public API ----------------
