@@ -968,6 +968,7 @@ async function loadDeals(stage){
     `<button class="btn small ${stage===k?'':'ghost'}" onclick="loadDeals('${k}')">${v}${counts[k]?` (${counts[k]})`:''}</button>`).join('')
     +`<button class="btn small ghost" onclick="loadDeals()">All</button>`;
   const esc=s=>(s||'').replace(/</g,'&lt;');
+  _dealPartners=j.partners;
   $('deallist').innerHTML=j.partners.map(p=>`
     <div class="card ${p.status==='submitted'?'order new':''}">
       <div class="row"><b>#${p.id} — ${esc(p.legal_name)}</b><span class="badge">${j.stages[p.status]||p.status}</span></div>
@@ -984,13 +985,16 @@ async function loadDeals(stage){
         <button class="btn small ghost" onclick="dealStage(${p.id},'approved')">✅ Approve</button>
         <button class="btn small ghost" onclick="dealStage(${p.id},'rejected')">❌ Reject</button>
         <button class="btn small ghost" onclick="dealNotes(${p.id})">📝 Notes</button>
-        <button class="btn small ghost" onclick="dealPerk(${p.id},${p.perk_active?1:0},`${esc(p.perk_title)}`,`${esc(p.perk_details)}`)">🎁 Perk</button>
+        <button class="btn small ghost" onclick="dealPerk(${p.id})">🎁 Perk</button>
       </div>
       <div id="deal-${p.id}" style="margin-top:8px"></div>
       ${p.perk_active?`<p class="small" style="color:#4ade80">🎁 Perk live: <b>${esc(p.perk_title)}</b></p>`:''}
     </div>`).join('')||'<p class="small">No partnership applications yet.</p>';
 }
-window.dealPerk=(id,active,title,details)=>{
+let _dealPartners=[];
+window.dealPerk=(id)=>{
+  const p=(_dealPartners||[]).find(x=>x.id===id)||{};
+  const active=p.perk_active?1:0, title=p.perk_title||'', details=p.perk_details||'';
   const box=$('deal-'+id);
   box.innerHTML=`<div class="card"><h3 style="margin-top:0">🎁 Drop Perk for riders</h3>
     <label class="small">Perk title *</label><input id="pk-t" value="${title}" placeholder="e.g. 10% off pizza with your Drop receipt">
