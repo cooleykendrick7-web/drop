@@ -68,7 +68,8 @@
       <p class="small">Pending = deliveries not finished yet. Only <b>available</b> money can be cashed out.</p>
       <div class="row"><input id="w-amt" inputmode="decimal" placeholder="Amount $" style="flex:1;margin-right:6px">
       <button class="btn small" id="w-cashout" style="width:auto">💸 Cash out</button></div>
-      <p class="small" id="w-msg"></p></div>
+      <p class="small" id="w-msg"></p>
+      <div id="connect-box" style="margin-top:10px"></div></div>
     <h3>Per-delivery earnings</h3>
     <div id="whist"></div>
     <h3>Payout history</h3>
@@ -231,7 +232,36 @@ async function loadEarn(){
       <span class="badge ${p.status==='paid'?'open':''}">${p.status.toUpperCase()}</span></div>
       <p class="small">${p.created_at.slice(0,16).replace('T',' ')}</p></div>`).join('')
     ||'<p class="small">No payouts yet.</p>';
+  loadConnectBox();
 }
+async function loadConnectBox(){
+  const box=$('connect-box'); if(!box) return;
+  try{
+    const c=await (await fetch('/api/drivers/connect/status')).json();
+    if(!c.connect_enabled){box.innerHTML='';return;}
+    if(c.payouts_enabled){
+      box.innerHTML='<p class="small" style="color:#4ade80">✅ Bank payouts active — approved cash-outs go straight to your bank.</p>';return;}
+    box.innerHTML='<p class="small">🏦 <b>Get paid straight to your bank.</b> One-time setup:</p>'
+      +'<button class="btn small" id="connect-go">Set up bank payouts</button><p class="small" id="connect-msg"></p>';
+    $('connect-go').onclick=async()=>{
+      $('connect-msg').textContent='Opening secure setup…';
+      try{
+        const r=await (await fetch('/api/drivers/connect/link',{method:'POST'})).json();
+        if(r.url){location.href=r.url;}
+        else{$('connect-msg').textContent='❌ '+(r.detail||'setup failed — try again later');}
+      }catch(e){$('connect-msg').textContent='❌ Connection error.';}
+    };
+  }catch(e){box.innerHTML='';}
+}
+// after returning from Stripe onboarding
+(function(){
+  const q=new URLSearchParams(location.search);
+  if(q.get('connect')==='done'){
+    const box=$('connect-box');
+    if(box) box.innerHTML='<p class="small" style="color:#4ade80">✅ Bank setup submitted — payouts will go to your bank once verified.</p>';
+    history.replaceState({},'',location.pathname);
+  }
+})();
 $('w-cashout').onclick=async()=>{
   const amt=parseFloat($('w-amt').value);
   if(!amt||amt<=0){$('w-msg').textContent='Enter an amount.';return;}

@@ -807,17 +807,29 @@ $('fs-save').onclick=async()=>{
 async function loadPayouts(){
   const p=await (await fetch('/api/operator/payouts',{headers:H()})).json();
   const req=p.filter(x=>x.status==='requested');
+  let auto=false;
+  try{auto=(await (await fetch('/api/operator/connect/status',{headers:H()})).json()).enabled;}catch(e){}
   $('payoutlist').innerHTML=(req.map(x=>`
     <div class="card"><div class="row"><b>${x.driver_name}: $${x.amount.toFixed(2)}</b>
       <span class="badge">REQUESTED</span></div>
-      <p class="small">${x.created_at.slice(0,16).replace('T',' ')} · Send via bank/Cash App, then tap:</p>
-      <button class="btn small" onclick="markPaid(${x.id})">✅ Mark paid</button></div>`).join('')
+      <p class="small">${x.created_at.slice(0,16).replace('T',' ')} · ${auto
+        ?'Tap to send automatically via Stripe:' 
+        : 'Send via bank/Cash App, then tap:'}</p>
+      <button class="btn small" onclick="markPaid(${x.id})">${auto?'⚡ Send via Stripe':'✅ Mark paid'}</button></div>`).join('')
     ||'<p class="small">No payout requests right now.</p>')
     + (p.filter(x=>x.status==='paid').length?`<p class="small">✅ ${p.filter(x=>x.status==='paid').length} payouts completed.</p>`:'');
 }
 async function markPaid(id){
-  if(!confirm('Confirm you sent this money to the driver?'))return;
-  await fetch('/api/operator/payouts/'+id+'/paid',{method:'POST',headers:H()});
+  let auto=false;
+  try{auto=(await (await fetch('/api/operator/connect/status',{headers:H()})).json()).enabled;}catch(e){}
+  if(!confirm(auto?'Send this payout to the driver via Stripe now?':'Confirm you sent this money to the driver?'))return;
+  const r=await fetch('/api/operator/payouts/'+id+'/paid',{method:'POST',headers:H()});
+  const j=await r.json();
+  if(j.ok){
+    alert(j.automatic?'✅ Sent via Stripe — driver gets it in ~2 business days.':'✅ Marked paid.');
+  }else{
+    alert('❌ '+(j.detail||'failed — try again'));
+  }
   loadPayouts(); loadMoney();
 }
 async function loadConnect(){

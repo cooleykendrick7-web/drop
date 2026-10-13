@@ -220,7 +220,8 @@ def init_db():
                        ("declined", "INTEGER DEFAULT 0"),
                        ("is_online", "INTEGER DEFAULT 0"),
                        ("today_earned", "REAL DEFAULT 0"),
-                       ("today_date", "TEXT DEFAULT ''")):
+                       ("today_date", "TEXT DEFAULT ''"),
+                       ("stripe_account_id", "TEXT DEFAULT ''")):
         if _col not in dcols:
             c.execute(f"ALTER TABLE drivers ADD COLUMN {_col} {_ddl}")
     # Drop Investors: inbound investor interest (added 2026-10-11)
@@ -2376,7 +2377,7 @@ def connect_status(x_pin: str = Header(default="")):
             {"done": False,
              "label": "Complete Connect onboarding (identity verification + bank account)"},
             {"done": CONNECT_ENABLED,
-             "label": "Set CONNECT_ENABLED=1 in Render environment variables"},
+             "label": "Connect payouts switched on (CONNECT_ENABLED=1)"},
         ],
         "note": ("Until Connect is active, driver payouts are tracked in the "
                  "Payouts tab and you send them manually (bank transfer, Cash App, etc.), "
@@ -2385,18 +2386,113 @@ def connect_status(x_pin: str = Header(default="")):
 
 
 @app.post("/api/operator/drivers/{did}/connect-link")
-def driver_connect_link(did: int, x_pin: str = Header(default="")):
-    """Generate a Stripe Express onboarding link for a driver.
-    Requires CONNECT_ENABLED=1 and the stripe package with Connect access."""
+def driver_connect_link(did: int, req: Request, x_pin: str = Header(default="")):
+    """Ken generates a Stripe Express onboarding link for a driver."""
     check_pin(x_pin)
+    _require_connect()
+    conn = db()
+    d = conn.execute("SELECT * FROM drivers WHERE id=?", (did,)).fetchone()
+    conn.close()
+    if not d:
+        raise HTTPException(404, "Driver not found")
+    acct_id = _driver_connect_account(dict(d))
+    url = _connect_onboarding_url(acct_id, req)
+    return {"ok": True, "url": url, "stripe_account_id": acct_id}
+
+
+def _require_connect():
+    """Raise 400 unless Stripe + Connect are usable."""
+    if not STRIPE_LIVE:
+        raise HTTPException(400, "Stripe payments aren't configured.")
     if not CONNECT_ENABLED:
         raise HTTPException(400,
             "Stripe Connect isn't activated yet. See the Connect tab for setup steps.")
-    # Full Express onboarding is implemented when Ken activates Connect.
-    # The flow: stripe.Account.create(type='express') ->
-    #          stripe.AccountLink.create(...) -> driver completes onboarding ->
-    #          webhook account.updated -> store stripe_account_id on driver.
-    raise HTTPException(501, "Connect onboarding activates after Ken completes setup.")
+
+
+def _driver_connect_account(driver):
+    """Get or create the driver's Stripe Express account. Returns account id."""
+    _require_connect()
+    acct_id = (driver.get("stripe_account_id") or "").strip()
+    if acct_id:
+        try:
+            stripe.Account.retrieve(acct_id)
+            return acct_id
+        except Exception:
+            acct_id = ""  # stale id — create fresh below
+    try:
+        acct = stripe.Account.create(
+            type="express",
+            country="US",
+            email=(driver.get("email") or "").strip() or None,
+            capabilities={"card_payments": {"requested": True},
+                          "transfers": {"requested": True}},
+            business_type="individual",
+        )
+    except Exception as e:
+        raise HTTPException(502, "Stripe Connect error: %s"
+                            % _stripe_err(e))
+    conn = db()
+    conn.execute("UPDATE drivers SET stripe_account_id=? WHERE id=?",
+                 (acct.id, driver["id"]))
+    conn.commit()
+    conn.close()
+    return acct.id
+
+
+def _connect_onboarding_url(acct_id, req):
+    """Fresh Stripe-hosted onboarding link for an Express account."""
+    _require_connect()
+    base = str(req.base_url).rstrip("/")
+    try:
+        link = stripe.AccountLink.create(
+            account=acct_id,
+            refresh_url=f"{base}/driver.html?connect=refresh",
+            return_url=f"{base}/driver.html?connect=done",
+            type="account_onboarding",
+        )
+    except Exception as e:
+        raise HTTPException(502, "Stripe Connect error: %s"
+                            % _stripe_err(e))
+    return link.url
+
+
+def _stripe_err(e):
+    """Short human-readable Stripe error."""
+    return (getattr(e, "user_message", None)
+            or str(getattr(e, "message", None) or e))[:200]
+
+
+@app.post("/api/drivers/connect/link")
+async def driver_connect_link_self(req: Request):
+    """Logged-in driver gets their own Stripe Express onboarding link."""
+    d = get_driver(req)
+    if not d:
+        raise HTTPException(401, "Not logged in")
+    _require_connect()
+    acct_id = _driver_connect_account(d)
+    url = _connect_onboarding_url(acct_id, req)
+    return {"ok": True, "url": url}
+
+
+@app.get("/api/drivers/connect/status")
+async def driver_connect_status(req: Request):
+    """Driver's Connect onboarding status for the wallet UI."""
+    d = get_driver(req)
+    if not d:
+        raise HTTPException(401, "Not logged in")
+    out = {"connect_enabled": bool(CONNECT_ENABLED and STRIPE_LIVE),
+           "onboarded": False, "payouts_enabled": False,
+           "stripe_account_id": ""}
+    acct_id = (d.get("stripe_account_id") or "").strip()
+    if acct_id and STRIPE_LIVE:
+        out["stripe_account_id"] = acct_id
+        try:
+            acct = stripe.Account.retrieve(acct_id)
+            out["onboarded"] = True
+            out["payouts_enabled"] = bool(acct.get("payouts_enabled", False))
+        except Exception:
+            pass
+    return out
 
 
 # ---------------- DROP MORE marketplace: partnerships ----------------
@@ -5862,14 +5958,55 @@ def op_payouts(x_pin: str = Header(default="")):
 
 @app.post("/api/operator/payouts/{pid}/paid")
 def op_payout_paid(pid: int, x_pin: str = Header(default="")):
-    """Ken sent the money (bank transfer, Cash App, etc.) — mark it paid."""
+    """Ken approves a payout. With Connect active and the driver onboarded,
+    the money moves automatically via Stripe Transfer. Otherwise Ken sends it
+    manually (bank transfer, Cash App, etc.) and this just marks it paid."""
     check_pin(x_pin)
     conn = db()
-    conn.execute("UPDATE payouts SET status='paid', paid_at=? WHERE id=?",
-                 (now_iso(), pid))
+    p = conn.execute("SELECT * FROM payouts WHERE id=?", (pid,)).fetchone()
+    if not p:
+        conn.close()
+        raise HTTPException(404, "Payout not found")
+    if p["status"] == "paid":
+        conn.close()
+        return {"ok": True, "already_paid": True}
+    d = conn.execute("SELECT * FROM drivers WHERE id=?",
+                     (p["driver_id"],)).fetchone()
+    conn.close()
+    transfer_id = ""
+    automatic = False
+    if CONNECT_ENABLED and STRIPE_LIVE and d and (d["stripe_account_id"] or "").strip():
+        try:
+            acct = stripe.Account.retrieve(d["stripe_account_id"])
+            if acct.get("payouts_enabled", False):
+                t = stripe.Transfer.create(
+                    amount=int(round(p["amount"] * 100)),
+                    currency="usd",
+                    destination=d["stripe_account_id"],
+                    description="Drop driver payout #%d" % pid,
+                )
+                transfer_id = t.id
+                automatic = True
+            else:
+                raise HTTPException(400,
+                    "This driver hasn't finished bank setup yet. Ask them to tap "
+                    "'Set up bank payouts' in their driver app, or send it manually.")
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(502,
+                "Automatic transfer failed (%s). Send it manually, then tap Mark paid again."
+                % _stripe_err(e))
+    conn = db()
+    if transfer_id:
+        conn.execute("UPDATE payouts SET status='paid', paid_at=?, stripe_transfer_id=? WHERE id=?",
+                     (now_iso(), transfer_id, pid))
+    else:
+        conn.execute("UPDATE payouts SET status='paid', paid_at=? WHERE id=?",
+                     (now_iso(), pid))
     conn.commit()
     conn.close()
-    return {"ok": True}
+    return {"ok": True, "automatic": automatic, "transfer_id": transfer_id}
 
 
 @app.post("/api/investors/interest")
