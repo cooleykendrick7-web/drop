@@ -24,6 +24,7 @@
   <label>PIN</label><input id="pin" inputmode="numeric" type="password" placeholder="Enter PIN">
   <button class="btn" id="gobtn">Unlock</button>
   <p class="small" id="loginmsg"></p>
+  <p class="small"><a href="#" id="resetpin" style="opacity:.6">having trouble? tap to clear saved login</a></p>
 </div>
 
 <div id="app" style="display:none">
@@ -365,8 +366,16 @@ $('gobtn').onclick=async()=>{
   loadOrders(true);
 };
 PIN=localStorage.getItem('droppin')||'';
-if(PIN){$('login').style.display='none';$('app').style.display='block';loadOrders(true);}
+(async()=>{
+  if(!PIN) return;
+  try{
+    const r=await fetch('/api/operator/orders',{headers:H()});
+    if(r.status===401){doLogout();return;}  // stale/bad saved PIN -> force fresh login
+  }catch(e){return;}  // offline: leave as-is, login screen stays hidden
+  $('login').style.display='none';$('app').style.display='block';loadOrders(true);
+})();
 $('logoutbtn').onclick=()=>{doLogout();};
+$('resetpin').onclick=(e)=>{e.preventDefault();doLogout();$('pin').value='';$('loginmsg').textContent='Cleared. Type your PIN and tap Unlock.';};
 
 async function activateSched(oid){
   if(!confirm('Activate order #'+oid+' now?'))return;
