@@ -4876,7 +4876,7 @@ def migrate_rides_growth():
         discount_pct REAL DEFAULT 10,
         stripe_payment_id TEXT DEFAULT '')""")
     # business accounts (companies buying rides for staff/customers)
-    conn.execute("""CREATE TABLE IF NOT EXISTS business_accounts (
+    conn.execute("""CREATE TABLE IF NOT EXISTS ride_business_accounts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL, contact_name TEXT DEFAULT '',
         email TEXT DEFAULT '', phone TEXT DEFAULT '',
@@ -4935,7 +4935,7 @@ def compute_ride_fare(p_lat, p_lng, d_lat, d_lng, miles, tip=0, priority=False,
     business_discount = 0
     if business_code:
         conn = db()
-        b = conn.execute("SELECT discount_pct FROM business_accounts"
+        b = conn.execute("SELECT discount_pct FROM ride_business_accounts"
                          " WHERE code=? AND status='active'",
                          (business_code.strip().upper(),)).fetchone()
         conn.close()
@@ -5396,7 +5396,7 @@ def validate_business_code(code: str = ""):
     if not code:
         return {"valid": False}
     conn = db()
-    b = conn.execute("SELECT name, discount_pct FROM business_accounts"
+    b = conn.execute("SELECT name, discount_pct FROM ride_business_accounts"
                      " WHERE code=? AND status='active'", (code,)).fetchone()
     conn.close()
     if not b:
@@ -5408,7 +5408,7 @@ def validate_business_code(code: str = ""):
 def operator_business_list(x_pin: str = Header(default="")):
     check_pin(x_pin)
     conn = db()
-    rows = conn.execute("SELECT * FROM business_accounts ORDER BY id DESC").fetchall()
+    rows = conn.execute("SELECT * FROM ride_business_accounts ORDER BY id DESC").fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
@@ -5425,7 +5425,7 @@ async def operator_business_create(req: Request, x_pin: str = Header(default="")
     code = "BIZ-" + "".join(_rand.choices(_str.ascii_uppercase + _str.digits, k=6))
     conn = db()
     cur = conn.execute(
-        "INSERT INTO business_accounts(name, contact_name, email, phone, code,"
+        "INSERT INTO ride_business_accounts(name, contact_name, email, phone, code,"
         " discount_pct, status, created_at) VALUES(?,?,?,?,?,?,?,?)",
         (name, (body.get("contact_name") or "").strip()[:80],
          (body.get("email") or "").strip()[:120],
@@ -5443,7 +5443,7 @@ async def operator_business_status(bid: int, req: Request, x_pin: str = Header(d
     body = await req.json()
     status = "active" if body.get("active") else "paused"
     conn = db()
-    conn.execute("UPDATE business_accounts SET status=? WHERE id=?", (status, bid))
+    conn.execute("UPDATE ride_business_accounts SET status=? WHERE id=?", (status, bid))
     conn.commit()
     conn.close()
     return {"ok": True, "status": status}
@@ -5454,7 +5454,7 @@ def operator_business_rides(bid: int, x_pin: str = Header(default="")):
     """Rides billed to a business account (for invoicing)."""
     check_pin(x_pin)
     conn = db()
-    b = conn.execute("SELECT * FROM business_accounts WHERE id=?", (bid,)).fetchone()
+    b = conn.execute("SELECT * FROM ride_business_accounts WHERE id=?", (bid,)).fetchone()
     if not b:
         conn.close()
         raise HTTPException(404, "Business not found")
