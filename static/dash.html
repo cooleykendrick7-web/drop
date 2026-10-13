@@ -474,6 +474,20 @@ $('pausetoggle').onclick=async()=>{
     body:JSON.stringify({accepting_orders:!s.accepting_orders})});
   loadSet();
 };
+async function loadSet(){
+  try{
+    const s=await (await fetch('/api/operator/settings',{headers:H()})).json();
+    if($('sfee')) $('sfee').value=s.delivery_fee;
+    if($('sgas')) $('sgas').value=s.gas_pct;
+    if($('smpd')) $('smpd').value=s.mins_per_delivery;
+    if($('stopic')) $('stopic').value=s.ntfy_topic||'';
+    if($('szone')) $('szone').value=s.delivery_zone||'';
+    if($('sopen')) $('sopen').value=s.open_hour;
+    if($('sclose')) $('sclose').value=s.close_hour;
+    if($('sopin')) $('sopin').value=s.owner_pin||'';
+    if($('setmsg')) $('setmsg').textContent=s.owner_pin?'✅ Owner driver PIN is set.':'';
+  }catch(e){}
+}
 $('saveset').onclick=async()=>{
   const body={delivery_fee:parseFloat($('sfee').value),gas_pct:parseFloat($('sgas').value)||0,
     mins_per_delivery:parseInt($('smpd').value)||18,max_queue:parseInt($('smaxq').value)||8,

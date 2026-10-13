@@ -1194,6 +1194,8 @@ def op_get_settings(x_pin: str = Header(default="")):
             "open_hour": oh, "close_hour": ch,
             "delivery_zone": get_setting("delivery_zone") or "Bismarck, ND",
             "pin": get_setting("pin"),
+            "owner_pin": get_setting("owner_pin") or "",
+            "gas_pct": float(get_setting("gas_pct") or 10),
             "ntfy_topic": get_setting("ntfy_topic"),
             "tagline": get_setting("tagline")}
 
@@ -1229,6 +1231,12 @@ async def op_put_settings(req: Request, x_pin: str = Header(default="")):
             raise HTTPException(400, "PIN must be 4–8 digits")
         set_setting("pin", pin)
         out["pin"] = "updated"
+    if "owner_pin" in body:
+        opin = str(body["owner_pin"]).strip()
+        if opin and not (opin.isdigit() and len(opin) == 6):
+            raise HTTPException(400, "Owner PIN must be 6 digits")
+        set_setting("owner_pin", opin)
+        out["owner_pin"] = "updated" if opin else "cleared"
     if "ntfy_topic" in body:
         topic = str(body["ntfy_topic"]).strip()
         set_setting("ntfy_topic", topic)
@@ -1248,6 +1256,10 @@ async def op_put_settings(req: Request, x_pin: str = Header(default="")):
         z = str(body["delivery_zone"]).strip()[:80] or "Bismarck, ND"
         set_setting("delivery_zone", z)
         out["delivery_zone"] = z
+    if "gas_pct" in body:
+        gp = max(0, min(50, float(body["gas_pct"] or 0)))
+        set_setting("gas_pct", str(gp))
+        out["gas_pct"] = gp
     return out
 
 
