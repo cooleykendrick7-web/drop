@@ -95,6 +95,23 @@
     </div>
     <div id="b-quote" style="margin:12px 0"></div>
     <button class="lux-btn ghost" id="b-quote-btn">Get my price</button>
+    <div id="b-extras" style="margin-top:10px;display:none">
+      <label style="display:flex;gap:8px;align-items:flex-start">
+        <input type="checkbox" id="b-priority" style="margin-top:4px">
+        <span class="small">⚡ <b>Priority pickup</b> — get matched first <span id="b-priority-fee"></span></span>
+      </label>
+      <label>Extra stops <span class="small">(optional, up to 3)</span></label>
+      <input class="lux-input" id="b-stop1" placeholder="Stop 1 address (optional)">
+      <input class="lux-input" id="b-stop2" placeholder="Stop 2 address (optional)" style="margin-top:6px">
+      <input class="lux-input" id="b-stop3" placeholder="Stop 3 address (optional)" style="margin-top:6px">
+      <label>Business code <span class="small">(optional — if your company covers rides)</span></label>
+      <input class="lux-input" id="b-bizcode" placeholder="e.g. BIZ-ABC123">
+      <p class="small" id="b-bizmsg"></p>
+      <div id="b-favwrap" style="display:none">
+        <label>⭐ Favorite driver</label>
+        <select class="lux-input" id="b-fav"><option value="0">Best available driver</option></select>
+      </div>
+    </div>
     <button class="lux-btn" id="b-go" style="display:none">Pay &amp; Request Ride →</button>
     <p class="small" id="b-msg"></p>
     <label style="display:flex;gap:8px;align-items:flex-start;margin-top:10px">
@@ -195,6 +212,14 @@ async function getQuote(from,to,pCoords,dCoords){
   let url=`/api/rides/quote?pickup_address=${encodeURIComponent(from)}&dropoff_address=${encodeURIComponent(to)}`;
   if(pCoords) url+=`&plat=${pCoords.lat}&plng=${pCoords.lng}`;
   if(dCoords) url+=`&dlat=${dCoords.lat}&dlng=${dCoords.lng}`;
+  const pri=$('b-priority')&&$('b-priority').checked;
+  if(pri) url+=`&priority=true`;
+  const stops=[$('b-stop1'),$('b-stop2'),$('b-stop3')].filter(e=>e&&e.value.trim()).length;
+  if(stops) url+=`&extra_stops=${stops}`;
+  const bc=$('b-bizcode')&&$('b-bizcode').value.trim();
+  if(bc) url+=`&business_code=${encodeURIComponent(bc)}`;
+  const ph=$('b-phone')&&$('b-phone').value.trim();
+  if(ph) url+=`&rider_phone=${encodeURIComponent(ph)}`;
   const r=await(await fetch(url)).json();
   if(r.detail) throw new Error(r.detail);
   return r;
@@ -211,11 +236,17 @@ function wireAC(id,key){
 });
 
 function fareHTML(q, showTip){
+  const discLbl={first_ride:'🎉 First-ride discount',ride_pass:'🎫 Drop Pass discount',business:'🏢 Business discount'}[q.discount_kind]||'Discount';
   return `<div class="fare-row"><span>Base fare</span><b>$${q.base_fare.toFixed(2)}</b></div>
-    <div class="fare-row"><span class="small">${q.miles} mi × $${q.per_mile.toFixed(2)}/mi</span><b>$${q.mileage_charge.toFixed(2)}</b></div>
+    ${q.is_airport_flat?`<div class="fare-row"><span class="small">✈️ Airport flat rate applied</span></div>`
+      :`<div class="fare-row"><span class="small">${q.miles} mi × $${q.per_mile.toFixed(2)}/mi</span><b>$${q.mileage_charge.toFixed(2)}</b></div>`}
+    ${q.extra_stop_fee?`<div class="fare-row"><span class="small">📍 Extra stops</span><b>$${q.extra_stop_fee.toFixed(2)}</b></div>`:''}
     <div class="fare-row"><span class="small">⛽ Gas fund (${q.gas_pct}%)</span><b>$${q.gas_fee.toFixed(2)}</b></div>
+    ${q.priority_fee?`<div class="fare-row"><span class="small">⚡ Priority pickup</span><b>$${q.priority_fee.toFixed(2)}</b></div>`:''}
+    ${q.discount?`<div class="fare-row"><span class="small">${discLbl}</span><b style="color:#4ade80">−$${q.discount.toFixed(2)}</b></div>`:''}
     ${showTip?`<div class="fare-row"><span class="small">Driver tip</span><b>$${tip.toFixed(2)}</b></div>`:''}
     <div class="fare-row fare-total"><span><b>You'll pay</b></span><b class="gold">$${(q.total+(showTip?tip:0)).toFixed(2)}</b></div>
+    <div class="ai-note" style="border-color:#4ade80">🤝 Your driver gets <b>$${(q.driver_pay_est+(showTip?tip:0)).toFixed(2)}</b> of this ride — 70% of the fare + 100% of tips.</div>
     ${q.ai_note?`<div class="ai-note">🤖 ${q.ai_note}</div>`:''}
     ${q.too_far?`<div class="ai-note">⚠️ This ride is ${q.miles} miles — beyond our ${q.max_miles}-mile service area. Contact us for a custom long-distance quote.</div>`:''}
     ${(!q.too_far&&q.approximate)?`<p class="small">📍 Approximate price — one address mapped to city level. Exact fare confirmed when you book.</p>`:''}`;
@@ -241,8 +272,42 @@ $('b-quote-btn').onclick=async()=>{
     lastQuote=await getQuote(f,t,ac.bFrom||gps.bFrom,ac.bTo);
     renderQuote();
     $('b-go').style.display=lastQuote.too_far?'none':'block';
+    $('b-extras').style.display='block';
+    loadFavorites();
   }catch(e){$('b-msg').textContent='Error: '+e.message;}
 };
+
+// re-quote when extras change
+['b-priority','b-stop1','b-stop2','b-stop3','b-bizcode'].forEach(id=>{
+  const el=$(id); if(el) el.addEventListener('change',()=>{ if(lastQuote) $('b-quote-btn').click(); });
+});
+// validate business code live
+let _bizT=null;
+$('b-bizcode').addEventListener('input',()=>{
+  clearTimeout(_bizT);
+  _bizT=setTimeout(async()=>{
+    const c=$('b-bizcode').value.trim();
+    if(!c){$('b-bizmsg').textContent='';return;}
+    try{
+      const r=await(await fetch('/api/business/validate?code='+encodeURIComponent(c))).json();
+      $('b-bizmsg').textContent=r.valid?`✅ ${r.name} — ${r.discount_pct}% off applied`:'❌ Code not recognized';
+      $('b-bizmsg').style.color=r.valid?'#4ade80':'#f66';
+    }catch(e){}
+  },500);
+});
+async function loadFavorites(){
+  const ph=$('b-phone').value.trim();
+  if(!ph){$('b-favwrap').style.display='none';return;}
+  try{
+    const favs=await(await fetch('/api/favorites?phone='+encodeURIComponent(ph))).json();
+    if(favs.length){
+      $('b-fav').innerHTML='<option value="0">Best available driver</option>'+favs.map(f=>
+        `<option value="${f.id}">⭐ ${f.name.replace(/</g,'&lt;')}${f.vehicle_make?` — ${f.vehicle_color} ${f.vehicle_make} ${f.vehicle_model}`:''}</option>`).join('');
+      $('b-favwrap').style.display='block';
+    }else{$('b-favwrap').style.display='none';}
+  }catch(e){}
+}
+$('b-phone').addEventListener('change',loadFavorites);
 
 function renderQuote(){
   if(!lastQuote)return;
@@ -251,6 +316,7 @@ function renderQuote(){
 
 $('b-go').onclick=async()=>{
   if(!$('b-wait-ok').checked){$('b-msg').textContent='Please accept the wait-time terms first.';return;}
+  const stops=[$('b-stop1').value.trim(),$('b-stop2').value.trim(),$('b-stop3').value.trim()].filter(s=>s);
   const body={
     pickup_address:$('b-from').value.trim(),
     dropoff_address:$('b-to').value.trim(),
@@ -260,6 +326,10 @@ $('b-go').onclick=async()=>{
     phone:$('b-phone').value.trim(),
     notes:$('b-notes').value.trim(),
     tip:tip,
+    priority:$('b-priority').checked,
+    extra_stops:stops,
+    business_code:$('b-bizcode').value.trim(),
+    favorite_driver_id:parseInt(($('b-fav')||{value:'0'}).value)||0,
   };
   if(!body.pickup_address||!body.dropoff_address||!body.customer_name){
     $('b-msg').textContent='Pickup, dropoff, and your name are required.';return;

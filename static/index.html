@@ -103,6 +103,11 @@
   <div style="margin-top:8px"><a href="/#book">🚗 Book a ride</a> · <a href="/drive.html">🚗 Drive for Drop</a> · <a href="/investors.html">💰 Investors</a> · <a href="/terms">Terms</a></div>
 </div>
 
+<div class="card" id="perks-card" style="display:none">
+  <b>🎁 Drop Perks — deals from local businesses</b>
+  <div id="perks-list" style="margin-top:8px"></div>
+</div>
+
 <!-- Dropper AI assistant -->
 <div id="dropper" title="Chat with Dropper">🤖</div>
 <div id="dropper-chat">
@@ -116,6 +121,19 @@
 
 <script>
 const $=id=>document.getElementById(id);
+
+// Drop Perks teaser
+(async()=>{
+  try{
+    const r=await(await fetch('/api/perks')).json();
+    if(r.length){
+      $('perks-card').style.display='block';
+      $('perks-list').innerHTML=r.slice(0,3).map(p=>
+        `<p class="small" style="margin:6px 0"><b>${p.title.replace(/</g,'&lt;')}</b> <span style="opacity:.7">· ${p.business.replace(/</g,'&lt;')}</span></p>`).join('')
+        +`<p class="small"><a href="/account.html">See all perks →</a></p>`;
+    }
+  }catch(e){}
+})();
 
 function buildAddr(p){
   const s=$(p+'street').value.trim(), a=$(p+'apt').value.trim();

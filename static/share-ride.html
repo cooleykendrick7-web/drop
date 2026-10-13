@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Track a Drop ride</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+body{font-family:-apple-system,system-ui,sans-serif;background:#0b0b10;color:#f5f5f5;margin:0;padding:16px;max-width:640px;margin:auto}
+h1{font-size:1.3rem}
+.card{background:#15151d;border:1px solid #2a2a35;border-radius:14px;padding:14px;margin:12px 0}
+.small{font-size:.85rem;opacity:.75}
+#map{height:320px;border-radius:14px;margin:12px 0}
+.status{font-size:1.05rem;font-weight:700}
+.pill{display:inline-block;padding:4px 12px;border-radius:999px;font-size:.8rem;font-weight:700;background:#1d2b1d;color:#4ade80}
+</style></head><body>
+<h1>🚗 <span id="who">Drop ride</span> <span class="pill" id="st">…</span></h1>
+<div id="map"></div>
+<div class="card"><div class="status" id="route">Loading…</div>
+<p class="small" id="detail"></p></div>
+<div class="card" id="carcard" style="display:none"><b>🚙 The car</b><p class="small" id="carinfo"></p></div>
+<p class="small" style="text-align:center">Live tracking by <b>Drop</b> — shared by the rider.</p>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+const token=new URLSearchParams(location.search).get('token')||'';
+let map=null, markers={};
+const STLBL={requested:'Requested',assigned:'Driver assigned',in_progress:'On the way',completed:'Completed',cancelled:'Cancelled'};
+async function load(){
+  if(!token){$('route').textContent='Invalid link.';return;}
+  try{
+    const r=await(await fetch('/api/rides/shared/'+token)).json();
+    if(r.detail){$('route').textContent='Ride not found.';return;}
+    $('who').textContent=(r.rider_name||'Rider')+"'s ride";
+    $('st').textContent=STLBL[r.status]||r.status;
+    $('route').textContent=`${r.pickup_address} → ${r.dropoff_address}`;
+    $('detail').textContent=(r.driver_name?`Driver: ${r.driver_name} · `:'')+'Updated '+new Date(r.updated_at).toLocaleTimeString();
+    if(r.car){$('carcard').style.display='block';
+      $('carinfo').textContent=`${r.car.color} ${r.car.year} ${r.car.make} ${r.car.model}`.trim()+(r.car.plate?` · Plate ${r.car.plate}`:'');}
+    if(!map){
+      map=L.map('map').setView([r.pickup_lat||39,-98],13);
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(map);
+      if(r.pickup_lat) L.marker([r.pickup_lat,r.pickup_lng]).addTo(map).bindPopup('Pickup');
+      if(r.dropoff_lat) L.marker([r.dropoff_lat,r.dropoff_lng]).addTo(map).bindPopup('Dropoff');
+    }
+    if(r.driver_lat){
+      if(markers.d) markers.d.setLatLng([r.driver_lat,r.driver_lng]);
+      else markers.d=L.marker([r.driver_lat,r.driver_lng],{icon:L.divIcon({html:'🚗',className:''})}).addTo(map);
+    }
+  }catch(e){$('route').textContent='Could not load ride.';}
+}
+load(); setInterval(load,15000);
+</script></body></html>

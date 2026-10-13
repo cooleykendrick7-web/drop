@@ -113,14 +113,32 @@ function render(r){
     html+=`<button class="btn" id="incar" style="width:100%">✅ I'm in the car</button>
       <p class="small" style="text-align:center">Tap when your driver picks you up</p>`;
   }
+  if(['assigned','in_progress'].includes(r.status) && r.share_token){
+    html+=`<button class="btn ghost" id="sharebtn" style="width:100%">📤 Share my ride — let family track live</button>`;
+  }
   if(r.status==='completed' && !r.rating){
     html+=`<div class="card"><h3>Rate your driver</h3>
       <div style="display:flex;gap:8px;justify-content:center;margin:12px 0" id="stars">
         ${[1,2,3,4,5].map(n=>`<button class="btn ghost" data-s="${n}" style="font-size:1.5rem;width:auto;padding:8px 12px">⭐</button>`).join('')}
       </div>
-      <button class="btn ghost" id="tipbtn" style="width:100%">💰 Add a tip</button></div>`;
+      ${(!r.tip||r.tip==0)?`<p class="small" style="text-align:center">💡 Loved the ride? A tip goes 100% to your driver.</p>`:''}
+      <button class="btn ghost" id="tipbtn" style="width:100%">💰 Add a tip</button>
+      ${r.driver_id?`<button class="btn ghost" id="favbtn" style="width:100%;margin-top:8px">⭐ Favorite ${(r.driver_name||'driver').replace(/</g,'&lt;')} — request them next time</button><p class="small" id="favmsg" style="text-align:center"></p>`:''}</div>`;
   }
   $('actions').innerHTML=html;
+
+  const sb=$('sharebtn');
+  if(sb) sb.onclick=()=>{
+    const link=location.origin+'/share-ride.html?token='+r.share_token;
+    if(navigator.share){navigator.share({title:'Track my Drop ride',url:link}).catch(()=>{});}
+    else{navigator.clipboard.writeText(link).then(()=>{sb.textContent='✅ Link copied — text it to family!';});}
+  };
+  const fb=$('favbtn');
+  if(fb) fb.onclick=async()=>{
+    const res=await(await fetch('/api/favorites',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({phone:r.rider_phone,driver_id:r.driver_id})})).json();
+    $('favmsg').textContent=res.ok?`✅ ${res.driver_name} saved as a favorite!`:'❌ '+(res.detail||'failed');
+  };
 
   const ib=$('incar');
   if(ib) ib.onclick=async()=>{
@@ -139,7 +157,7 @@ function render(r){
     const t=prompt('Tip amount ($):','3');
     if(t&&parseFloat(t)>0){
       fetch('/api/rides/'+rid+'/rate',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({rating:5, tip:parseFloat(t)})}).then(()=>load());
+        body:JSON.stringify({rating:5, extra_tip:parseFloat(t)})}).then(()=>load());
     }
   };
 }

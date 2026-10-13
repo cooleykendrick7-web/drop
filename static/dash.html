@@ -100,6 +100,35 @@
       <div class="row"><div style="flex:1"><label class="small">Min profit per order $</label><input id="fs-minp" inputmode="decimal"></div>
       <div style="flex:1"><label class="small">&nbsp;</label><button class="btn small" id="fs-save">Save rules</button></div></div>
       <p class="small" id="fs-msg"></p></div>
+    <div class="card"><h3>🚀 Growth settings</h3>
+      <p class="small">Discounts come out of your cut — drivers always get their full 70% + tips.</p>
+      <div class="row"><div style="flex:1"><label class="small">Ride base fare $</label><input id="gs-base" inputmode="decimal"></div>
+      <div style="flex:1"><label class="small">Ride per mile $</label><input id="gs-mile" inputmode="decimal"></div></div>
+      <div class="row"><div style="flex:1"><label class="small">Gas fund %</label><input id="gs-gas" inputmode="decimal"></div>
+      <div style="flex:1"><label class="small">First-ride discount %</label><input id="gs-first" inputmode="decimal"></div></div>
+      <div class="row"><div style="flex:1"><label class="small">Priority pickup fee $</label><input id="gs-prio" inputmode="decimal"></div>
+      <div style="flex:1"><label class="small">Extra stop fee $</label><input id="gs-stop" inputmode="decimal"></div></div>
+      <div class="row"><div style="flex:1"><label class="small">Drop Pass price $/mo</label><input id="gs-passprice" inputmode="decimal"></div>
+      <div style="flex:1"><label class="small">Drop Pass discount %</label><input id="gs-passpct" inputmode="decimal"></div></div>
+      <h3 style="margin-top:12px">✈️ Airport flat rate <span class="small">(0 = off)</span></h3>
+      <div class="row"><div style="flex:1"><label class="small">Flat rate $</label><input id="gs-airrate" inputmode="decimal"></div>
+      <div style="flex:1"><label class="small">Airport name</label><input id="gs-airname" placeholder="Bismarck Airport"></div></div>
+      <div class="row"><div style="flex:1"><label class="small">Airport lat</label><input id="gs-airlat" inputmode="decimal"></div>
+      <div style="flex:1"><label class="small">Airport lng</label><input id="gs-airlng" inputmode="decimal"></div>
+      <div style="flex:1"><label class="small">Radius (mi)</label><input id="gs-airrad" inputmode="decimal"></div></div>
+      <div class="row"><div style="flex:1"><label class="small">&nbsp;</label><button class="btn small" id="gs-save">Save growth settings</button></div></div>
+      <p class="small" id="gs-msg"></p></div>
+    <div class="card"><h3>🏢 Business accounts</h3>
+      <p class="small">Companies get a code — their people book with it, rides get tagged for invoicing.</p>
+      <div id="bizlist"><p class="small">Loading…</p></div>
+      <div class="card"><h3 style="margin-top:0">Add business</h3>
+      <div class="row"><div style="flex:1"><label class="small">Business name *</label><input id="bz-name"></div>
+      <div style="flex:1"><label class="small">Discount %</label><input id="bz-disc" inputmode="decimal" placeholder="10"></div></div>
+      <div class="row"><div style="flex:1"><label class="small">Contact name</label><input id="bz-contact"></div>
+      <div style="flex:1"><label class="small">Phone</label><input id="bz-phone" inputmode="tel"></div></div>
+      <label class="small">Email</label><input id="bz-email" type="email">
+      <button class="btn small" id="bz-add" style="margin-top:8px">Add business</button>
+      <p class="small" id="bz-msg"></p></div></div>
     <div class="card"><h3>💸 Payout requests</h3><div id="payoutlist"><p class="small">Loading…</p></div></div>
     <div class="card"><h3>🔗 Stripe Connect</h3><div id="connectbox"><p class="small">Loading…</p></div></div>
     <h3>Per-order breakdown</h3>
@@ -295,7 +324,7 @@ document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.tabs button').forEach(x=>x.classList.remove('on'));
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
   b.classList.add('on'); $('t-'+b.dataset.t).classList.add('on');
-  if(b.dataset.t==='money'){loadMoney();loadEarn();}
+  if(b.dataset.t==='money'){loadMoney();loadEarn();loadGrowth();loadBiz();}
   if(b.dataset.t==='growth'){loadDeals();loadOutreach();loadBiz();loadPromos();loadInv();}
   if(b.dataset.t==='insights'){loadStats();loadAudit();}
   if(b.dataset.t==='set') loadSet(); if(b.dataset.t==='sup') loadTix();
@@ -804,6 +833,69 @@ $('fs-save').onclick=async()=>{
   await fetch('/api/operator/financial-settings',{method:'POST',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify(body)});
   $('fs-msg').textContent='✅ Pricing rules saved.'; loadMoney();
 };
+/* --- Growth settings --- */
+async function loadGrowth(){
+  const f=await (await fetch('/api/operator/financials',{headers:H()})).json();
+  const p=f.pricing;
+  $('gs-base').value=p.ride_base_fare; $('gs-mile').value=p.ride_per_mile;
+  $('gs-gas').value=p.ride_gas_pct; $('gs-first').value=p.first_ride_discount_pct;
+  $('gs-prio').value=p.priority_pickup_fee; $('gs-stop').value=p.extra_stop_fee;
+  $('gs-passprice').value=p.ride_pass_price; $('gs-passpct').value=p.ride_pass_discount_pct;
+  $('gs-airrate').value=p.airport_flat_rate; $('gs-airname').value=p.airport_name;
+  $('gs-airlat').value=p.airport_lat; $('gs-airlng').value=p.airport_lng;
+  $('gs-airrad').value=p.airport_radius_miles;
+}
+$('gs-save').onclick=async()=>{
+  const body={
+    ride_base_fare:parseFloat($('gs-base').value)||4.99,
+    ride_per_mile:parseFloat($('gs-mile').value)||2.00,
+    ride_gas_pct:parseFloat($('gs-gas').value)||10,
+    first_ride_discount_pct:parseFloat($('gs-first').value)||0,
+    priority_pickup_fee:parseFloat($('gs-prio').value)||0,
+    extra_stop_fee:parseFloat($('gs-stop').value)||0,
+    ride_pass_price:parseFloat($('gs-passprice').value)||49,
+    ride_pass_discount_pct:parseFloat($('gs-passpct').value)||10,
+    airport_flat_rate:parseFloat($('gs-airrate').value)||0,
+    airport_lat:parseFloat($('gs-airlat').value)||0,
+    airport_lng:parseFloat($('gs-airlng').value)||0,
+    airport_radius_miles:parseFloat($('gs-airrad').value)||5,
+    airport_name:$('gs-airname').value.trim()};
+  await fetch('/api/operator/financial-settings',{method:'POST',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify(body)});
+  $('gs-msg').textContent='✅ Growth settings saved.'; loadGrowth();
+};
+/* --- Business accounts --- */
+async function loadBiz(){
+  const b=await (await fetch('/api/operator/business',{headers:H()})).json();
+  $('bizlist').innerHTML=b.map(x=>`
+    <div class="card"><div class="row"><b>${x.name.replace(/</g,'&lt;')}</b>
+      <span class="badge ${x.status==='active'?'open':''}">${x.status.toUpperCase()}</span></div>
+      <p class="small">Code: <b>${x.code}</b> · ${x.discount_pct}% off · ${x.contact_name||'no contact'}</p>
+      <div class="row">
+        <button class="btn ghost small" style="width:auto" onclick="bizRides(${x.id})">🧾 Rides</button>
+        <button class="btn ghost small" style="width:auto" onclick="bizToggle(${x.id},${x.status==='active'?0:1})">${x.status==='active'?'⏸ Pause':'▶ Activate'}</button>
+      </div><div id="bizrides-${x.id}"></div></div>`).join('')
+    ||'<p class="small">No business accounts yet.</p>';
+}
+window.bizToggle=async(id,active)=>{
+  await fetch('/api/operator/business/'+id+'/status',{method:'POST',headers:{...H(),'Content-Type':'application/json'},
+    body:JSON.stringify({active:!!active})});
+  loadBiz();
+};
+window.bizRides=async(id)=>{
+  const el=$('bizrides-'+id);
+  const r=await (await fetch('/api/operator/business/'+id+'/rides',{headers:H()})).json();
+  el.innerHTML=`<p class="small"><b>${r.ride_count} rides · $${r.total.toFixed(2)}</b> — invoice ${r.business.name}</p>`
+    +r.rides.slice(0,10).map(x=>`<p class="small">#${x.id} ${x.rider_name}: $${x.total.toFixed(2)} · ${x.created_at.slice(0,10)}</p>`).join('');
+};
+$('bz-add').onclick=async()=>{
+  const name=$('bz-name').value.trim();
+  if(!name){$('bz-msg').textContent='Enter the business name.';return;}
+  const r=await(await fetch('/api/operator/business',{method:'POST',headers:{...H(),'Content-Type':'application/json'},
+    body:JSON.stringify({name,contact_name:$('bz-contact').value,phone:$('bz-phone').value,
+      email:$('bz-email').value,discount_pct:parseFloat($('bz-disc').value)||10})})).json();
+  $('bz-msg').textContent=r.ok?`✅ Added! Their code: ${r.code}`:'❌ '+(r.detail||'failed');
+  if(r.ok){['bz-name','bz-contact','bz-phone','bz-email','bz-disc'].forEach(i=>$(i).value='');loadBiz();}
+};
 async function loadPayouts(){
   const p=await (await fetch('/api/operator/payouts',{headers:H()})).json();
   const req=p.filter(x=>x.status==='requested');
@@ -869,10 +961,30 @@ async function loadDeals(stage){
         <button class="btn small ghost" onclick="dealStage(${p.id},'approved')">✅ Approve</button>
         <button class="btn small ghost" onclick="dealStage(${p.id},'rejected')">❌ Reject</button>
         <button class="btn small ghost" onclick="dealNotes(${p.id})">📝 Notes</button>
+        <button class="btn small ghost" onclick="dealPerk(${p.id},${p.perk_active?1:0},`${esc(p.perk_title)}`,`${esc(p.perk_details)}`)">🎁 Perk</button>
       </div>
       <div id="deal-${p.id}" style="margin-top:8px"></div>
+      ${p.perk_active?`<p class="small" style="color:#4ade80">🎁 Perk live: <b>${esc(p.perk_title)}</b></p>`:''}
     </div>`).join('')||'<p class="small">No partnership applications yet.</p>';
 }
+window.dealPerk=(id,active,title,details)=>{
+  const box=$('deal-'+id);
+  box.innerHTML=`<div class="card"><h3 style="margin-top:0">🎁 Drop Perk for riders</h3>
+    <label class="small">Perk title *</label><input id="pk-t" value="${title}" placeholder="e.g. 10% off pizza with your Drop receipt">
+    <label class="small">Details</label><input id="pk-d" value="${details}" placeholder="How riders claim it">
+    <label class="small" style="display:flex;gap:8px;align-items:center;margin-top:8px">
+    <input type="checkbox" id="pk-a" ${active?'checked':''}> Show this perk to riders</label>
+    <button class="btn small" id="pk-save" style="margin-top:8px">Save perk</button>
+    <p class="small" id="pk-msg"></p></div>`;
+  $('pk-save').onclick=async()=>{
+    const t=$('pk-t').value.trim();
+    if(!t){$('pk-msg').textContent='Enter a perk title.';return;}
+    await fetch(`/api/operator/partners/${id}/perk`,{method:'POST',
+      headers:{...H(),'Content-Type':'application/json'},
+      body:JSON.stringify({title:t,details:$('pk-d').value,active:$('pk-a').checked})});
+    $('pk-msg').textContent='✅ Perk saved.'; loadDeals();
+  };
+};
 async function dealStage(id,stage){
   const stages={under_review:'Under Review',negotiation:'Negotiation',approved:'Approved',rejected:'Rejected'};
   if((stage==='approved'||stage==='rejected')&&!confirm(`${stages[stage]} deal #${id}?`))return;

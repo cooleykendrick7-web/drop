@@ -82,6 +82,12 @@ async function load(){
     <div id="sched"><p class="small">Loading…</p></div>
     <h2>🧾 My rides</h2>
     <div id="hist"><p class="small">Loading…</p></div>
+    <h2>🎁 Give $5, Get $5</h2>
+    <div class="card" id="refcard"><p class="small">Loading…</p></div>
+    <h2>🎫 Drop Pass</h2>
+    <div class="card" id="passcard"><p class="small">Loading…</p></div>
+    <h2>🎁 Drop Perks</h2>
+    <div id="perks"><p class="small">Loading…</p></div>
     <h2>🔔 Push notifications</h2>
     <div class="card">
       <p class="small">Get ride updates on your phone (driver assigned → arriving → in progress → completed).</p>
@@ -105,6 +111,74 @@ async function load(){
   window.delPlace=async(id)=>{
     await fetch('/api/places/'+id,{method:'DELETE'});
     loadPlaces();
+
+  // referrals — Give $5, Get $5
+  async function loadReferral(){
+    try{
+      const r=await(await fetch('/api/referral/code')).json();
+      $('refcard').innerHTML=`
+        <p><b>Your code: <span style="color:#f6e27a">${r.code}</span></b> · ${r.referrals} friend${r.referrals==1?'':'s'} joined · $${r.credit.toFixed(2)} credit</p>
+        <p class="small">Share your link — friends get $5 off, you get $5 credit when they ride.</p>
+        <div class="row"><input id="reflink" readonly value="${r.link}" style="flex:1;margin-right:6px">
+        <button class="btn small" id="refcopy" style="width:auto">Copy</button></div>
+        <div class="card" style="margin-top:10px"><h3 style="margin-top:0">Have a code?</h3>
+        <div class="row"><input id="refapply" placeholder="Enter friend's code" style="flex:1;margin-right:6px">
+        <button class="btn small" id="refgo" style="width:auto">Apply</button></div>
+        <p class="small" id="refmsg"></p></div>`;
+      $('refcopy').onclick=()=>{navigator.clipboard.writeText(r.link);$('refcopy').textContent='✅ Copied';};
+      $('refgo').onclick=async()=>{
+        const c=$('refapply').value.trim();
+        if(!c){$('refmsg').textContent='Enter a code.';return;}
+        const j=await(await fetch('/api/referral/apply',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({code:c})})).json();
+        $('refmsg').textContent=j.ok?'✅ $5 credit added to both accounts!':'❌ '+(j.detail||'failed');
+        if(j.ok) loadReferral();
+      };
+    }catch(e){$('refcard').innerHTML='<p class="small">Log in to see your referral code.</p>';}
+  }
+  loadReferral();
+
+  // Drop Pass — monthly ride pass
+  async function loadPass(){
+    try{
+      const r=await(await fetch('/api/passes/mine')).json();
+      if(r.active){
+        $('passcard').innerHTML=`<p>✅ <b>Drop Pass active</b> — ${r.discount_pct}% off every ride until ${r.expires_at.slice(0,10)}.</p>`;
+      }else{
+        const q=new URLSearchParams(location.search);
+        $('passcard').innerHTML=`
+          ${q.get('pass')==='active'?'<p style="color:#4ade80">✅ Drop Pass activated! Your discount applies automatically.</p>':''}
+          <p><b>🎫 Drop Pass — $49/month</b><br><span class="small">10% off every ride for 30 days. Pays for itself in a few trips.</span></p>
+          <label class="small">Phone number for the pass</label>
+          <input id="pass-phone" placeholder="Your phone" inputmode="tel" style="width:100%;box-sizing:border-box">
+          <button class="btn" id="passbuy" style="width:100%;margin-top:8px">Get Drop Pass →</button>
+          <p class="small" id="passmsg"></p>`;
+        $('passbuy').onclick=async()=>{
+          const ph=$('pass-phone').value.trim();
+          if(!ph){$('passmsg').textContent='Enter your phone number.';return;}
+          $('passmsg').textContent='Opening checkout…';
+          const j=await(await fetch('/api/passes/buy',{method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({phone:ph})})).json();
+          if(j.url) location.href=j.url;
+          else $('passmsg').textContent='❌ '+(j.detail||'failed');
+        };
+      }
+    }catch(e){$('passcard').innerHTML='<p class="small">Could not load pass status.</p>';}
+  }
+  loadPass();
+
+  // Drop Perks
+  async function loadPerks(){
+    try{
+      const r=await(await fetch('/api/perks')).json();
+      $('perks').innerHTML=r.map(p=>`
+        <div class="card" style="margin:6px 0"><b>🎁 ${p.title.replace(/</g,'&lt;')}</b>
+        <span class="small"> · ${p.business.replace(/</g,'&lt;')}</span>
+        <p class="small">${p.details.replace(/</g,'&lt;')}</p></div>`).join('')
+        ||'<p class="small">No perks yet — check back soon!</p>';
+    }catch(e){$('perks').innerHTML='<p class="small">No perks right now.</p>';}
+  }
+  loadPerks();
   };
   $('pl-add').onclick=async()=>{
     const label=$('pl-label').value.trim(), addr=$('pl-addr').value.trim();

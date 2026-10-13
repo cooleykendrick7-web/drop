@@ -877,6 +877,11 @@ def pay_success(session_id: str):
     oid = int(session.metadata.get("drop_order_id", 0) or 0)
     rid = int(session.metadata.get("drop_ride_id", 0) or 0)
     sched_id = int(session.metadata.get("drop_scheduled_id", 0) or 0)
+    pass_phone = (session.metadata.get("drop_pass_phone") or "").strip()
+    pass_user_id = int(session.metadata.get("drop_pass_user_id", 0) or 0)
+    if session.payment_status == "paid" and pass_phone:
+        _grant_ride_pass(pass_phone, pass_user_id, session.get("payment_intent", ""))
+        return RedirectResponse("/account.html?pass=active", status_code=303)
     if session.payment_status == "paid" and sched_id:
         conn = db()
         r = conn.execute("SELECT * FROM scheduled_rides WHERE id=?",
@@ -3572,10 +3577,11 @@ def pending_ai_drivers(req: Request, x_pin: str = Header(default="")):
 def auto_assign_driver(ride_id):
     """Pick the best available driver for a ride. Returns driver or None."""
     conn = db()
-    r0 = conn.execute("SELECT pickup_lat, pickup_lng FROM rides WHERE id=?",
+    r0 = conn.execute("SELECT pickup_lat, pickup_lng, favorite_driver_id FROM rides WHERE id=?",
                       (ride_id,)).fetchone()
     plat = (r0["pickup_lat"] or 0) if r0 else 0
     plng = (r0["pickup_lng"] or 0) if r0 else 0
+    fav_id = (r0["favorite_driver_id"] or 0) if r0 else 0
     # approved drivers: online first, then closest to pickup, then fewest deliveries
     drivers = conn.execute(
         "SELECT * FROM drivers WHERE status='approved'").fetchall()
@@ -3583,17 +3589,26 @@ def auto_assign_driver(ride_id):
         conn.close()
         return None
 
-    def dist(d):
-        lat, lng = d["last_lat"] or 0, d["last_lng"] or 0
-        if not lat or not plat:
-            return 99999  # no GPS known — goes last
-        return haversine_miles(lat, lng, plat, plng)
+    # favorite driver requested and available? They jump the line.
+    drv = None
+    if fav_id:
+        for d in drivers:
+            if d["id"] == fav_id and d["is_online"]:
+                drv = dict(d)
+                break
 
-    drivers = sorted(drivers,
-                     key=lambda d: (0 if d["is_online"] else 1,
-                                    dist(d),
-                                    d["deliveries"] or 0))
-    drv = dict(drivers[0])
+    if drv is None:
+        def dist(d):
+            lat, lng = d["last_lat"] or 0, d["last_lng"] or 0
+            if not lat or not plat:
+                return 99999  # no GPS known — goes last
+            return haversine_miles(lat, lng, plat, plng)
+
+        drivers = sorted(drivers,
+                         key=lambda d: (0 if d["is_online"] else 1,
+                                        dist(d),
+                                        d["deliveries"] or 0))
+        drv = dict(drivers[0])
 
     now = datetime.now(timezone.utc).isoformat()
     conn.execute(
@@ -4752,7 +4767,9 @@ def scheduled_page():
 @app.get("/api/rides/quote")
 def rides_quote(pickup_address: str = "", dropoff_address: str = "",
                 plat: float = None, plng: float = None,
-                dlat: float = None, dlng: float = None):
+                dlat: float = None, dlng: float = None,
+                priority: bool = False, extra_stops: int = 0,
+                business_code: str = "", rider_phone: str = ""):
     """Passenger ride fare estimate. Geocodes both addresses (or uses
     provided GPS coords), calculates real driving distance, returns fare."""
     # opportunistic scheduled-ride processing (activate due rides, send reminders)
@@ -4783,44 +4800,39 @@ def rides_quote(pickup_address: str = "", dropoff_address: str = "",
             "Couldn't map one of those addresses — check the spelling and try again.")
 
     miles = driving_miles(p_lat, p_lng, d_lat, d_lng)
-
-    # ride pricing (passenger rides cost more than food delivery)
-    base_fare = fin_setting("ride_base_fare", 4.99)
-    per_mile = fin_setting("ride_per_mile", 2.00)
-    gas_pct = fin_setting("ride_gas_pct", 10.0)
     max_miles = fin_setting("ride_max_miles", 150.0)
 
-    mileage_charge = round(miles * per_mile, 2)
-    fare = round(base_fare + mileage_charge, 2)
-    gas_fee = round(fare * gas_pct / 100, 2)
-    total = round(fare + gas_fee, 2)
-
-    # driver pay estimate (70% of fare)
-    driver_pay_est = round(fare * 0.70, 2)
-    company_profit_est = round(total - driver_pay_est - gas_fee, 2)
+    f = compute_ride_fare(p_lat, p_lng, d_lat, d_lng, miles,
+                          priority=priority, extra_stops=extra_stops,
+                          business_code=business_code, rider_phone=rider_phone)
 
     too_far = miles > max_miles
     approximate = p_approx or d_approx
 
     ai_note = ""
-    if company_profit_est >= 3:
+    if f["company_profit"] >= 3:
         ai_note = "✅ Good fare — healthy margin."
-    elif company_profit_est >= 1:
+    elif f["company_profit"] >= 1:
         ai_note = "⚠️ Thin margin on this ride."
     else:
         ai_note = "🔴 Below target margin — consider adjusting."
 
     return {
         "miles": miles,
-        "base_fare": base_fare,
-        "per_mile": per_mile,
-        "mileage_charge": mileage_charge,
-        "fare": fare,
-        "gas_pct": gas_pct,
-        "gas_fee": gas_fee,
-        "total": total,
-        "driver_pay_est": driver_pay_est,
-        "company_profit_est": company_profit_est,
+        "base_fare": fin_setting("ride_base_fare", 4.99),
+        "per_mile": fin_setting("ride_per_mile", 2.00),
+        "mileage_charge": round(miles * fin_setting("ride_per_mile", 2.00), 2),
+        "fare": f["fare"],
+        "gas_pct": fin_setting("ride_gas_pct", 10.0),
+        "gas_fee": f["gas_fee"],
+        "total": f["total"],
+        "driver_pay_est": f["driver_pay_est"],
+        "company_profit_est": f["company_profit"],
+        "priority_fee": f["priority_fee"],
+        "extra_stop_fee": f["extra_stop_fee"],
+        "is_airport_flat": f["is_airport_flat"],
+        "discount": f["discount"],
+        "discount_kind": f["discount_kind"],
         "ai_note": ai_note,
         "geocoded": True,
         "too_far": too_far,
@@ -4832,6 +4844,158 @@ def rides_quote(pickup_address: str = "", dropoff_address: str = "",
 
 
 # ---------------- Rides table + full ride flow ----------------
+def migrate_rides_growth():
+    """Migrations for growth features: share tokens, priority, business
+    accounts, airport flat rate, ride passes, extra stops, favorites."""
+    conn = db()
+    rcols = [r[1] for r in conn.execute("PRAGMA table_info(rides)").fetchall()]
+    for _col, _ddl in (
+            ("share_token", "TEXT DEFAULT ''"),
+            ("priority", "INTEGER DEFAULT 0"),
+            ("priority_fee", "REAL DEFAULT 0"),
+            ("business_code", "TEXT DEFAULT ''"),
+            ("is_airport_flat", "INTEGER DEFAULT 0"),
+            ("extra_stops", "TEXT DEFAULT ''"),
+            ("extra_stop_fee", "REAL DEFAULT 0"),
+            ("first_ride_discount", "REAL DEFAULT 0"),
+            ("pass_discount", "REAL DEFAULT 0"),
+            ("favorite_driver_id", "INTEGER DEFAULT 0")):
+        if _col not in rcols:
+            conn.execute(f"ALTER TABLE rides ADD COLUMN {_col} {_ddl}")
+    # favorite drivers (rider favorites a driver by phone)
+    conn.execute("""CREATE TABLE IF NOT EXISTS favorite_drivers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        rider_phone TEXT NOT NULL, driver_id INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE(rider_phone, driver_id))""")
+    # monthly ride passes
+    conn.execute("""CREATE TABLE IF NOT EXISTS ride_passes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER DEFAULT 0, rider_phone TEXT NOT NULL,
+        purchased_at TEXT NOT NULL, expires_at TEXT NOT NULL,
+        discount_pct REAL DEFAULT 10,
+        stripe_payment_id TEXT DEFAULT '')""")
+    # business accounts (companies buying rides for staff/customers)
+    conn.execute("""CREATE TABLE IF NOT EXISTS business_accounts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL, contact_name TEXT DEFAULT '',
+        email TEXT DEFAULT '', phone TEXT DEFAULT '',
+        code TEXT NOT NULL UNIQUE, discount_pct REAL DEFAULT 10,
+        status TEXT NOT NULL DEFAULT 'active',
+        created_at TEXT NOT NULL)""")
+    # Drop Perks: partner-offered rider perks
+    bpcols = [r[1] for r in conn.execute("PRAGMA table_info(business_partners)").fetchall()]
+    for _col, _ddl in (("perk_title", "TEXT DEFAULT ''"),
+                       ("perk_details", "TEXT DEFAULT ''"),
+                       ("perk_active", "INTEGER DEFAULT 0")):
+        if _col not in bpcols:
+            conn.execute(f"ALTER TABLE business_partners ADD COLUMN {_col} {_ddl}")
+    conn.commit()
+    conn.close()
+
+
+migrate_rides_growth()
+
+
+def compute_ride_fare(p_lat, p_lng, d_lat, d_lng, miles, tip=0, priority=False,
+                      extra_stops=0, business_code="", rider_phone="", user_id=0):
+    """Central ride fare computation with all growth adjustments.
+    Discounts (first-ride, pass, business) come out of the company's cut —
+    the driver always gets 70% of the fare + 100% of the tip."""
+    base_fare = fin_setting("ride_base_fare", 4.99)
+    per_mile = fin_setting("ride_per_mile", 2.00)
+    gas_pct = fin_setting("ride_gas_pct", 10.0)
+
+    # airport flat rate? (either endpoint within the airport radius)
+    is_airport_flat = False
+    airport_rate = fin_setting("airport_flat_rate", 0)
+    if airport_rate > 0:
+        alat = fin_setting("airport_lat", 0)
+        alng = fin_setting("airport_lng", 0)
+        arad = fin_setting("airport_radius_miles", 5.0)
+        if alat and alng and p_lat and d_lat:
+            if (haversine_miles(p_lat, p_lng, alat, alng) <= arad or
+                    haversine_miles(d_lat, d_lng, alat, alng) <= arad):
+                is_airport_flat = True
+    fare = round(airport_rate, 2) if is_airport_flat else round(base_fare + miles * per_mile, 2)
+
+    # extra stops
+    stop_fee_each = fin_setting("extra_stop_fee", 2.00)
+    extra_stop_fee = round(stop_fee_each * max(0, int(extra_stops or 0)), 2)
+
+    fare_with_stops = round(fare + extra_stop_fee, 2)
+    gas_fee = round(fare_with_stops * gas_pct / 100, 2)
+
+    # priority pickup fee
+    priority_fee = round(fin_setting("priority_pickup_fee", 2.50), 2) if priority else 0
+
+    subtotal = fare_with_stops + gas_fee + priority_fee
+
+    # business account discount
+    business_discount = 0
+    if business_code:
+        conn = db()
+        b = conn.execute("SELECT discount_pct FROM business_accounts"
+                         " WHERE code=? AND status='active'",
+                         (business_code.strip().upper(),)).fetchone()
+        conn.close()
+        if b:
+            business_discount = round(subtotal * (b["discount_pct"] or 0) / 100, 2)
+
+    # first-ride discount (no completed rides yet on this phone number)
+    first_ride_discount = 0
+    if rider_phone:
+        conn = db()
+        prior = conn.execute("SELECT COUNT(*) as n FROM rides"
+                             " WHERE rider_phone=? AND status='completed'",
+                             (rider_phone,)).fetchone()["n"]
+        conn.close()
+        if prior == 0:
+            pct = fin_setting("first_ride_discount_pct", 25.0)
+            first_ride_discount = round(subtotal * pct / 100, 2)
+
+    # ride pass discount
+    pass_discount = 0
+    if rider_phone or user_id:
+        conn = db()
+        now = now_iso()
+        pp = None
+        if user_id:
+            pp = conn.execute("SELECT * FROM ride_passes WHERE user_id=? AND expires_at>?",
+                              (user_id, now)).fetchone()
+        if not pp and rider_phone:
+            pp = conn.execute("SELECT * FROM ride_passes WHERE rider_phone=? AND expires_at>?",
+                              (rider_phone, now)).fetchone()
+        conn.close()
+        if pp:
+            pass_discount = round(subtotal * (pp["discount_pct"] or 10) / 100, 2)
+
+    # discounts don't stack — rider gets the best one
+    discount = round(max(business_discount, first_ride_discount, pass_discount), 2)
+    discount_kind = ""
+    if discount > 0:
+        if discount == business_discount:
+            discount_kind = "business"
+        elif discount == first_ride_discount:
+            discount_kind = "first_ride"
+        else:
+            discount_kind = "ride_pass"
+
+    total = round(subtotal + tip - discount, 2)
+    driver_pay = round(fare_with_stops * 0.70 + priority_fee * 0.70 + tip, 2)
+    company_profit = round(total - driver_pay - gas_fee, 2)
+
+    return {
+        "miles": miles, "fare": fare_with_stops, "base_fare_amount": fare,
+        "gas_fee": gas_fee, "priority_fee": priority_fee,
+        "extra_stop_fee": extra_stop_fee, "is_airport_flat": is_airport_flat,
+        "discount": discount, "discount_kind": discount_kind,
+        "total": total, "driver_pay": driver_pay,
+        "driver_pay_est": round(fare_with_stops * 0.70 + priority_fee * 0.70, 2),
+        "company_profit": company_profit, "tip": tip,
+    }
+
+
 def init_rides_table():
     conn = db()
     conn.execute("""CREATE TABLE IF NOT EXISTS rides (
@@ -4864,6 +5028,10 @@ async def rides_request(req: Request):
     phone = (body.get("phone") or "").strip()
     notes = (body.get("notes") or "").strip()
     tip = float(body.get("tip") or 0)
+    priority = bool(body.get("priority"))
+    business_code = (body.get("business_code") or "").strip().upper()
+    extra_stops_in = body.get("extra_stops") or []
+    favorite_driver_id = int(body.get("favorite_driver_id") or 0)
 
     if not pickup or not dropoff or not name or not phone:
         raise HTTPException(400, "Pickup, dropoff, name, and phone required")
@@ -4879,46 +5047,76 @@ async def rides_request(req: Request):
         d_lat, d_lng = geocode(dropoff, {})
 
     miles = driving_miles(p_lat, p_lng, d_lat, d_lng) if p_lat and d_lat else 0
-    base_fare = fin_setting("ride_base_fare", 4.99)
-    per_mile = fin_setting("ride_per_mile", 2.00)
-    gas_pct = fin_setting("ride_gas_pct", 10.0)
-    fare = round(base_fare + miles * per_mile, 2)
-    gas_fee = round(fare * gas_pct / 100, 2)
-    total = round(fare + gas_fee + tip, 2)
-    driver_pay = round(fare * 0.70 + tip, 2)  # 70% + full tip
-    company_profit = round(total - driver_pay - gas_fee, 2)
+    # normalize extra stops (list of address strings, max 3)
+    if isinstance(extra_stops_in, str):
+        try:
+            import json as _js
+            extra_stops_in = _js.loads(extra_stops_in)
+        except Exception:
+            extra_stops_in = []
+    extra_stops_list = [str(s)[:200] for s in (extra_stops_in or [])][:3]
+    import json as _json
+    me = get_session_user(req)
+    f = compute_ride_fare(p_lat, p_lng, d_lat, d_lng, miles, tip=tip,
+                          priority=priority, extra_stops=len(extra_stops_list),
+                          business_code=business_code, rider_phone=phone,
+                          user_id=(me["id"] if me else 0))
+    fare, gas_fee = f["fare"], f["gas_fee"]
+    total, driver_pay = f["total"], f["driver_pay"]
+    company_profit = f["company_profit"]
+    # validate favorite driver belongs to this rider
+    if favorite_driver_id:
+        conn = db()
+        ok = conn.execute("SELECT id FROM favorite_drivers WHERE rider_phone=? AND driver_id=?",
+                          (phone, favorite_driver_id)).fetchone()
+        conn.close()
+        if not ok:
+            favorite_driver_id = 0
+    import secrets as _secrets
+    share_token = _secrets.token_urlsafe(16)
 
     now = datetime.now(timezone.utc).isoformat()
     conn = db()
     cur = conn.execute(
         """INSERT INTO rides (rider_name, rider_phone, pickup_address, pickup_lat,
            pickup_lng, dropoff_address, dropoff_lat, dropoff_lng, miles, fare,
-           tip, total, driver_pay, company_profit, notes, created_at, updated_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+           tip, total, driver_pay, company_profit, notes, created_at, updated_at,
+           share_token, priority, priority_fee, business_code, is_airport_flat,
+           extra_stops, extra_stop_fee, first_ride_discount, pass_discount,
+           favorite_driver_id)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (name, phone, pickup, p_lat, p_lng, dropoff, d_lat, d_lng,
-         miles, fare, tip, total, driver_pay, company_profit, notes, now, now))
+         miles, fare, tip, total, driver_pay, company_profit, notes, now, now,
+         share_token, 1 if priority else 0, f["priority_fee"], business_code,
+         1 if f["is_airport_flat"] else 0, _json.dumps(extra_stops_list),
+         f["extra_stop_fee"],
+         f["discount"] if f["discount_kind"] == "first_ride" else 0,
+         f["discount"] if f["discount_kind"] == "ride_pass" else 0,
+         favorite_driver_id))
     rid = cur.lastrowid
     conn.commit()
     conn.close()
 
     log_event("ride", f"🚗 Ride request #{rid}", f"{name}: {pickup} → {dropoff}")
-    return {"ok": True, "order_id": rid, "ride_id": rid, "total": total}
+    return {"ok": True, "order_id": rid, "ride_id": rid, "total": total,
+            "driver_pay_est": f["driver_pay_est"], "discount": f["discount"],
+            "discount_kind": f["discount_kind"], "share_token": share_token}
 
 
 @app.get("/api/rides/driver/{driver_id}")
 def driver_rides(driver_id: int, req: Request):
     """Driver's ride history with earnings."""
-    # verify driver PIN or operator PIN
+    # verify: logged-in driver viewing own history, or operator PIN
     pin = req.headers.get("x-pin", "")
     conn = db()
     drv = conn.execute("SELECT * FROM drivers WHERE id=?", (driver_id,)).fetchone()
     if not drv:
         conn.close()
         raise HTTPException(404, "Driver not found")
-    # allow if PIN matches driver PIN or operator PIN
-    if pin != drv["pin"] and pin != get_setting("pin"):
+    me = get_driver(req)
+    if pin != get_setting("pin") and (not me or me["id"] != driver_id):
         conn.close()
-        raise HTTPException(401, "Bad PIN")
+        raise HTTPException(401, "Not authorized")
     rides = conn.execute(
         "SELECT * FROM rides WHERE driver_id=? ORDER BY id DESC LIMIT 50",
         (driver_id,)).fetchall()
@@ -5007,6 +5205,265 @@ async def complete_ride(ride_id: int, req: Request, x_pin: str = Header(default=
     log_event("ride", f"🏁 Ride #{ride_id} completed", "")
     return {"ok": True}
 
+
+# ---------------- Growth features: share-ride, favorites, perks, passes, business ---
+@app.get("/share-ride.html", response_class=HTMLResponse)
+def shareridepage():
+    with open(os.path.join(BASE, "static", "share-ride.html")) as f:
+        return f.read()
+
+
+@app.get("/api/rides/shared/{token}")
+def shared_ride(token: str):
+    """Public live view of a ride via share token. No phone numbers exposed."""
+    conn = db()
+    r = conn.execute("SELECT * FROM rides WHERE share_token=?", (token,)).fetchone()
+    if not r:
+        conn.close()
+        raise HTTPException(404, "Ride not found")
+    r = dict(r)
+    out = {
+        "pickup_address": r["pickup_address"], "dropoff_address": r["dropoff_address"],
+        "pickup_lat": r["pickup_lat"], "pickup_lng": r["pickup_lng"],
+        "dropoff_lat": r["dropoff_lat"], "dropoff_lng": r["dropoff_lng"],
+        "status": r["status"], "driver_name": r["driver_name"],
+        "rider_name": (r["rider_name"] or "Rider").split()[0],
+        "updated_at": r["updated_at"],
+        "driver_lat": 0, "driver_lng": 0, "car": None,
+    }
+    if r["driver_id"]:
+        d = conn.execute(
+            "SELECT last_lat, last_lng, vehicle_make, vehicle_model,"
+            " vehicle_year, vehicle_color, license_plate FROM drivers WHERE id=?",
+            (r["driver_id"],)).fetchone()
+        if d:
+            out["driver_lat"] = d["last_lat"] or 0
+            out["driver_lng"] = d["last_lng"] or 0
+            out["car"] = {"make": d["vehicle_make"] or "", "model": d["vehicle_model"] or "",
+                          "year": d["vehicle_year"] or "", "color": d["vehicle_color"] or "",
+                          "plate": d["license_plate"] or ""}
+    conn.close()
+    return out
+
+
+@app.post("/api/favorites")
+async def add_favorite_driver(req: Request):
+    """Rider favorites a driver (by phone + driver_id from a past ride)."""
+    body = await req.json()
+    phone = norm_phone(body.get("phone") or "")
+    driver_id = int(body.get("driver_id") or 0)
+    if not phone or not driver_id:
+        raise HTTPException(400, "Phone and driver required")
+    conn = db()
+    d = conn.execute("SELECT id, name FROM drivers WHERE id=? AND status='approved'",
+                     (driver_id,)).fetchone()
+    if not d:
+        conn.close()
+        raise HTTPException(404, "Driver not found")
+    conn.execute("INSERT OR IGNORE INTO favorite_drivers(rider_phone, driver_id, created_at)"
+                 " VALUES(?,?,?)", (phone, driver_id, now_iso()))
+    conn.commit()
+    conn.close()
+    return {"ok": True, "driver_name": d["name"]}
+
+
+@app.get("/api/favorites")
+def list_favorite_drivers(phone: str = ""):
+    """Rider's favorite drivers."""
+    phone = norm_phone(phone)
+    if not phone:
+        return []
+    conn = db()
+    rows = conn.execute(
+        """SELECT d.id, d.name, d.vehicle_make, d.vehicle_model, d.vehicle_color
+           FROM favorite_drivers f JOIN drivers d ON d.id=f.driver_id
+           WHERE f.rider_phone=? AND d.status='approved' ORDER BY d.name""",
+        (phone,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+@app.delete("/api/favorites/{driver_id}")
+def remove_favorite_driver(driver_id: int, phone: str = ""):
+    phone = norm_phone(phone)
+    conn = db()
+    conn.execute("DELETE FROM favorite_drivers WHERE rider_phone=? AND driver_id=?",
+                 (phone, driver_id))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.get("/api/perks")
+def public_perks():
+    """Active Drop Perks from partners — visible to all riders."""
+    conn = db()
+    rows = conn.execute(
+        "SELECT dba, legal_name, perk_title, perk_details FROM business_partners"
+        " WHERE perk_active=1 AND perk_title != '' ORDER BY dba").fetchall()
+    conn.close()
+    return [{"business": (r["dba"] or r["legal_name"]),
+             "title": r["perk_title"], "details": r["perk_details"] or ""}
+            for r in rows]
+
+
+@app.post("/api/operator/partners/{pid}/perk")
+async def set_partner_perk(pid: int, req: Request, x_pin: str = Header(default="")):
+    """Ken sets a rider perk for a partner (Drop Perks)."""
+    check_pin(x_pin)
+    body = await req.json()
+    conn = db()
+    conn.execute("UPDATE business_partners SET perk_title=?, perk_details=?, perk_active=?"
+                 " WHERE id=?",
+                 ((body.get("title") or "").strip()[:120],
+                  (body.get("details") or "").strip()[:500],
+                  1 if body.get("active") else 0, pid))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.post("/api/passes/buy")
+async def buy_ride_pass(req: Request):
+    """Buy a monthly Drop Pass via Stripe. Returns checkout URL."""
+    if not STRIPE_LIVE:
+        raise HTTPException(400, "Stripe not configured")
+    body = await req.json()
+    phone = norm_phone(body.get("phone") or "")
+    if not phone:
+        raise HTTPException(400, "Phone required")
+    me = get_session_user(req)
+    price = fin_setting("ride_pass_price", 49.00)
+    pct = fin_setting("ride_pass_discount_pct", 10.0)
+    base = str(req.base_url).rstrip("/")
+    session = stripe.checkout.Session.create(
+        mode="payment",
+        line_items=[{
+            "price_data": {
+                "currency": "usd",
+                "product_data": {"name": f"Drop Pass — {pct:g}% off rides for 30 days"},
+                "unit_amount": int(round(price * 100)),
+            },
+            "quantity": 1,
+        }],
+        success_url=f"{base}/pay/success?session_id={{CHECKOUT_SESSION_ID}}",
+        cancel_url=f"{base}/account.html?pass=cancelled",
+        metadata={"drop_pass_phone": phone,
+                  "drop_pass_user_id": str(me["id"] if me else 0)},
+    )
+    return {"url": session.url}
+
+
+@app.get("/api/passes/mine")
+async def my_ride_pass(req: Request, phone: str = ""):
+    """Active ride pass for this rider (by login or phone)."""
+    me = get_session_user(req)
+    phone = norm_phone(phone)
+    conn = db()
+    now = now_iso()
+    pp = None
+    if me:
+        pp = conn.execute("SELECT * FROM ride_passes WHERE user_id=? AND expires_at>?",
+                          (me["id"], now)).fetchone()
+    if not pp and phone:
+        pp = conn.execute("SELECT * FROM ride_passes WHERE rider_phone=? AND expires_at>?",
+                          (phone, now)).fetchone()
+    conn.close()
+    if not pp:
+        return {"active": False}
+    return {"active": True, "expires_at": pp["expires_at"],
+            "discount_pct": pp["discount_pct"]}
+
+
+def _grant_ride_pass(phone, user_id, stripe_payment_id):
+    """Create a 30-day ride pass after successful Stripe payment."""
+    pct = fin_setting("ride_pass_discount_pct", 10.0)
+    now = datetime.now(timezone.utc)
+    exp = (now + timedelta(days=30)).isoformat()
+    conn = db()
+    conn.execute("INSERT INTO ride_passes(user_id, rider_phone, purchased_at, expires_at,"
+                 " discount_pct, stripe_payment_id) VALUES(?,?,?,?,?,?)",
+                 (user_id, phone, now.isoformat(), exp, pct, stripe_payment_id))
+    conn.commit()
+    conn.close()
+    log_event("pass", f"🎫 Drop Pass sold to {phone}", f"{pct:g}% off for 30 days")
+
+
+@app.get("/api/business/validate")
+def validate_business_code(code: str = ""):
+    """Check a business code at booking time."""
+    code = (code or "").strip().upper()
+    if not code:
+        return {"valid": False}
+    conn = db()
+    b = conn.execute("SELECT name, discount_pct FROM business_accounts"
+                     " WHERE code=? AND status='active'", (code,)).fetchone()
+    conn.close()
+    if not b:
+        return {"valid": False}
+    return {"valid": True, "name": b["name"], "discount_pct": b["discount_pct"]}
+
+
+@app.get("/api/operator/business")
+def operator_business_list(x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    conn = db()
+    rows = conn.execute("SELECT * FROM business_accounts ORDER BY id DESC").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+@app.post("/api/operator/business")
+async def operator_business_create(req: Request, x_pin: str = Header(default="")):
+    """Ken creates a business account. Code is auto-generated."""
+    check_pin(x_pin)
+    body = await req.json()
+    name = (body.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "Business name required")
+    import random as _rand, string as _str
+    code = "BIZ-" + "".join(_rand.choices(_str.ascii_uppercase + _str.digits, k=6))
+    conn = db()
+    cur = conn.execute(
+        "INSERT INTO business_accounts(name, contact_name, email, phone, code,"
+        " discount_pct, status, created_at) VALUES(?,?,?,?,?,?,?,?)",
+        (name, (body.get("contact_name") or "").strip()[:80],
+         (body.get("email") or "").strip()[:120],
+         norm_phone(body.get("phone") or ""), code,
+         float(body.get("discount_pct") or 10), "active", now_iso()))
+    bid = cur.lastrowid
+    conn.commit()
+    conn.close()
+    return {"ok": True, "id": bid, "code": code}
+
+
+@app.post("/api/operator/business/{bid}/status")
+async def operator_business_status(bid: int, req: Request, x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    body = await req.json()
+    status = "active" if body.get("active") else "paused"
+    conn = db()
+    conn.execute("UPDATE business_accounts SET status=? WHERE id=?", (status, bid))
+    conn.commit()
+    conn.close()
+    return {"ok": True, "status": status}
+
+
+@app.get("/api/operator/business/{bid}/rides")
+def operator_business_rides(bid: int, x_pin: str = Header(default="")):
+    """Rides billed to a business account (for invoicing)."""
+    check_pin(x_pin)
+    conn = db()
+    b = conn.execute("SELECT * FROM business_accounts WHERE id=?", (bid,)).fetchone()
+    if not b:
+        conn.close()
+        raise HTTPException(404, "Business not found")
+    rides = conn.execute("SELECT * FROM rides WHERE business_code=? ORDER BY id DESC LIMIT 200",
+                         (b["code"],)).fetchall()
+    conn.close()
+    total = round(sum(r["total"] for r in rides), 2)
+    return {"business": dict(b), "rides": [dict(r) for r in rides],
+            "ride_count": len(rides), "total": total}
 
 
 @app.get("/api/operator/rides")
@@ -5818,6 +6275,19 @@ def op_financials(x_pin: str = Header(default="")):
             "driver_base": fin_setting("driver_base_pay", 3.00),
             "driver_per_mile": fin_setting("driver_per_mile", 1.00),
             "min_profit": min_profit,
+            "ride_base_fare": fin_setting("ride_base_fare", 4.99),
+            "ride_per_mile": fin_setting("ride_per_mile", 2.00),
+            "ride_gas_pct": fin_setting("ride_gas_pct", 10.0),
+            "first_ride_discount_pct": fin_setting("first_ride_discount_pct", 25.0),
+            "priority_pickup_fee": fin_setting("priority_pickup_fee", 2.50),
+            "extra_stop_fee": fin_setting("extra_stop_fee", 2.00),
+            "ride_pass_price": fin_setting("ride_pass_price", 49.00),
+            "ride_pass_discount_pct": fin_setting("ride_pass_discount_pct", 10.0),
+            "airport_flat_rate": fin_setting("airport_flat_rate", 0),
+            "airport_lat": fin_setting("airport_lat", 0),
+            "airport_lng": fin_setting("airport_lng", 0),
+            "airport_radius_miles": fin_setting("airport_radius_miles", 5.0),
+            "airport_name": get_setting("airport_name") or "",
         },
     }
 
@@ -5829,7 +6299,12 @@ async def op_fin_settings(req: Request, x_pin: str = Header(default="")):
     body = await req.json()
     conn = db()
     for k in ("price_base_fee", "price_per_mile", "driver_base_pay",
-              "driver_per_mile", "min_profit_per_order"):
+              "driver_per_mile", "min_profit_per_order",
+              "ride_base_fare", "ride_per_mile", "ride_gas_pct",
+              "first_ride_discount_pct", "priority_pickup_fee",
+              "extra_stop_fee", "ride_pass_price", "ride_pass_discount_pct",
+              "airport_flat_rate", "airport_lat", "airport_lng",
+              "airport_radius_miles"):
         if k in body:
             try:
                 v = float(body[k])
@@ -5837,6 +6312,9 @@ async def op_fin_settings(req: Request, x_pin: str = Header(default="")):
                              (k, str(v)))
             except (TypeError, ValueError):
                 pass
+    if "airport_name" in body:
+        conn.execute("INSERT OR REPLACE INTO settings(key, value) VALUES(?, ?)",
+                     ("airport_name", str(body["airport_name"])[:120]))
     conn.commit()
     conn.close()
     return {"ok": True}
