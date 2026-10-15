@@ -926,27 +926,78 @@ def dev_pay(oid: int):
 def pay_success(session_id: str):
     if not STRIPE_LIVE:
         raise HTTPException(400, "Stripe not configured")
-    session = stripe.checkout.Session.retrieve(session_id)
-    oid = int(session.metadata.get("drop_order_id", 0) or 0)
-    rid = int(session.metadata.get("drop_ride_id", 0) or 0)
-    sched_id = int(session.metadata.get("drop_scheduled_id", 0) or 0)
-    pass_phone = (session.metadata.get("drop_pass_phone") or "").strip()
-    pass_user_id = int(session.metadata.get("drop_pass_user_id", 0) or 0)
-    if session.payment_status == "paid" and pass_phone:
-        _grant_ride_pass(pass_phone, pass_user_id, session.get("payment_intent", ""))
+    try:
+        session = stripe.checkout.Session.retrieve(session_id)
+    except Exception as e:
+        # Don't 500 on the customer: the webhook will still fulfill the payment.
+        log_event("stripe", "⚠️ /pay/success: Stripe verify failed", str(e)[:200])
+        return HTMLResponse(
+            "<html><body style='font-family:sans-serif;text-align:center;padding:60px'>"
+            "<h2>Confirming your payment…</h2>"
+            "<p>If your card was charged, your booking is being activated right now.</p>"
+            "<p>You can close this tab — we'll take it from here. 🚗</p>"
+            "</body></html>")
+    # stripe-python v9 returns a rich object, not a dict — convert before use
+    sess = session.to_dict() if hasattr(session, "to_dict") else session
+    md = sess.get("metadata") or {}
+    _fulfill_checkout_session(sess)
+    # send the customer to the right page
+    if (md.get("drop_pass_phone") or "").strip():
         return RedirectResponse("/account.html?pass=active", status_code=303)
-    if session.payment_status == "paid" and sched_id:
+    sched_id = int(md.get("drop_scheduled_id") or 0)
+    if sched_id:
+        return RedirectResponse(f"/scheduled.html?id={sched_id}", status_code=303)
+    rid = int(md.get("drop_ride_id") or 0)
+    if rid:
+        return RedirectResponse(f"/track-ride.html?id={rid}", status_code=303)
+    oid = int(md.get("drop_order_id") or 0)
+    return RedirectResponse(f"/track.html?id={oid}", status_code=303)
+
+
+# ---------------- Stripe webhook: payments land live, no browser needed ----------------
+# Stripe calls this the instant a checkout completes — even if the customer closes
+# their tab before returning to /pay/success. This is what makes payments show up
+# live in the operator dashboard.
+#
+# One-time setup (Ken does this once in the Stripe Dashboard → Developers → Webhooks):
+#   1. Add endpoint: https://drop-52yj.onrender.com/api/stripe/webhook
+#   2. Select event: checkout.session.completed
+#   3. Copy the "Signing secret" (whsec_...) → Render dashboard → drop-52yj →
+#      Environment → add STRIPE_WEBHOOK_SECRET=whsec_... → Save (auto-redeploys).
+
+STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "").strip()
+
+
+def _fulfill_checkout_session(sess):
+    """Mark whatever a Stripe checkout session paid for as paid. Idempotent.
+    sess is a dict-like Stripe session (from a webhook event or the API).
+    Returns a short label of what was fulfilled."""
+    md = sess.get("metadata") or {}
+    if sess.get("payment_status") != "paid":
+        return "not-paid"
+    pi = sess.get("payment_intent") or ""
+    rid = int(md.get("drop_ride_id") or 0)
+    sched_id = int(md.get("drop_scheduled_id") or 0)
+    oid = int(md.get("drop_order_id") or 0)
+    pass_phone = (md.get("drop_pass_phone") or "").strip()
+    pass_user_id = int(md.get("drop_pass_user_id") or 0)
+
+    if pass_phone:
+        _grant_ride_pass(pass_phone, pass_user_id, pi)
+        log_event("stripe", f"🎫 Ride pass granted via webhook ({pass_phone})", "")
+        return "pass"
+
+    if sched_id:
         conn = db()
         r = conn.execute("SELECT * FROM scheduled_rides WHERE id=?",
                          (sched_id,)).fetchone()
         if r and r["payment_status"] != "paid":
-            pi = session.get("payment_intent", "")
             conn.execute(
                 "UPDATE scheduled_rides SET payment_status='paid',"
                 " stripe_payment_intent=?, updated_at=? WHERE id=?",
                 (pi, now_iso(), sched_id))
             conn.commit()
-            log_event("ride", f"📅 Scheduled ride #{sched_id} paid",
+            log_event("ride", f"📅 Scheduled ride #{sched_id} paid (webhook)",
                       f"{r['rider_name']}: {r['pickup_address']} → {r['dropoff_address']} (${r['total']:.2f})")
             try:
                 topic = get_setting("ntfy_topic").strip()
@@ -956,24 +1007,23 @@ def pay_success(session_id: str):
             except Exception:
                 pass
         conn.close()
-        return RedirectResponse(f"/scheduled.html?id={sched_id}", status_code=303)
-    if session.payment_status == "paid" and rid:
+        return f"scheduled:{sched_id}"
+
+    if rid:
         conn = db()
         r = conn.execute("SELECT * FROM rides WHERE id=?", (rid,)).fetchone()
         if r and r["payment_status"] != "paid":
             conn.execute("UPDATE rides SET payment_status='paid', status='requested',"
                          " updated_at=? WHERE id=?", (now_iso(), rid))
             conn.commit()
-            log_event("ride", f"💰 Ride #{rid} paid",
+            log_event("ride", f"💰 Ride #{rid} paid (webhook)",
                       f"{r['rider_name']}: {r['pickup_address']} → {r['dropoff_address']} (${r['total']:.2f})")
-            # auto-assign a driver if one is available
             try:
                 drv = auto_assign_driver(rid)
                 if not drv:
                     log_event("ride", f"⚠️ No drivers available for ride #{rid} — Ken must assign manually", "")
             except Exception as e:
                 log_event("ride", f"⚠️ Auto-assign failed for ride #{rid}: {e}", "")
-            # notify Ken
             try:
                 topic = get_setting("ntfy_topic").strip()
                 if topic:
@@ -982,8 +1032,9 @@ def pay_success(session_id: str):
             except Exception:
                 pass
         conn.close()
-        return RedirectResponse(f"/track-ride.html?id={rid}", status_code=303)
-    if session.payment_status == "paid" and oid:
+        return f"ride:{rid}"
+
+    if oid:
         conn = db()
         o = conn.execute("SELECT * FROM orders WHERE id=?", (oid,)).fetchone()
         if o and o["stripe_status"] != "paid":
@@ -994,10 +1045,37 @@ def pay_success(session_id: str):
                 "SELECT * FROM orders WHERE id=?", (oid,)).fetchone())
             notify_ken(od)
         conn.close()
-    return RedirectResponse(f"/track.html?id={oid}", status_code=303)
+        return f"order:{oid}"
+
+    return "unknown"
 
 
-@app.get("/api/orders/{oid}/public")
+@app.post("/api/stripe/webhook")
+async def stripe_webhook(req: Request):
+    """Stripe calls this on every checkout.session.completed. Verifies the
+    signature, fulfills the payment, returns 200 fast (Stripe retries otherwise)."""
+    if not STRIPE_LIVE:
+        raise HTTPException(400, "Stripe not configured")
+    secret = STRIPE_WEBHOOK_SECRET
+    if not secret:
+        log_event("stripe", "⚠️ Webhook hit but STRIPE_WEBHOOK_SECRET not set", "")
+        raise HTTPException(400, "Webhook not configured: set STRIPE_WEBHOOK_SECRET")
+    payload = await req.body()
+    sig = req.headers.get("stripe-signature", "")
+    try:
+        event = stripe.Webhook.construct_event(payload, sig, secret)
+    except Exception:
+        raise HTTPException(400, "Bad webhook signature")
+    # stripe-python v9 returns rich objects, not dicts — convert before use
+    if event["type"] == "checkout.session.completed":
+        try:
+            obj = event["data"]["object"]
+            sess = obj.to_dict() if hasattr(obj, "to_dict") else obj
+            label = _fulfill_checkout_session(sess)
+            log_event("stripe", f"🔔 Webhook: checkout completed ({label})", "")
+        except Exception as e:
+            log_event("stripe", "⚠️ Webhook fulfill failed", str(e)[:200])
+    return {"ok": True}
 def public_order(oid: int):
     conn = db()
     o = conn.execute("SELECT * FROM orders WHERE id=?", (oid,)).fetchone()
@@ -2082,6 +2160,8 @@ def op_list_drivers(x_pin: str = Header(default=""), status: str = ""):
     else:
         rows = conn.execute(q + " ORDER BY id DESC").fetchall()
     out = [dict(r) for r in rows]
+    for d in out:
+        d["rides_approved"] = 1 if (d.get("status") == "approved") else 0
     conn.close()
     return out
 
@@ -5533,13 +5613,92 @@ def operator_business_rides(bid: int, x_pin: str = Header(default="")):
 
 @app.get("/api/operator/rides")
 def operator_rides(req: Request, x_pin: str = Header(default="")):
-    """All rides for operator dashboard."""
+    """All rides for the operator dashboard, in the shape dash.html expects."""
     check_pin(x_pin)
     conn = db()
     rides = conn.execute(
         "SELECT * FROM rides ORDER BY id DESC LIMIT 100").fetchall()
     conn.close()
-    return [dict(r) for r in rides]
+    out = []
+    for r in rides:
+        d = dict(r)
+        fare = d.get("fare") or 0
+        tip = d.get("tip") or 0
+        total = d.get("total") or 0
+        # dashboard status model: new = needs your decision, accepted = driver on it
+        st = d.get("status") or "requested"
+        dst = {"requested": "new", "assigned": "accepted"}.get(st, st)
+        out.append({
+            "id": d["id"],
+            "customer_name": d.get("rider_name") or "",
+            "phone": d.get("rider_phone") or "",
+            "pickup_address": d.get("pickup_address") or "",
+            "address": d.get("dropoff_address") or "",
+            "distance_miles": d.get("miles") or 0,
+            "total": total,
+            "delivery_fee": fare,
+            "gas_fee": round(total - fare - tip, 2),
+            "tip": tip,
+            "driver_pay": d.get("driver_pay") or 0,
+            "company_profit": d.get("company_profit") or 0,
+            "notes": d.get("notes") or "",
+            "status": dst,
+            "payment_status": d.get("payment_status") or "pending",
+            "stripe_payment_id": d.get("stripe_payment_id") or "",
+            "driver_name": d.get("driver_name") or "",
+            "driver_id": d.get("driver_id") or 0,
+            "wait_fee": d.get("wait_fee") or 0,
+            "wait_minutes": d.get("wait_minutes") or 0,
+            "created_at": d.get("created_at"),
+        })
+    return {"rides": out, "rides_open": True, "launch_at": None}
+
+
+@app.post("/api/operator/rides/{ride_id}/decision")
+async def ride_decision(ride_id: int, req: Request, x_pin: str = Header(default="")):
+    """Ken accepts (assigns driver or himself) or declines a ride request."""
+    check_pin(x_pin)
+    body = await req.json()
+    action = (body.get("action") or "").strip()
+    driver_id = int(body.get("driver_id") or 0)
+    conn = db()
+    r = conn.execute("SELECT * FROM rides WHERE id=?", (ride_id,)).fetchone()
+    if not r:
+        conn.close()
+        raise HTTPException(404, "Ride not found")
+    now = now_iso()
+    if action == "accept":
+        if driver_id:
+            drv = conn.execute("SELECT * FROM drivers WHERE id=?", (driver_id,)).fetchone()
+            if not drv:
+                conn.close()
+                raise HTTPException(404, "Driver not found")
+            conn.execute("UPDATE rides SET driver_id=?, driver_name=?, status='assigned',"
+                         " updated_at=? WHERE id=?",
+                         (driver_id, drv["name"], now, ride_id))
+            try:
+                if drv["ntfy_topic"]:
+                    send_ntfy(drv["ntfy_topic"], "🚗 New ride assigned!",
+                              f"Pickup: {r['pickup_address']}\nDropoff: {r['dropoff_address']}\n"
+                              f"You earn: ${r['driver_pay']:.2f}")
+            except Exception:
+                pass
+            log_event("ride", f"👨‍✈️ Driver {drv['name']} assigned to ride #{ride_id} by operator", "")
+        else:
+            # driver_id 0 = Ken drives it himself
+            conn.execute("UPDATE rides SET driver_id=0, driver_name='Ken (owner)',"
+                         " status='assigned', updated_at=? WHERE id=?", (now, ride_id))
+            log_event("ride", f"✅ Ride #{ride_id} accepted — Ken driving", "")
+    elif action == "decline":
+        conn.execute("UPDATE rides SET status='cancelled', updated_at=? WHERE id=?",
+                     (now, ride_id))
+        log_event("ride", f"❌ Ride #{ride_id} declined by operator", "")
+    else:
+        conn.close()
+        raise HTTPException(400, "action must be 'accept' or 'decline'")
+    conn.commit()
+    conn.close()
+    return {"ok": True}
 
 
 @app.post("/api/operator/rides/{ride_id}/assign")
@@ -5570,6 +5729,43 @@ async def assign_ride_driver(ride_id: int, req: Request, x_pin: str = Header(def
         pass
     log_event("ride", f"👨‍✈️ Driver {drv['name']} assigned to ride #{ride_id}", "")
     return {"ok": True}
+
+
+@app.post("/api/operator/rides/{ride_id}/reconcile")
+async def reconcile_ride_payment(ride_id: int, req: Request, x_pin: str = Header(default="")):
+    """Manually mark a ride paid after confirming the money in the Stripe dashboard.
+    Backstop for any payment that didn't auto-register (webhook + redirect both missed it)."""
+    check_pin(x_pin)
+    body = await req.json()
+    note = (body.get("note") or "").strip()
+    conn = db()
+    r = conn.execute("SELECT * FROM rides WHERE id=?", (ride_id,)).fetchone()
+    if not r:
+        conn.close()
+        raise HTTPException(404, "Ride not found")
+    if r["payment_status"] == "paid":
+        conn.close()
+        return {"ok": True, "already": True}
+    conn.execute("UPDATE rides SET payment_status='paid', status='requested',"
+                 " updated_at=? WHERE id=?", (now_iso(), ride_id))
+    conn.commit()
+    conn.close()
+    log_event("ride", f"💰 Ride #{ride_id} manually reconciled as paid by operator",
+              (note[:200] if note else f"{r['rider_name']} ${r['total']:.2f}"))
+    try:
+        drv = auto_assign_driver(ride_id)
+        if not drv:
+            log_event("ride", f"⚠️ No drivers available for ride #{ride_id} — Ken must assign manually", "")
+    except Exception as e:
+        log_event("ride", f"⚠️ Auto-assign failed for ride #{ride_id}: {e}", "")
+    try:
+        topic = get_setting("ntfy_topic").strip()
+        if topic:
+            send_ntfy(topic, f"💰 Ride #{ride_id} reconciled — ${r['total']:.2f}",
+                      f"{r['rider_name']}: {r['pickup_address']} → {r['dropoff_address']}")
+    except Exception:
+        pass
+    return {"ok": True, "ride_id": ride_id}
 
 
 # ---------------- Dropper AI assistant ----------------
@@ -6317,13 +6513,65 @@ def op_financials(x_pin: str = Header(default="")):
         if f["company_profit"] < min_profit:
             alerts.append(f"Order #{od['id']}: profit ${f['company_profit']:.2f} "
                           f"is below your ${min_profit:.2f} minimum.")
+    # --- rideshare rides (paid) ---
+    paid_rides = conn.execute(
+        """SELECT * FROM rides WHERE payment_status='paid'
+           AND status NOT IN ('cancelled') ORDER BY id DESC""").fetchall()
+    for r in paid_rides:
+        rd = dict(r)
+        r_total = rd.get("total") or 0
+        r_pay = rd.get("driver_pay") or 0
+        r_tip = rd.get("tip") or 0
+        r_fee = round(r_total * 0.029 + 0.30, 2)
+        r_profit = rd.get("company_profit")
+        if r_profit is None:
+            r_profit = round(r_total - r_pay - r_fee, 2)
+        total_rev += r_total
+        total_driver_pay += r_pay
+        total_tips += r_tip
+        total_stripe += r_fee
+        total_profit += r_profit
+        per_order.append({"id": rd["id"], "kind": "ride",
+                          "total": r_total, "driver_pay": r_pay,
+                          "tip": r_tip, "stripe_fee": r_fee,
+                          "profit": round(r_profit, 2),
+                          "below_min": r_profit < min_profit,
+                          "created_at": rd.get("created_at")})
+        if r_profit < min_profit:
+            alerts.append(f"Ride #{rd['id']}: profit ${r_profit:.2f} "
+                          f"is below your ${min_profit:.2f} minimum.")
+    # --- scheduled rides (paid) ---
+    paid_sched = conn.execute(
+        """SELECT * FROM scheduled_rides WHERE payment_status='paid'
+           AND status NOT IN ('cancelled') ORDER BY id DESC""").fetchall()
+    for r in paid_sched:
+        rd = dict(r)
+        r_total = rd.get("total") or 0
+        r_pay = rd.get("driver_pay") or 0
+        r_tip = rd.get("tip") or 0
+        r_fee = round(r_total * 0.029 + 0.30, 2)
+        r_profit = rd.get("company_profit")
+        if r_profit is None:
+            r_profit = round(r_total - r_pay - r_fee, 2)
+        total_rev += r_total
+        total_driver_pay += r_pay
+        total_tips += r_tip
+        total_stripe += r_fee
+        total_profit += r_profit
+        per_order.append({"id": rd["id"], "kind": "scheduled_ride",
+                          "total": r_total, "driver_pay": r_pay,
+                          "tip": r_tip, "stripe_fee": r_fee,
+                          "profit": round(r_profit, 2),
+                          "below_min": r_profit < min_profit,
+                          "created_at": rd.get("created_at")})
     # money owed to drivers (delivered, paid, assigned to a driver)
     # (payouts are tracked separately in the payouts table)
     pending_payouts = conn.execute(
         "SELECT COUNT(*) c, COALESCE(SUM(amount),0) s FROM payouts WHERE status='requested'").fetchone()
     conn.close()
+    per_order.sort(key=lambda x: x.get("created_at") or "", reverse=True)
     return {
-        "orders": len(orders),
+        "orders": len(orders) + len(paid_rides) + len(paid_sched),
         "gross_revenue": round(total_rev, 2),
         "driver_pay_owed": round(total_driver_pay, 2),
         "tips_owed": round(total_tips, 2),

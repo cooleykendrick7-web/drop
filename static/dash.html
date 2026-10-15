@@ -622,7 +622,8 @@ async function loadRides(){
   $('ridepend').textContent=pend.length?`(${pend.length})`:'';
   $('ridelist').innerHTML=pend.map(x=>`
     <div class="card order new">
-      <div class="row"><b>🚗 Ride #${x.id} — ${esc(x.customer_name)}</b><span class="badge">NEW</span></div>
+      <div class="row"><b>🚗 Ride #${x.id} — ${esc(x.customer_name)}</b><span class="badge">NEW</span>
+      ${x.payment_status==='paid'?'<span class="badge" style="background:#14532d">💰 PAID</span>':'<span class="badge" style="background:#7c2d12">⏳ UNPAID</span>'}</div>
       <p class="small">📍 ${esc(x.pickup_address)}<br>🏁 ${esc(x.address)}<br>
       🛣️ ${x.distance_miles||'?'} mi · 💵 $${(x.total||0).toFixed(2)} (fare $${(x.delivery_fee||0).toFixed(2)} + gas $${(x.gas_fee||0).toFixed(2)}${x.tip?` + tip $${x.tip.toFixed(2)}`:''})<br>
       📞 ${esc(x.phone)} ${x.notes?`<br>📝 ${esc(x.notes)}`:''}</p>
@@ -641,7 +642,8 @@ async function loadRides(){
   });
   $('rideactive').innerHTML=act.map(x=>`
     <div class="card"><div class="row"><b>🚗 Ride #${x.id} — ${esc(x.customer_name)}</b>
-      <span class="badge ${x.status==='waiting'?'closed':'open'}">${x.status.toUpperCase()}</span></div>
+      <span class="badge ${x.status==='waiting'?'closed':'open'}">${x.status.toUpperCase()}</span>
+      ${x.payment_status==='paid'?'<span class="badge" style="background:#14532d">💰 PAID</span>':'<span class="badge" style="background:#7c2d12">⏳ UNPAID</span>'}</div>
       <p class="small">📍 ${esc(x.pickup_address)} → 🏁 ${esc(x.address)}<br>
       👤 Driver: ${esc(x.driver_name||('Me' ))} · 💵 $${(x.total||0).toFixed(2)}
       ${x.wait_fee?`<br>⏳ Wait: ${x.wait_minutes} min = <b>$${x.wait_fee.toFixed(2)}</b>`:''}</p>
