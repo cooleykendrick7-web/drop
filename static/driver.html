@@ -38,6 +38,7 @@
   <div class="tabs">
     <button class="on" data-t="avail">Available</button>
     <button data-t="sched">📅 Scheduled</button>
+    <button data-t="myrides">🚗 My Rides</button>
     <button data-t="del">My deliveries</button>
     <button data-t="msg">Inbox <span id="msgbadge"></span></button>
     <button data-t="earn">Earnings</button>
@@ -46,6 +47,7 @@
 
   <div class="tab on" id="t-avail"><div id="alist"><p class="small">Go online to see available pickups.</p></div></div>
   <div class="tab" id="t-sched"><div id="schedlist"><p class="small">Loading scheduled rides…</p></div></div>
+  <div class="tab" id="t-myrides"><div id="myrideslist"><p class="small">Loading your rides…</p></div></div>
   <div class="tab" id="t-del"><div id="olist"><p class="small">Loading…</p></div></div>
 
   <div class="tab" id="t-msg">
@@ -97,7 +99,7 @@ document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
   b.classList.add('on'); $('t-'+b.dataset.t).classList.add('on');
   if(b.dataset.t==='earn') loadEarn(); if(b.dataset.t==='me') loadMe();
   if(b.dataset.t==='msg') loadMsgs(); if(b.dataset.t==='avail') loadAvail();
-  if(b.dataset.t==='sched') loadSched();
+  if(b.dataset.t==='sched') loadSched(); if(b.dataset.t==='myrides') loadMyRides();
 });
 
 // online/offline + stats
@@ -162,6 +164,68 @@ async function claimSched(id){
   if(r.ok){alert('✅ Ride claimed!');loadSched();}
   else alert('❌ '+(r.detail||'Could not claim'));
 }
+// ---- My Rides: assigned rides with chat, complete, and rate-rider ----
+let myDriverId=0;
+async function loadMyRides(){
+  try{
+    const me=await (await fetch('/api/drivers/me')).json();
+    myDriverId=me.id||0;
+    const j=await (await fetch('/api/rides/driver/'+myDriverId)).json();
+    const rides=(j.rides||[]).filter(r=>!['cancelled'].includes(r.status));
+    if(!rides.length){$('myrideslist').innerHTML='<p class="small">No rides assigned to you yet. Go online to get matched!</p>';return;}
+    $('myrideslist').innerHTML='<h2>🚗 My Rides ('+rides.length+')</h2>'+rides.map(r=>{
+      const active=['assigned','in_progress'].includes(r.status);
+      const done=r.status==='completed';
+      return `<div class="card" style="border-color:var(--acc);margin:10px 0">
+        <div class="row"><b>Ride #${r.id} · ${r.status.replace(/_/g,' ')}</b>
+          <b style="color:#4ade80">$${((r.driver_pay||0)+(r.tip||0)).toFixed(2)}</b></div>
+        <p><b>Rider:</b> ${(r.rider_name||'').replace(/</g,'&lt;')}<br>
+        <span class="small">📍 ${(r.pickup_address||'').replace(/</g,'&lt;')}<br>🏠 ${(r.dropoff_address||'').replace(/</g,'&lt;')}</span></p>
+        ${active?`<div id="dchat-${r.id}" style="max-height:180px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;margin:8px 0"></div>
+        <div class="row"><input id="dchat-in-${r.id}" placeholder="Message rider…" maxlength="500" style="flex:1;margin-right:6px">
+        <button class="btn small" style="width:auto" onclick="sendDriverChat(${r.id})">Send</button></div>
+        <button class="btn small" style="width:100%;margin-top:8px" onclick="completeMyRide(${r.id})">🏁 Complete ride</button>`:''}
+        ${done && !r.driver_rating?`<div style="margin-top:8px"><b>Rate this rider/job:</b>
+          <div style="display:flex;gap:6px;margin:8px 0">${[1,2,3,4,5].map(n=>`<button class="btn ghost" style="width:auto;padding:6px 10px" onclick="rateRider(${r.id},${n})">⭐</button>`).join('')}</div></div>`:''}
+        ${done && r.driver_rating?`<p class="small">⭐ You rated this ride ${r.driver_rating}/5</p>`:''}
+      </div>`;
+    }).join('');
+    // load chat for active rides
+    rides.filter(r=>['assigned','in_progress'].includes(r.status)).forEach(r=>loadDriverChat(r.id));
+  }catch(e){$('myrideslist').innerHTML='<p class="small">Could not load rides. Log in first.</p>';}
+}
+async function loadDriverChat(rideId){
+  try{
+    const j=await (await fetch(`/api/rides/${rideId}/messages?sender=driver`)).json();
+    const box=$('dchat-'+rideId); if(!box) return;
+    box.innerHTML=(j.messages||[]).map(m=>{
+      const mine=m.sender==='driver';
+      return `<div style="align-self:${mine?'flex-end':'flex-start'};max-width:85%;padding:6px 10px;border-radius:10px;background:${mine?'var(--acc)':'#2a2a33'};color:#fff;font-size:.9rem">${(m.message||'').replace(/</g,'&lt;')}</div>`;
+    }).join('');
+    box.scrollTop=box.scrollHeight;
+  }catch(e){}
+}
+async function sendDriverChat(rideId){
+  const inp=$('dchat-in-'+rideId), text=inp.value.trim();
+  if(!text) return;
+  inp.value='';
+  await fetch(`/api/rides/${rideId}/messages`,{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({sender:'driver',message:text})});
+  loadDriverChat(rideId);
+}
+async function completeMyRide(rideId){
+  if(!confirm('Mark ride #'+rideId+' complete?'))return;
+  const r=await (await fetch('/api/rides/'+rideId+'/complete',{method:'POST'})).json();
+  if(r.ok){alert('✅ Ride completed!');loadMyRides();loadEarn();}
+  else alert('❌ '+(r.detail||'Could not complete'));
+}
+async function rateRider(rideId, stars){
+  const r=await (await fetch('/api/rides/'+rideId+'/rate-driver',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({rating:stars})})).json();
+  if(r.ok){alert('⭐ Thanks for rating!');loadMyRides();}
+  else alert('❌ '+(r.detail||'Could not rate'));
+}
+setInterval(()=>{ if($('t-myrides').classList.contains('on')) loadMyRides(); }, 10000);
 async function acceptOrder(id){
   const r=await fetch('/api/drivers/orders/'+id+'/accept',{method:'POST'});
   if(r.ok){loadAvail();loadOrders();loadStats();}

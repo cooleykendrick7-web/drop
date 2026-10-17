@@ -25,6 +25,12 @@
   <div class="drivercard" id="driver" style="display:none"></div>
   <div id="steps"></div>
   <div id="actions" style="margin:16px 0"></div>
+  <div class="card" id="chatcard" style="display:none">
+    <h3 style="margin-top:0">💬 Chat with your driver</h3>
+    <div id="chatmsgs" style="max-height:220px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;margin-bottom:10px"></div>
+    <div class="row"><input id="chatinput" placeholder="Message your driver…" maxlength="500" style="flex:1;margin-right:6px">
+    <button class="btn small" id="chatsend" style="width:auto">Send</button></div>
+  </div>
   <button id="sosbtn" style="width:100%;margin:8px 0;padding:14px;border-radius:12px;border:2px solid #f66;background:#2a0a0a;color:#f66;font-weight:900;font-size:1rem">🆘 EMERGENCY SOS</button>
   <p class="small" style="text-align:center;opacity:.6">Only tap in a real emergency. Alerts Drop immediately with your location.</p>
 </div>
@@ -46,6 +52,12 @@ async function load(){
   try{
     const r=await(await fetch('/api/rides/'+rid)).json();
     if(r.detail){document.body.innerHTML='<p style="padding:20px">Ride not found.</p>';return;}
+    riderPhone=r.rider_phone||'';
+    // show chat once a driver is assigned
+    if(r.driver_id && ['assigned','in_progress'].includes(r.status)){
+      $('chatcard').style.display='block';
+      loadChat();
+    }
     render(r);
     // get driver location if assigned
     if(r.driver_id){
@@ -188,6 +200,36 @@ function haversine(lat1,lon1,lat2,lon2){
 
 load();
 setInterval(load, 15000); // refresh every 15 seconds
+
+// ---- live chat with driver ----
+let riderPhone='', lastChatId=0;
+async function loadChat(){
+  if(!riderPhone) return;
+  try{
+    const j=await (await fetch(`/api/rides/${rid}/messages?sender=rider&phone=${encodeURIComponent(riderPhone)}`)).json();
+    const msgs=j.messages||[];
+    if(msgs.length){
+      $('chatcard').style.display='block';
+      $('chatmsgs').innerHTML=msgs.map(m=>{
+        const mine=m.sender==='rider';
+        return `<div style="align-self:${mine?'flex-end':'flex-start'};max-width:80%;padding:8px 12px;border-radius:12px;background:${mine?'var(--acc)':'#2a2a33'};color:#fff">${(m.message||'').replace(/</g,'&lt;')}</div>`;
+      }).join('');
+      const box=$('chatmsgs'); box.scrollTop=box.scrollHeight;
+      lastChatId=msgs[msgs.length-1].id;
+    }
+  }catch(e){}
+}
+async function sendChat(){
+  const inp=$('chatinput'), text=inp.value.trim();
+  if(!text||!riderPhone) return;
+  inp.value='';
+  await fetch(`/api/rides/${rid}/messages`,{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({sender:'rider',phone:riderPhone,message:text})});
+  loadChat();
+}
+$('chatsend').onclick=sendChat;
+$('chatinput').addEventListener('keydown',e=>{if(e.key==='Enter')sendChat();});
+setInterval(loadChat, 5000); // check for driver replies every 5 seconds
 
 // SOS emergency
 $('sosbtn').onclick=()=>{

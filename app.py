@@ -2757,8 +2757,11 @@ async def op_partner_stage(pid: int, req: Request, x_pin: str = Header(default="
 async def op_partner_note(pid: int, req: Request, x_pin: str = Header(default="")):
     """Negotiation history / internal notes."""
     check_pin(x_pin)
-    body = await req.json()
-    note = (body.get("note") or "").strip()[:2000]
+    try:
+        body = await req.json()
+    except Exception:
+        body = {}
+    note = ((body or {}).get("note") or "").strip()[:2000]
     if not note:
         raise HTTPException(400, "Note required")
     conn = db()
@@ -5339,15 +5342,163 @@ async def rate_ride(ride_id: int, req: Request):
 
 @app.post("/api/rides/{ride_id}/complete")
 async def complete_ride(ride_id: int, req: Request, x_pin: str = Header(default="")):
-    """Driver or operator marks ride complete."""
-    check_pin(x_pin)
+    """Driver marks their own ride complete, or operator via PIN."""
     conn = db()
+    r = conn.execute("SELECT driver_id FROM rides WHERE id=?", (ride_id,)).fetchone()
+    if not r:
+        conn.close()
+        raise HTTPException(404, "Ride not found")
+    me = get_driver(req)
+    is_owner = (x_pin == get_setting("pin"))
+    is_driver = (me and me["id"] == (r["driver_id"] or 0))
+    if not (is_owner or is_driver):
+        conn.close()
+        raise HTTPException(401, "Not authorized")
     now = datetime.now(timezone.utc).isoformat()
     conn.execute("UPDATE rides SET status='completed', updated_at=? WHERE id=?",
                  (now, ride_id))
     conn.commit()
     conn.close()
     log_event("ride", f"🏁 Ride #{ride_id} completed", "")
+    return {"ok": True}
+
+
+# ---------------- Rider <-> driver live chat ----------------
+def init_ride_messages_table():
+    conn = db()
+    conn.execute("""CREATE TABLE IF NOT EXISTS ride_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ride_id INTEGER NOT NULL,
+        sender TEXT NOT NULL DEFAULT 'rider',
+        message TEXT NOT NULL,
+        created_at TEXT NOT NULL)""")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_rm_ride ON ride_messages(ride_id, id)")
+    # driver rates the rider/job (1-5 + optional note)
+    rcols = [r[1] for r in conn.execute("PRAGMA table_info(rides)").fetchall()]
+    for col, ddl in (("driver_rating", "INTEGER DEFAULT 0"),
+                     ("driver_review", "TEXT DEFAULT ''")):
+        if col not in rcols:
+            conn.execute(f"ALTER TABLE rides ADD COLUMN {col} {ddl}")
+    conn.commit()
+    conn.close()
+
+init_ride_messages_table()
+
+
+def _chat_allowed(ride_id, req, body_sender="", body_phone=""):
+    """Rider (phone matches), assigned driver (session), or operator (PIN)."""
+    conn = db()
+    r = conn.execute("SELECT * FROM rides WHERE id=?", (ride_id,)).fetchone()
+    if not r:
+        conn.close()
+        return None, "Ride not found"
+    pin = req.headers.get("x-pin", "")
+    if pin == get_setting("pin"):
+        conn.close()
+        return dict(r), "operator"
+    me = get_driver(req)
+    if me and me["id"] == (r["driver_id"] or 0):
+        conn.close()
+        return dict(r), "driver"
+    if body_sender == "rider" and body_phone and norm_phone(body_phone) == norm_phone(r["rider_phone"] or ""):
+        conn.close()
+        return dict(r), "rider"
+    conn.close()
+    return None, "Not authorized"
+
+
+@app.get("/api/rides/{ride_id}/messages")
+async def get_ride_messages(ride_id: int, req: Request, sender: str = "", phone: str = ""):
+    ride, who = _chat_allowed(ride_id, req, sender, phone)
+    if not ride:
+        raise HTTPException(401 if who == "Not authorized" else 404, who)
+    conn = db()
+    msgs = conn.execute(
+        "SELECT id, sender, message, created_at FROM ride_messages"
+        " WHERE ride_id=? ORDER BY id ASC LIMIT 100", (ride_id,)).fetchall()
+    conn.close()
+    return {"messages": [dict(m) for m in msgs]}
+
+
+@app.post("/api/rides/{ride_id}/messages")
+async def post_ride_message(ride_id: int, req: Request):
+    body = await req.json()
+    sender = (body.get("sender") or "").strip()
+    phone = (body.get("phone") or "").strip()
+    text = (body.get("message") or "").strip()
+    if sender not in ("rider", "driver"):
+        raise HTTPException(400, "sender must be rider or driver")
+    if not text:
+        raise HTTPException(400, "Empty message")
+    if len(text) > 500:
+        raise HTTPException(400, "Message too long")
+    ride, who = _chat_allowed(ride_id, req, sender, phone)
+    if not ride:
+        raise HTTPException(401 if who == "Not authorized" else 404, who)
+    # the label must match who is actually sending
+    if who in ("rider", "driver") and sender != who:
+        raise HTTPException(403, "Sender mismatch")
+    conn = db()
+    # light anti-spam: max 30 messages per ride per minute per sender
+    n = conn.execute(
+        """SELECT COUNT(*) c FROM ride_messages WHERE ride_id=? AND sender=?
+           AND created_at > ?""",
+        (ride_id, sender,
+         (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat())).fetchone()["c"]
+    if n >= 30:
+        conn.close()
+        raise HTTPException(429, "Slow down")
+    conn.execute("INSERT INTO ride_messages(ride_id, sender, message, created_at)"
+                 " VALUES(?,?,?,?)",
+                 (ride_id, sender, text[:500], now_iso()))
+    conn.commit()
+    conn.close()
+    # nudge the other side if they set a notification topic
+    try:
+        if sender == "rider" and ride.get("driver_id"):
+            d = db()
+            drv = d.execute("SELECT ntfy_topic FROM drivers WHERE id=?",
+                            (ride["driver_id"],)).fetchone()
+            d.close()
+            if drv and drv["ntfy_topic"]:
+                send_ntfy(drv["ntfy_topic"], f"💬 Rider (ride #{ride_id})",
+                          text[:120])
+        elif sender == "driver":
+            topic = get_setting("ntfy_topic").strip()
+            # rider has no ntfy; the tracking page polls — nothing to push
+    except Exception:
+        pass
+    return {"ok": True}
+
+
+@app.post("/api/rides/{ride_id}/rate-driver")
+async def rate_ride_by_driver(ride_id: int, req: Request):
+    """Driver rates the rider/job 1-5 after the ride."""
+    body = await req.json()
+    try:
+        rating = int(body.get("rating") or 0)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Bad rating")
+    if rating < 1 or rating > 5:
+        raise HTTPException(400, "Rating must be 1-5")
+    review = (body.get("review") or "").strip()[:500]
+    conn = db()
+    r = conn.execute("SELECT * FROM rides WHERE id=?", (ride_id,)).fetchone()
+    if not r:
+        conn.close()
+        raise HTTPException(404, "Ride not found")
+    pin = req.headers.get("x-pin", "")
+    me = get_driver(req)
+    is_owner = (pin == get_setting("pin"))
+    is_driver = (me and me["id"] == (r["driver_id"] or 0))
+    if not (is_owner or is_driver):
+        conn.close()
+        raise HTTPException(401, "Not authorized")
+    conn.execute("UPDATE rides SET driver_rating=?, driver_review=?, updated_at=? WHERE id=?",
+                 (rating, review, now_iso(), ride_id))
+    conn.commit()
+    conn.close()
+    log_event("ride", f"⭐ Driver rated ride #{ride_id}: {rating}/5", review[:100])
     return {"ok": True}
 
 
@@ -5736,8 +5887,11 @@ async def reconcile_ride_payment(ride_id: int, req: Request, x_pin: str = Header
     """Manually mark a ride paid after confirming the money in the Stripe dashboard.
     Backstop for any payment that didn't auto-register (webhook + redirect both missed it)."""
     check_pin(x_pin)
-    body = await req.json()
-    note = (body.get("note") or "").strip()
+    try:
+        body = await req.json()
+    except Exception:
+        body = {}
+    note = ((body or {}).get("note") or "").strip()
     conn = db()
     r = conn.execute("SELECT * FROM rides WHERE id=?", (ride_id,)).fetchone()
     if not r:
@@ -6641,15 +6795,25 @@ async def driver_wallet(req: Request):
     if not d:
         raise HTTPException(401, "Not logged in")
     conn = db()
-    # pending: assigned but not delivered
+    # pending: assigned but not delivered (food orders)
     pend = conn.execute(
         """SELECT id, driver_pay, tip, status FROM orders
            WHERE driver_id=? AND status NOT IN ('delivered','cancelled')""",
+        (d["id"],)).fetchall()
+    # pending: assigned but not completed (rides)
+    pend_rides = conn.execute(
+        """SELECT id, driver_pay, tip, status FROM rides
+           WHERE driver_id=? AND status NOT IN ('completed','cancelled')""",
         (d["id"],)).fetchall()
     # delivered: ensure pay computed, then split by payout status
     done = conn.execute(
         """SELECT id, driver_pay, tip FROM orders
            WHERE driver_id=? AND status='delivered' AND stripe_status='paid'""",
+        (d["id"],)).fetchall()
+    # completed rides (paid)
+    done_rides = conn.execute(
+        """SELECT id, driver_pay, tip FROM rides
+           WHERE driver_id=? AND status='completed' AND payment_status='paid'""",
         (d["id"],)).fetchall()
     conn.close()
     # ensure driver pay on delivered orders
@@ -6666,7 +6830,13 @@ async def driver_wallet(req: Request):
         else:
             dp, tp = (o["driver_pay"] or 0), (o["tip"] or 0)
         earn = round(dp + tp, 2)
-        history.append({"order_id": o["id"], "base": dp, "tip": tp, "total": earn})
+        history.append({"order_id": o["id"], "kind": "order", "base": dp, "tip": tp, "total": earn})
+        avail += earn
+    # completed rides add to available earnings too
+    for r in done_rides:
+        dp, tp = (r["driver_pay"] or 0), (r["tip"] or 0)
+        earn = round(dp + tp, 2)
+        history.append({"order_id": r["id"], "kind": "ride", "base": dp, "tip": tp, "total": earn})
         avail += earn
     # subtract already-paid payouts
     conn = db()
@@ -6681,7 +6851,8 @@ async def driver_wallet(req: Request):
         (d["id"],)).fetchall()
     conn.close()
     available = round(max(0, avail - paid_out - requested), 2)
-    pending = round(sum((r["driver_pay"] or 0) + (r["tip"] or 0) for r in pend), 2)
+    pending = round(sum((r["driver_pay"] or 0) + (r["tip"] or 0) for r in pend)
+                    + sum((r["driver_pay"] or 0) + (r["tip"] or 0) for r in pend_rides), 2)
     return {
         "pending": pending,
         "available": available,
