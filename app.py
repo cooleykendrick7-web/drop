@@ -5371,32 +5371,59 @@ async def reconcile_ride_payment(ride_id: int, req: Request, x_pin: str = Header
 # ---------------- Dropper AI assistant ----------------
 @app.post("/api/dropper")
 async def dropper_chat(req: Request):
-    """Dropper — friendly AI that helps riders sign up and answers questions."""
+    """Dropper — Drop's personal AI assistant. Answers rider and driver questions."""
     body = await req.json()
     q = (body.get("q") or "").strip()
     if not q:
-        return {"answer": "Hey! I'm Dropper 🤖 Ask me about riding, driving, or fares!"}
+        return {"answer": "Hey! I'm Dropper 🤖 — Drop's personal AI. Ask me about booking a ride, fares, safety, driving for us, or anything else!"}
     l = q.lower()
 
-    # quick local answers (no AI needed)
-    if any(w in l for w in ("sign", "rider", "account", "join")):
-        return {"answer": "To ride with Drop: tap '🧍 Ride with Drop' on the homepage, enter your name and phone number, and you're in! Then use the fare calculator to see your price and book."}
-    if any(w in l for w in ("drive", "driver", "job", "apply", "work")):
-        return {"answer": "To drive for Drop: go to '🚗 Drive for Drop'. You'll need a valid driver's license, proof of insurance, a clear photo of yourself, and a photo of your car. Every application is reviewed personally — we only approve safe, reliable drivers."}
-    if any(w in l for w in ("price", "cost", "fare", "much", "charge")):
+    # --- booking & rides ---
+    if any(w in l for w in ("book", "request a ride", "get a ride", "need a ride", "order a ride")):
+        return {"answer": "Booking is easy! On the homepage, enter your pickup and dropoff, tap the fare calculator to see your exact price, then hit 'Pay & Request Ride.' You'll pay securely by card and get matched with a driver instantly. You can track them live on the map!"}
+    if any(w in l for w in ("schedule", "later", "tomorrow", "advance", "future", "pre-book")):
+        return {"answer": "You can schedule a ride ahead of time! On the homepage, toggle 'Schedule for later,' pick your date and time, and pay now to lock your fare. Your driver gets notified 1 hour and 15 minutes before pickup. Free cancellation up to 2 hours before!"}
+    if any(w in l for w in ("cancel", "refund")):
+        return {"answer": "To cancel: open your ride and look for the cancel option. Scheduled rides cancel free up to 2 hours before pickup. Inside 2 hours, it's a 50% refund (the other half goes to your driver for holding the slot). Instant rides: once a driver is on the way, the fare is set."}
+    # --- fares ---
+    if any(w in l for w in ("price", "cost", "fare", "much", "charge", "expensive")):
         base = fin_setting("ride_base_fare", 4.99)
         pm = fin_setting("ride_per_mile", 2.00)
-        return {"answer": f"Fares are simple: ${base:.2f} base + ${pm:.2f} per mile. Type your pickup and dropoff in the calculator to see your exact price upfront — no surge, no surprises!"}
-    if any(w in l for w in ("where", "area", "city", "serve", "location")):
-        return {"answer": "Drop serves Bismarck and Mandan, North Dakota right now. We're local — real drivers from your neighborhood!"}
-    if any(w in l for w in ("safe", "trust")):
-        return {"answer": "Every Drop driver passes our review: valid license, active insurance, and a personal application review. You can message your driver directly and track them live on the map."}
-    if any(w in l for w in ("pay", "payment", "card")):
-        return {"answer": "You pay right on the site with your card — secure checkout through Stripe. Your driver doesn't handle cash, so it's clean and simple."}
-    if any(w in l for w in ("hi", "hey", "hello")):
-        return {"answer": "Hey there! 👋 I'm Dropper. I can help you sign up to ride, apply to drive, or figure out your fare. What's up?"}
+        return {"answer": f"Fares are simple and upfront: ${base:.2f} base + ${pm:.2f} per mile, based on real driving distance. Type your pickup and dropoff in the calculator to see your EXACT price before you pay — no surge pricing, no surprises, ever!"}
+    if any(w in l for w in ("tip",)):
+        return {"answer": "Tips are 100% optional but 100% appreciated — every cent goes directly to your driver. You can add a tip when booking or after your ride when you rate your driver."}
+    # --- safety ---
+    if any(w in l for w in ("safe", "trust", "danger", "emergency", "sos", "unsafe", "scared")):
+        return {"answer": "Your safety comes first! Every driver passes our review: valid license, active insurance, and a personal application review. During your ride you get: a big red 🆘 SOS button (alerts us instantly with your live GPS location), live chat with your driver, real-time GPS tracking you can share with family, and you see your driver's car, photo, and plate before they arrive."}
+    if any(w in l for w in ("share", "family", "track my ride", "let someone know")):
+        return {"answer": "You can share your ride live! On the tracking page, tap '📤 Share my ride' — you'll get a link anyone can open to watch your trip in real time. No app needed for them!"}
+    # --- driver chat & ratings ---
+    if any(w in l for w in ("chat", "message", "talk to driver", "contact driver")):
+        return {"answer": "You can chat live with your driver! Once you're matched, a 💬 chat box appears on your tracking page. Messages deliver in seconds — great for 'I'm at the back door!' or 'Running 2 minutes late!'"}
+    if any(w in l for w in ("rate", "rating", "review", "stars", "feedback")):
+        return {"answer": "After your ride, you'll get to rate your driver 1-5 stars and leave a tip. Drivers rate riders too — good ratings help everyone get matched faster!"}
+    # --- driving ---
+    if any(w in l for w in ("drive", "driver", "job", "apply", "work", "earn", "money driving")):
+        return {"answer": "To drive for Drop: go to '🚗 Drive for Drop' and apply. You'll need: front AND back of your driver's license, your insurance card, a selfie, a photo of your car, plus your make/model, plate, and VIN. Every application gets personally reviewed. Drivers earn 70% of every fare + 100% of tips!"}
+    if any(w in l for w in ("how much do drivers make", "driver pay", "driver earn")):
+        return {"answer": "Drivers keep 70% of every fare plus 100% of all tips! Earnings go to your driver wallet and you can cash out anytime. For a $20 ride, that's about $14 in your pocket."}
+    # --- account & signup ---
+    if any(w in l for w in ("sign", "rider", "account", "join", "register")):
+        return {"answer": "To ride with Drop: tap '🧍 Ride with Drop' on the homepage, enter your name and phone number, and you're in! No app download needed — it all works right in your browser."}
+    if any(w in l for w in ("where", "area", "city", "serve", "location", "available")):
+        return {"answer": "Drop operates anywhere we have approved drivers! We're growing city by city. Enter your pickup address in the fare calculator — if we can map it, we can serve it."}
+    # --- payment ---
+    if any(w in l for w in ("pay", "payment", "card", "stripe")):
+        return {"answer": "You pay right on the site with your card — secure checkout through Stripe. Your driver never handles cash. The fare is locked in upfront so the price you see is the price you pay."}
+    # --- greetings ---
+    if any(w in l for w in ("hi", "hey", "hello", "yo", "sup")):
+        return {"answer": "Hey there! 👋 I'm Dropper, Drop's personal AI. I can help you book a ride, figure out fares, stay safe, apply to drive, or anything else. What's up?"}
+    if any(w in l for w in ("thank", "thanks", "thx")):
+        return {"answer": "You're so welcome! 😊 Anything else I can help with — ride, fare, safety, driving?"}
+    if any(w in l for w in ("who are you", "your name", "what are you")):
+        return {"answer": "I'm Dropper 🤖 — the personal AI for Drop! I live on this site to answer your questions, and I help keep everything running smoothly behind the scenes too."}
 
-    return {"answer": "Good question! I'm still learning — but I can definitely help with signing up to ride, applying to drive, fares, or where we operate. What else can I do for you?"}
+    return {"answer": "Good question! I can help with booking rides, fares, safety features (SOS, live tracking, driver chat), scheduling ahead, driving for Drop, payments, and ratings. What would you like to know more about?"}
 
 
 # ---------------- Public fare calculator ----------------
