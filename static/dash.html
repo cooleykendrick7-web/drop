@@ -562,7 +562,8 @@ function stopLoc(){
 
 // ---- AI menu watchdog proposals ----
 const KINDLBL={price_change:'💲 Price change',new_item:'✨ New item',unavailable:'🚫 Removed item',back_available:'✅ Back on menu'};
-setInterval(()=>{if(PIN) loadOrders();},5000);
+setInterval(()=>{if(PIN){loadOrders();loadRides();
+  if($('t-money').classList.contains('on'))loadMoney();}},5000);
 async function loadTix(){
   const t=await (await fetch('/api/operator/tickets',{headers:H()})).json();
   const open=t.filter(x=>x.status==='open').length;
@@ -613,8 +614,12 @@ async function resolveTix(id){
 }
 
 /* --- Drivers: approve / deny --- */
+let lastRidesJSON='';
 async function loadRides(){
   const j=await (await fetch('/api/operator/rides',{headers:H()})).json();
+  const sig=JSON.stringify(j);
+  if(sig===lastRidesJSON) return; // nothing changed — don't wipe Ken's dropdown picks
+  lastRidesJSON=sig;
   const esc=s=>(s||'').replace(/</g,'&lt;');
   $('ride-launch').textContent=j.rides_open?'🟢 LIVE — taking ride requests':'🌙 Launches '+new Date(j.launch_at).toLocaleString();
   const pend=j.rides.filter(x=>x.status==='new'), act=j.rides.filter(x=>['accepted','waiting'].includes(x.status));
