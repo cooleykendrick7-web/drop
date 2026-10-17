@@ -5939,9 +5939,10 @@ def op_financials(x_pin: str = Header(default="")):
     alerts = []
     min_profit = fin_setting("min_profit_per_order", 1.00)
     # --- rideshare rides (paid) ---
+    # NOTE: cancelled rides still show if payment went through — Ken got paid, he needs to see it
     paid_rides = conn.execute(
         """SELECT * FROM rides WHERE payment_status='paid'
-           AND status NOT IN ('cancelled') ORDER BY id DESC""").fetchall()
+           ORDER BY id DESC""").fetchall()
     for r in paid_rides:
         rd = dict(r)
         r_total = rd.get("total") or 0
@@ -5968,7 +5969,7 @@ def op_financials(x_pin: str = Header(default="")):
     # --- scheduled rides (paid) ---
     paid_sched = conn.execute(
         """SELECT * FROM scheduled_rides WHERE payment_status='paid'
-           AND status NOT IN ('cancelled') ORDER BY id DESC""").fetchall()
+           ORDER BY id DESC""").fetchall()
     for r in paid_sched:
         rd = dict(r)
         r_total = rd.get("total") or 0
@@ -5996,7 +5997,7 @@ def op_financials(x_pin: str = Header(default="")):
     conn.close()
     per_order.sort(key=lambda x: x.get("created_at") or "", reverse=True)
     return {
-        "orders": len(orders) + len(paid_rides) + len(paid_sched),
+        "orders": len(paid_rides) + len(paid_sched),
         "gross_revenue": round(total_rev, 2),
         "driver_pay_owed": round(total_driver_pay, 2),
         "tips_owed": round(total_tips, 2),
