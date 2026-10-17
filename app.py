@@ -637,6 +637,62 @@ def geocode(address, parts=None):
 
 
 # ---------------- public API ----------------
+
+
+# ---- Restored shared helpers (were adjacent to removed food code) ----
+def driving_miles(lat1, lng1, lat2, lng2):
+    """Real driving distance via OSRM (free, no key). Falls back to haversine."""
+    try:
+        url = (f"https://router.project-osrm.org/route/v1/driving/"
+               f"{lng1},{lat1};{lng2},{lat2}?overview=false")
+        req = urllib.request.Request(url, headers={"User-Agent": "DropDelivery/1.0"})
+        data = json.load(urllib.request.urlopen(req, timeout=10))
+        if data.get("routes"):
+            meters = data["routes"][0]["distance"]
+            return round(meters / 1609.34, 2)
+    except Exception:
+        pass
+    return haversine_miles(lat1, lng1, lat2, lng2)
+
+
+def haversine_miles(lat1, lng1, lat2, lng2):
+    """Straight-line distance (fallback only)."""
+    import math
+    R = 3959
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lng2 - lng1)
+    a = math.sin(dp/2)**2 + math.cos(p1)*math.cos(p2)*math.sin(dl/2)**2
+    return round(2 * R * math.asin(math.sqrt(a)), 2)
+
+
+def fin_setting(key, default):
+    v = get_setting(key)
+    if v is None or v == "":
+        return default
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return default
+
+
+def get_driver(req):
+    token = req.cookies.get("drop_driver", "")
+    if not token:
+        return None
+    conn = db()
+    s = conn.execute("SELECT driver_id, expires_at FROM driver_sessions WHERE token=?",
+                     (token,)).fetchone()
+    if not s:
+        conn.close()
+        return None
+    d = conn.execute("SELECT * FROM drivers WHERE id=?", (s["driver_id"],)).fetchone()
+    conn.close()
+    if not d or d["status"] != "approved":
+        return None
+    return dict(d)
+
+
 @app.get("/api/health")
 def health():
     return {"ok": True, "stripe_live": STRIPE_LIVE, "time": now_iso()}
@@ -5344,54 +5400,6 @@ async def dropper_chat(req: Request):
 
 
 # ---------------- Public fare calculator ----------------
-@app.post("/api/fare-quote")
-async def fare_quote(req: Request):
-    """Accurate upfront fare estimate. Takes structured from/to addresses,
-    geocodes both, calculates REAL driving distance, returns the price."""
-    body = await req.json()
-    frm = body.get("from") or {}
-    to = body.get("to") or {}
-    kind = body.get("kind", "courier")
-
-    # validate required fields
-    for label, a in (("pickup", frm), ("delivery", to)):
-        if not a.get("street") or not a.get("city") or not a.get("state"):
-            raise HTTPException(400, f"{label}: street, city, and state required")
-
-    def full_addr(a):
-        s = a["street"].strip()
-        if a.get("apt"):
-            s += ", " + a["apt"].strip()
-        s += f", {a['city'].strip()}, {a['state'].strip().upper()}"
-        if a.get("zip"):
-            s += " " + a["zip"].strip()
-        return s
-
-    from_full = full_addr(frm)
-    to_full = full_addr(to)
-
-    # geocode both with structured parts for max accuracy
-    flat, flng = geocode(from_full, frm)
-    tlat, tlng = geocode(to_full, to)
-    if not flat or not tlat:
-        raise HTTPException(400,
-            "Couldn't find one of those addresses. Double-check street, city, state.")
-
-    # real driving distance
-    miles = driving_miles(flat, flng, tlat, tlng)
-    q = calc_quote(flat, flng, tlat, tlng, kind)
-
-    return {
-        "from": from_full, "to": to_full,
-        "distance_miles": miles,
-        "delivery_fee": q["delivery_fee"],
-        "driver_pay": q["driver_pay"],
-        "warnings": q["warnings"],
-        "from_lat": flat, "from_lng": flng,
-        "to_lat": tlat, "to_lng": tlng,
-    }
-
-
 # ---------------- Watcher mode (PIN 5683): read-only live view + chat ----------------
 WATCHER_PIN = "5683"
 
@@ -5890,37 +5898,6 @@ def op_blasts(x_pin: str = Header(default="")):
 
 
 # ---------------- Drop Investors ----------------
-@app.get("/api/quote")
-def get_quote(pickup_lat: float = 0, pickup_lng: float = 0,
-              cust_lat: float = 0, cust_lng: float = 0, kind: str = "food"):
-    """Public: smart delivery price quote. Shown before the customer pays."""
-    q = calc_quote(pickup_lat, pickup_lng, cust_lat, cust_lng, kind)
-    return q
-
-
-def ensure_driver_pay(oid):
-    """Compute + store driver pay for an order using the pricing engine."""
-    conn = db()
-    o = conn.execute("SELECT * FROM orders WHERE id=?", (oid,)).fetchone()
-    if not o:
-        conn.close()
-        return
-    if o["driver_pay"]:
-        conn.close()
-        return
-    kind = o["kind"] or "food"
-    if kind == "courier":
-        plat, plng = o["pickup_lat"] or 0, o["pickup_lng"] or 0
-    else:
-        r = conn.execute("SELECT lat, lng FROM restaurants WHERE id=?",
-                         (o["restaurant_id"],)).fetchone()
-        plat, plng = (r["lat"] or 0, r["lng"] or 0) if r else (0, 0)
-    q = calc_quote(plat, plng, o["cust_lat"] or 0, o["cust_lng"] or 0, kind)
-    conn.execute("UPDATE orders SET driver_pay=? WHERE id=?", (q["driver_pay"], oid))
-    conn.commit()
-    conn.close()
-
-
 @app.get("/api/operator/financials")
 def op_financials(x_pin: str = Header(default="")):
     """Owner money dashboard: revenue, costs, profit per order, alerts."""
