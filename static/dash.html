@@ -33,8 +33,7 @@
     <button class="btn small ghost" id="logoutbtn" style="width:auto;padding:6px 14px">Log out</button>
   </div>
   <div class="tabs">
-    <button class="on" data-t="orders">📦 Orders</button>
-    <button data-t="rides">🚗 Rides <span id="ridebadge"></span></button>
+    <button class="on" data-t="rides">🚗 Rides <span id="ridebadge"></span></button>
     <button data-t="money">💰 Money</button>
     <button data-t="drv">👥 Drivers <span id="drvbadge"></span></button>
     <button data-t="growth">📈 Growth <span id="growthbadge"></span></button>
@@ -44,16 +43,7 @@
     <button data-t="set">⚙️ Settings</button>
   </div>
 
-  <div class="tab on" id="t-orders">
-    <div class="card" id="loccard"><div class="row"><span><b>📍 Share my location</b><br>
-      <span class="small">While ON, customers watch your car move on their tracking map.</span></span>
-      <button class="btn small ghost" id="locToggle" style="width:auto;padding:10px 20px">Start</button></div>
-      <p class="small" id="locmsg"></p></div>
-    <div id="schedlist"></div>
-    <div id="olist"></div>
-  </div>
-
-  <div class="tab" id="t-rides">
+  <div class="tab on" id="t-rides">
     <div class="card" style="background:linear-gradient(135deg,#0d0d10,#1a1405);border:1px solid #d4af37">
       <div class="row"><b style="color:#d4af37">🚗 Drop Rides</b><span id="ride-launch" class="small"></span></div>
       <p class="small">Customers request rides, you accept or decline. Drivers need your separate rides approval (photo of them + photo of their car + waiver).</p>
@@ -363,7 +353,7 @@ $('gobtn').onclick=async()=>{
   if(r.status===401){$('loginmsg').textContent='Wrong PIN.';return;}
   localStorage.setItem('droppin',PIN);
   $('login').style.display='none';$('app').style.display='block';
-  loadOrders(true);
+  loadRides();
 };
 PIN=localStorage.getItem('droppin')||'';
 (async()=>{
@@ -372,7 +362,7 @@ PIN=localStorage.getItem('droppin')||'';
     const r=await fetch('/api/operator/orders',{headers:H()});
     if(r.status===401){doLogout();return;}  // stale/bad saved PIN -> force fresh login
   }catch(e){return;}  // offline: leave as-is, login screen stays hidden
-  $('login').style.display='none';$('app').style.display='block';loadOrders(true);
+  $('login').style.display='none';$('app').style.display='block';loadRides();
 })();
 $('logoutbtn').onclick=()=>{doLogout();};
 $('resetpin').onclick=(e)=>{e.preventDefault();doLogout();$('pin').value='';$('loginmsg').textContent='Cleared. Type your PIN and tap Unlock.';};
@@ -381,7 +371,7 @@ async function activateSched(oid){
   if(!confirm('Activate order #'+oid+' now?'))return;
   await fetch('/api/operator/orders/'+oid+'/status',{method:'POST',headers:H(),
     body:JSON.stringify({status:'confirmed'})});
-  loadOrders();
+  loadRides();
 }
 function doLogout(){
   localStorage.removeItem('droppin');
@@ -391,63 +381,13 @@ function doLogout(){
   $('pin').value='';
   $('loginmsg').textContent='';
 }
-async function loadOrders(first){
-  const r=await fetch('/api/operator/orders',{headers:H()});
-  if(r.status===401){doLogout();$('loginmsg').textContent='Session expired — enter your PIN.';return;}
-  const orders=await r.json();
-  // scheduled orders
-  try{
-    const sch=await (await fetch('/api/operator/scheduled',{headers:H()})).json();
-    $('schedlist').innerHTML=sch.length?`<div class="card" style="border:2px solid #a78bfa">
-      <b>📅 Scheduled (${sch.length})</b>
-      ${sch.map(o=>`<div class="row" style="padding:6px 0;border-top:1px solid #222">
-        <div><b>#${o.id} · ${o.pickup_name||'Drop Ride'}</b><br>
-        <span class="small">${o.customer_name} · $${o.total.toFixed(2)}</span></div>
-        <div style="text-align:right"><span class="small">${o.scheduled_for.replace('T',' ').slice(0,16)}</span><br>
-        <button class="btn small ghost" style="width:auto;margin-top:4px" onclick="activateSched(${o.id})">▶ Activate</button></div>
-      </div>`).join('')}</div>`:'';
-  }catch(e){}
-  const ids=orders.map(o=>o.id), mx=Math.max(0,...ids);
-  if(!first && mx>lastSeen){
-    const fresh=orders.filter(o=>o.id>lastSeen);
-    beep(); banner(`🔔 ${fresh.length} NEW ORDER${fresh.length>1?'S':''} — check the list!`);
-  }
-  lastSeen=mx;
-  const open=orders.filter(o=>!['delivered','cancelled'].includes(o.status));
-  const done=orders.filter(o=>['delivered','cancelled'].includes(o.status));
-  const card=(o,i)=>{
-    const restDest=o.pickup_lat?`${o.pickup_lat},${o.pickup_lng}`:encodeURIComponent(o.pickup_address||'');
-    const custDest=o.cust_lat?`${o.cust_lat},${o.cust_lng}`:encodeURIComponent(o.address||'');
-    const active=!['delivered','cancelled'].includes(o.status);
-    return `
-    <div class="card order ${o.id>lastSeen-2&&o.status==='placed'?'new':''}">
-      <div class="row"><b>${i>=0?`#${i+1} · `:''}${o.id} · ${o.pickup_name||'Ride'}</b>
-        <span class="badge ${o.status==='placed'?'closed':''}">${o.status_label}</span></div>
-      <p><b>${o.customer_name}</b> · <a href="tel:${o.phone}">${o.phone}</a><br>
-      📍 ${o.address}${o.notes?`<br>📝 ${o.notes}`:''}</p>
-      ${o.items.map(i=>`<div class="row small"><span>${i.qty}× ${i.name}</span><span>$${i.line.toFixed(2)}</span></div>`).join('')}
-      <div class="row"><span class="small">Fare $${(o.total-(o.tip||0)-(o.discount||0)).toFixed(2)}${o.tip?` + tip $${o.tip.toFixed(2)}`:''}</span><b>$${o.total.toFixed(2)}</b></div>
-      <div class="small">${o.paid?'💰 Paid ✓':'⚠️ NOT PAID'} · ${o.driver_name?`🚗 ${o.driver_name}`:'🚗 Ken'} · ${new Date(o.created_at).toLocaleString()}</div>
-      ${active?`<div style="display:flex;gap:8px;margin-top:10px">
-        <a class="btn small" href="https://www.google.com/maps/dir/?api=1&destination=${restDest}" target="_blank" style="flex:1;text-decoration:none;text-align:center">🧭 To pickup</a>
-        <a class="btn small" href="https://www.google.com/maps/dir/?api=1&destination=${custDest}" target="_blank" style="flex:1;text-decoration:none;text-align:center">🏠 To customer</a>
-      </div>`:''}
-      <div style="margin-top:8px">
-        ${NEXT[o.status]?`<button class="btn small" onclick="setStatus(${o.id},'${NEXT[o.status]}')">${NEXTLBL[NEXT[o.status]]}</button>`:''}
-        ${active?`<button class="btn small ghost" onclick="setStatus(${o.id},'cancelled')">Cancel</button>`:''}
-        ${active?`<button class="btn small ghost" onclick="assignDriver(${o.id})">🚗 Assign driver</button>`:''}
-      </div>
-    </div>`;};
-  $('olist').innerHTML = '<h2>Active ('+open.length+')</h2>'+(open.map((o,i)=>card(o,i)).join('')||'<p class="small">None right now.</p>')
-    + '<h2>History</h2>'+(done.map(o=>card(o,-1)).join('')||'<p class="small">Nothing yet.</p>');
-}
 async function setStatus(id,s){
   await fetch('/api/operator/orders/'+id+'/status',{method:'POST',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({status:s})});
   if(s==='on_the_way' && !locWatch){
     // one tap: customer starts seeing Ken drive to them
     $('locToggle').click();
   }
-  loadOrders();
+  loadRides();
 }
 let DRIVERS=[];
 async function assignDriver(oid){
@@ -467,7 +407,7 @@ async function assignDriver(oid){
 async function doAssign(oid){
   const did=parseInt(document.getElementById('as-'+oid).value);
   await fetch('/api/operator/orders/'+oid+'/assign',{method:'POST',headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({driver_id:did})});
-  loadOrders();
+  loadRides();
 }
 async function loadEarn(){
   const e=await (await fetch('/api/operator/earnings',{headers:H()})).json();
@@ -562,7 +502,7 @@ function stopLoc(){
 
 // ---- AI menu watchdog proposals ----
 const KINDLBL={price_change:'💲 Price change',new_item:'✨ New item',unavailable:'🚫 Removed item',back_available:'✅ Back on menu'};
-setInterval(()=>{if(PIN){loadOrders();loadRides();
+setInterval(()=>{if(PIN){loadRides();loadRides();
   if($('t-money').classList.contains('on'))loadMoney();}},5000);
 async function loadTix(){
   const t=await (await fetch('/api/operator/tickets',{headers:H()})).json();

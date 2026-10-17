@@ -63,25 +63,6 @@ def init_db():
     c = conn.cursor()
     c.execute("""CREATE TABLE IF NOT EXISTS settings (
         key TEXT PRIMARY KEY, value TEXT)""")
-    c.execute("""CREATE TABLE IF NOT EXISTS restaurants (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL, cuisine TEXT DEFAULT '', emoji TEXT DEFAULT '🍽️',
-        open INTEGER DEFAULT 1, sample INTEGER DEFAULT 0)""")
-    c.execute("""CREATE TABLE IF NOT EXISTS menu_items (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        restaurant_id INTEGER NOT NULL REFERENCES restaurants(id) ON DELETE CASCADE,
-        name TEXT NOT NULL, description TEXT DEFAULT '',
-        price REAL NOT NULL, available INTEGER DEFAULT 1)""")
-    c.execute("""CREATE TABLE IF NOT EXISTS orders (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        restaurant_id INTEGER NOT NULL REFERENCES restaurants(id),
-        items_json TEXT NOT NULL,
-        customer_name TEXT NOT NULL, phone TEXT NOT NULL,
-        address TEXT NOT NULL, notes TEXT DEFAULT '',
-        food_total REAL NOT NULL, delivery_fee REAL NOT NULL, total REAL NOT NULL,
-        status TEXT NOT NULL DEFAULT 'placed',
-        stripe_payment_id TEXT DEFAULT '', stripe_status TEXT NOT NULL DEFAULT 'pending',
-        created_at TEXT NOT NULL, updated_at TEXT NOT NULL)""")
     c.execute("""CREATE TABLE IF NOT EXISTS support_tickets (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL, phone TEXT DEFAULT '',
@@ -152,15 +133,6 @@ def init_db():
                        ("driver_updated", "TEXT DEFAULT ''")):
         if _col not in ocols3:
             c.execute(f"ALTER TABLE orders ADD COLUMN {_col} {_ddl}")
-    c.execute("""CREATE TABLE IF NOT EXISTS menu_proposals (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        restaurant_id INTEGER NOT NULL REFERENCES restaurants(id) ON DELETE CASCADE,
-        kind TEXT NOT NULL DEFAULT 'price_change',
-        item_name TEXT NOT NULL DEFAULT '',
-        old_price REAL DEFAULT 0, new_price REAL DEFAULT 0,
-        detail TEXT DEFAULT '', source_url TEXT DEFAULT '',
-        status TEXT NOT NULL DEFAULT 'pending',
-        created_at TEXT NOT NULL)""")
     # support ticket replies (added 2026-10-10)
     c.execute("""CREATE TABLE IF NOT EXISTS ticket_replies (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -685,223 +657,6 @@ def config():
         "hours_label": f"{fmt_hour(oh)}–{fmt_hour(ch)}",
         "delivery_zone": get_setting("delivery_zone") or "Bismarck, ND",
     }
-
-
-@app.get("/api/restaurants")
-def list_restaurants():
-    conn = db()
-    rows = conn.execute("SELECT * FROM restaurants ORDER BY id").fetchall()
-    out = []
-    for r in rows:
-        rd = dict(r)
-        items = conn.execute(
-            "SELECT * FROM menu_items WHERE restaurant_id=? AND available=1 ORDER BY id",
-            (r["id"],)).fetchall()
-        rd["menu"] = [dict(i) for i in items]
-        out.append(rd)
-    conn.close()
-    return out
-
-
-@app.post("/api/orders")
-async def create_order(req: Request):
-    """Create an order (unpaid). Server prices everything from the DB."""
-    body = await req.json()
-    if not is_open_now():
-        oh, _ = get_hours()
-        raise HTTPException(400, f"We're closed right now — back at {fmt_hour(oh)}")
-    if get_setting("accepting_orders") == "0":
-        raise HTTPException(400, "We're at capacity right now — please check back soon")
-    rid = body.get("restaurant_id")
-    # logged-in customer?
-    me = get_session_user(req)
-    user_id = me["id"] if me else 0
-    items = body.get("items", [])
-    cust = body.get("customer", {})
-    name = (cust.get("name") or "").strip()
-    phone = (cust.get("phone") or "").strip()
-    address = (cust.get("address") or "").strip()
-    notes = (cust.get("notes") or "").strip()
-    if not rid or not items or not name or not phone or not address:
-        raise HTTPException(400, "Missing restaurant, items, name, phone, or address")
-    conn = db()
-    rest = conn.execute("SELECT * FROM restaurants WHERE id=?", (rid,)).fetchone()
-    if not rest:
-        conn.close()
-        raise HTTPException(400, "Unknown restaurant")
-    if not rest["open"]:
-        conn.close()
-        raise HTTPException(400, "Restaurant is closed right now")
-    food_total = 0.0
-    priced = []
-    for it in items:
-        mi = conn.execute(
-            "SELECT * FROM menu_items WHERE id=? AND restaurant_id=? AND available=1",
-            (it.get("menu_item_id"), rid)).fetchone()
-        if not mi:
-            conn.close()
-            raise HTTPException(400, "A menu item is invalid or unavailable")
-        qty = max(1, min(20, int(it.get("qty", 1))))
-        line = round(mi["price"] * qty, 2)
-        food_total += line
-        priced.append({"menu_item_id": mi["id"], "name": mi["name"],
-                       "price": mi["price"], "qty": qty, "line": line})
-    food_total = round(food_total, 2)
-    fee = round(float(get_setting("delivery_fee")), 2)
-    free_fee_applied = False
-    if user_id:
-        rw = get_rewards(user_id)
-        if rw["free_fee"]:
-            fee = 0.0
-            free_fee_applied = True
-            conn.execute("UPDATE rewards SET free_fee=0 WHERE user_id=?", (user_id,))
-    try:
-        tip = round(max(0.0, min(100.0, float(body.get("tip", 0)))), 2)
-    except (TypeError, ValueError):
-        tip = 0.0
-    # promo code (re-validated server-side; never trust the client)
-    discount, promo_code = 0.0, ""
-    pcode = (body.get("promo_code") or "").strip()
-    if pcode:
-        discount, msg = validate_promo(pcode, food_total)
-        if discount > 0:
-            promo_code = pcode.strip().upper()
-            conn.execute("UPDATE promo_codes SET uses=uses+1 WHERE code=?", (promo_code,))
-    total = round(food_total + fee + tip - discount, 2)
-    # referral/store credit (added 2026-10-11)
-    credit_used = 0.0
-    if me and body.get("use_credit"):
-        credit = conn.execute("SELECT credit FROM users WHERE id=?", (me["id"],)).fetchone()["credit"] or 0
-        credit_used = round(min(credit, total), 2)
-        if credit_used > 0:
-            conn.execute("UPDATE users SET credit=credit-? WHERE id=?", (credit_used, me["id"]))
-            total = round(total - credit_used, 2)
-    # gift order?
-    gift = body.get("gift") or {}
-    is_gift = 1 if gift.get("recipient_name") else 0
-    gift_recipient = (gift.get("recipient_name") or "").strip()[:80]
-    gift_contact = (gift.get("recipient_contact") or "").strip()[:120]
-    gift_message = (gift.get("message") or "").strip()[:500]
-    cur = conn.execute(
-        """INSERT INTO orders(restaurant_id, items_json, customer_name, phone, address,
-                              notes, food_total, delivery_fee, tip, discount, promo_code,
-                              user_id, total, status, stripe_status, created_at, updated_at,
-                              is_gift, gift_recipient, gift_contact, gift_message, gift_sender,
-                              credit_used)
-           VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'placed','pending',?,?, ?,?,?,?,? ,?)""",
-        (rid, json.dumps(priced), name, phone, address, notes,
-         food_total, fee, tip, discount, promo_code, user_id, total, now_iso(), now_iso(),
-         is_gift, gift_recipient, gift_contact, gift_message, name if is_gift else "",
-         credit_used))
-    oid = cur.lastrowid
-    conn.commit()
-    # queue gift notification (sent by background job from business Gmail)
-    if is_gift and gift_contact:
-        conn.execute(
-            "INSERT INTO gift_queue(order_id, recipient, contact, message, sender, status, created_at)"
-            " VALUES(?,?,?,?,?,'pending',?)",
-            (oid, gift_recipient, gift_contact, gift_message, name, now_iso()))
-        conn.commit()
-        log_event("gift", f"🎁 Gift order #{oid} queued",
-                  f"For {gift_recipient} from {name}")
-    # pin the delivery address on the map (background — never slows the order)
-    # uses structured parts when available for max accuracy
-    addr_parts = (body.get("customer") or {}).get("address_parts")
-    def _geocode_order():
-        try:
-            glat, glng = geocode(address, addr_parts)
-            if glat:
-                c2 = db()
-                c2.execute("UPDATE orders SET cust_lat=?, cust_lng=? WHERE id=?",
-                           (glat, glng, oid))
-                c2.commit()
-                c2.close()
-        except Exception:
-            pass
-    threading.Thread(target=_geocode_order, daemon=True).start()
-    conn.close()
-    return {"order_id": oid, "food_total": food_total, "delivery_fee": fee,
-            "tip": tip, "discount": discount, "promo_code": promo_code,
-            "free_fee_applied": free_fee_applied,
-            "total": total, "stripe_live": STRIPE_LIVE}
-
-
-@app.post("/api/checkout")
-async def checkout(req: Request):
-    """Start real payment. Live: Stripe Checkout URL. Dev: test-pay endpoint."""
-    body = await req.json()
-    oid = body.get("order_id")
-    conn = db()
-    o = conn.execute("SELECT * FROM orders WHERE id=?", (oid,)).fetchone()
-    conn.close()
-    if not o:
-        raise HTTPException(404, "Order not found")
-    if o["stripe_status"] == "paid":
-        return {"already_paid": True, "track_url": f"/track.html?id={oid}"}
-    # referral credit applied at order time — adjust line items
-    credit_used = o["credit_used"] if "credit_used" in o.keys() else 0
-    if STRIPE_LIVE:
-        base = str(req.base_url).rstrip("/")
-        net_total = round(o["total"], 2)
-        if net_total <= 0:
-            # credit covered everything — no Stripe needed
-            conn = db()
-            conn.execute("UPDATE orders SET stripe_status='paid', stripe_payment_id='credit',"
-                         " updated_at=? WHERE id=?", (now_iso(), oid))
-            conn.commit()
-            conn.close()
-            return {"already_paid": True, "track_url": f"/track.html?id={oid}",
-                    "note": "Paid with referral credit"}
-        line_items = [{
-                "price_data": {
-                    "currency": "usd",
-                    "product_data": {"name": f"Drop order #{oid} — food"},
-                    "unit_amount": int(round(o["food_total"] * 100)),
-                },
-                "quantity": 1,
-            }, {
-                "price_data": {
-                    "currency": "usd",
-                    "product_data": {"name": "Drop delivery fee"},
-                    "unit_amount": int(round(o["delivery_fee"] * 100)),
-                },
-                "quantity": 1,
-            }]
-        if (o["tip"] or 0) > 0:
-            line_items.append({
-                "price_data": {
-                    "currency": "usd",
-                    "product_data": {"name": "Tip for your driver"},
-                    "unit_amount": int(round(o["tip"] * 100)),
-                },
-                "quantity": 1,
-            })
-        if (o["discount"] or 0) > 0:
-            line_items.append({
-                "price_data": {
-                    "currency": "usd",
-                    "product_data": {"name": f"Discount ({o['promo_code']})"},
-                    "unit_amount": -int(round(o["discount"] * 100)),
-                },
-                "quantity": 1,
-            })
-        session = stripe.checkout.Session.create(
-            mode="payment",
-            line_items=line_items,
-            success_url=f"{base}/pay/success?session_id={{CHECKOUT_SESSION_ID}}",
-            cancel_url=f"{base}/checkout.html?order_id={oid}&cancelled=1",
-            metadata={"drop_order_id": str(oid)},
-        )
-        conn = db()
-        conn.execute("UPDATE orders SET stripe_payment_id=?, updated_at=? WHERE id=?",
-                     (session.id, now_iso(), oid))
-        conn.commit()
-        conn.close()
-        return {"url": session.url}
-    return {"dev": True, "pay_url": f"/api/dev-pay/{oid}",
-            "note": "DEV MODE: no Stripe keys configured. Test payment only."}
-
-
 @app.post("/api/dev-pay/{oid}")
 def dev_pay(oid: int):
     """DEV ONLY: simulate a successful payment. Refused when Stripe is live."""
@@ -1117,68 +872,6 @@ def public_order(oid: int):
 
 
 # ---------------- operator API (PIN protected) ----------------
-@app.get("/api/operator/orders")
-def op_orders(x_pin: str = Header(default="")):
-    check_pin(x_pin)
-    conn = db()
-    rows = conn.execute(
-        """SELECT o.*, r.name AS restaurant_name, r.lat AS rest_lat, r.lng AS rest_lng,
-           r.address AS rest_address, d.name AS driver_name FROM orders o
-           LEFT JOIN restaurants r ON r.id = o.restaurant_id
-           LEFT JOIN drivers d ON d.id = o.driver_id
-           ORDER BY o.id DESC""").fetchall()
-    out = []
-    for r in rows:
-        d = order_dict(r)
-        d["restaurant_name"] = r["restaurant_name"] or r["pickup_name"] or "—"
-        out.append(d)
-    conn.close()
-    return out
-
-
-@app.post("/api/operator/orders/{oid}/status")
-async def op_set_status(oid: int, req: Request, x_pin: str = Header(default="")):
-    check_pin(x_pin)
-    body = await req.json()
-    status = body.get("status")
-    if status not in STATUSES:
-        raise HTTPException(400, "Bad status")
-    conn = db()
-    o = conn.execute("SELECT * FROM orders WHERE id=?", (oid,)).fetchone()
-    if not o:
-        conn.close()
-        raise HTTPException(404, "Order not found")
-    refunded = False
-    new_stripe_status = o["stripe_status"]
-    if status == "cancelled":
-        refunded = refund_order(o)
-        if refunded:
-            new_stripe_status = "refunded"
-        if o["promo_code"]:
-            conn.execute("UPDATE promo_codes SET uses=MAX(0,uses-1) WHERE code=?", (o["promo_code"],))
-    conn.execute("UPDATE orders SET status=?, stripe_status=?, updated_at=? WHERE id=?",
-                 (status, new_stripe_status, now_iso(), oid))
-    conn.commit()
-    punch = None
-    if status == "delivered" and (o["user_id"] or 0) and new_stripe_status == "paid":
-        punch = award_punch(o["user_id"])
-    conn.close()
-    # customer push notification (added 2026-10-11)
-    if o["user_id"]:
-        _msgs = {
-            "confirmed": ("✅ Order confirmed", "The restaurant is making your food!"),
-            "picked_up": ("🛍️ Picked up", "Your driver has your food and is heading your way!"),
-            "on_the_way": ("🚗 On the way!", "Your driver is on the way to you!"),
-            "delivered": ("📦 Delivered!", "Your food was dropped at your door. Enjoy!"),
-            "cancelled": ("❌ Order cancelled", "Your order was cancelled. Refund on the way if you paid."),
-        }
-        if status in _msgs:
-            t, m = _msgs[status]
-            push_to_customer(o["user_id"], t, f"Order #{oid}: {m}")
-    return {"ok": True, "status": status, "label": STATUS_LABELS[status],
-            "refunded": refunded, "rewards": punch}
-
-
 @app.post("/api/operator/location")
 async def op_location(req: Request, x_pin: str = Header(default="")):
     """Ken's phone posts GPS while delivering. Updates all active orders so
@@ -1670,31 +1363,6 @@ def queue_status():
     return {"active": n, "accepting": accepting and open_now,
             "open_now": open_now, "hours_label": f"{fmt_hour(oh)}–{fmt_hour(ch)}",
             "estimated_mins": (n * mins + 25) if (accepting and open_now) else 0}
-
-
-@app.post("/api/orders/{oid}/cancel")
-def customer_cancel(oid: int):
-    """Customer cancels their own order (before pickup). Auto-refunds if paid."""
-    conn = db()
-    o = conn.execute("SELECT * FROM orders WHERE id=?", (oid,)).fetchone()
-    if not o:
-        conn.close()
-        raise HTTPException(404, "Order not found")
-    if o["status"] not in ("placed", "confirmed"):
-        conn.close()
-        raise HTTPException(400, "Too late to cancel — your food is already on the way")
-    refunded = refund_order(o)
-    conn.execute(
-        "UPDATE orders SET status='cancelled', stripe_status=?, updated_at=? WHERE id=?",
-        ("refunded" if refunded else o["stripe_status"], now_iso(), oid))
-    if o["promo_code"]:
-        conn.execute("UPDATE promo_codes SET uses=MAX(0,uses-1) WHERE code=?", (o["promo_code"],))
-    conn.commit()
-    conn.close()
-    return {"ok": True, "refunded": refunded}
-
-
-# ---------------- visitor analytics ----------------
 @app.post("/api/visit")
 async def track_visit(req: Request):
     """Count one visit per browser session per page (frontend dedupes)."""
@@ -2002,103 +1670,6 @@ def op_del_business(bid: int, x_pin: str = Header(default="")):
     conn.commit()
     conn.close()
     return {"ok": True}
-
-
-@app.post("/api/courier-orders")
-async def create_courier_order(req: Request):
-    """Drop More courier request: pick up items from a business, deliver to customer."""
-    body = await req.json()
-    if not is_open_now():
-        oh, _ = get_hours()
-        raise HTTPException(400, f"We're closed right now — back at {fmt_hour(oh)}")
-    if get_setting("accepting_orders") == "0":
-        raise HTTPException(400, "We're at capacity right now — please check back soon")
-    me = get_session_user(req)
-    user_id = me["id"] if me else 0
-    business_id = int(body.get("business_id") or 0)
-    # pickup can be a listed business or a custom location
-    pickup_name = (body.get("pickup_name") or "").strip()[:120]
-    pickup_address = (body.get("pickup_address") or "").strip()[:200]
-    item_desc = (body.get("item_desc") or "").strip()[:1000]
-    cust = body.get("customer", {})
-    name = (cust.get("name") or "").strip()
-    phone = (cust.get("phone") or "").strip()
-    address = (cust.get("address") or "").strip()
-    notes = (cust.get("notes") or "").strip()
-    if not item_desc or not name or not phone or not address:
-        raise HTTPException(400, "Missing items, name, phone, or delivery address")
-    if not pickup_name and not business_id:
-        raise HTTPException(400, "Missing pickup location")
-    try:
-        est_total = round(max(0.0, float(body.get("est_total") or 0)), 2)
-    except (TypeError, ValueError):
-        est_total = 0.0
-    conn = db()
-    plat, plng = 0.0, 0.0
-    if business_id:
-        b = conn.execute("SELECT * FROM businesses WHERE id=?", (business_id,)).fetchone()
-        if not b:
-            conn.close()
-            raise HTTPException(400, "Unknown business")
-        pickup_name, pickup_address, plat, plng = b["name"], b["address"], b["lat"], b["lng"]
-    elif pickup_address:
-        plat, plng = geocode(pickup_address, body.get("pickup_parts"))
-    fee = round(float(get_setting("delivery_fee")), 2)
-    try:
-        tip = round(max(0.0, min(100.0, float(body.get("tip", 0)))), 2)
-    except (TypeError, ValueError):
-        tip = 0.0
-    total = round(est_total + fee + tip, 2)
-    items_json = json.dumps([{"name": item_desc[:120], "qty": 1,
-                              "price": est_total, "line": est_total}])
-    cur = conn.execute(
-        """INSERT INTO orders(kind, business_id, pickup_name, pickup_address, pickup_lat, pickup_lng,
-                              item_desc, restaurant_id, items_json, customer_name, phone, address,
-                              notes, food_total, delivery_fee, tip, user_id, total,
-                              status, stripe_status, created_at, updated_at)
-           VALUES('courier',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'placed','pending',?,?)""",
-        (business_id, pickup_name, pickup_address, plat, plng, item_desc,
-         0, items_json, name, phone, address, notes,
-         est_total, fee, tip, user_id, total, now_iso(), now_iso()))
-    oid = cur.lastrowid
-    conn.commit()
-    # geocode delivery address in background (structured parts for accuracy)
-    cust_parts = (body.get("customer") or {}).get("address_parts")
-    def _geo():
-        try:
-            glat, glng = geocode(address, cust_parts)
-            if glat:
-                c2 = db()
-                c2.execute("UPDATE orders SET cust_lat=?, cust_lng=? WHERE id=?",
-                           (glat, glng, oid))
-                c2.commit()
-                c2.close()
-        except Exception:
-            pass
-    threading.Thread(target=_geo, daemon=True).start()
-    conn.close()
-    return {"order_id": oid, "est_total": est_total, "delivery_fee": fee,
-            "tip": tip, "total": total, "stripe_live": STRIPE_LIVE}
-
-
-# ---------------- Droppers: driver applications + portal ----------------
-def get_driver(req):
-    token = req.cookies.get("drop_driver", "")
-    if not token:
-        return None
-    conn = db()
-    s = conn.execute("SELECT driver_id, expires_at FROM driver_sessions WHERE token=?",
-                     (token,)).fetchone()
-    if not s:
-        conn.close()
-        return None
-    d = conn.execute("SELECT * FROM drivers WHERE id=?", (s["driver_id"],)).fetchone()
-    conn.close()
-    if not d or d["status"] != "approved":
-        return None
-    return dict(d)
-
-
 @app.post("/api/drivers/apply")
 async def driver_apply(req: Request):
     """Now Hiring: full driver application. Goes to pending for Ken's approval."""
@@ -2255,59 +1826,6 @@ async def driver_me(req: Request):
     # rank score: on-time rate (simple, transparent)
     d["on_time_rate"] = round(100.0 * d["on_time"] / d["deliveries"], 1) if d["deliveries"] else 100.0
     return d
-
-
-@app.get("/api/drivers/orders")
-async def driver_orders(req: Request):
-    """Orders assigned to this driver."""
-    d = get_driver(req)
-    if not d:
-        raise HTTPException(401, "Not logged in")
-    conn = db()
-    rows = conn.execute(
-        """SELECT o.*, COALESCE(r.name, o.pickup_name) AS pickup_label,
-                  COALESCE(r.address, o.pickup_address) AS pickup_addr,
-                  COALESCE(r.lat, o.pickup_lat) AS plat, COALESCE(r.lng, o.pickup_lng) AS plng
-           FROM orders o LEFT JOIN restaurants r ON r.id = o.restaurant_id
-           WHERE o.driver_id=? AND o.status NOT IN ('delivered','cancelled')
-           ORDER BY o.id""", (d["id"],)).fetchall()
-    out = []
-    for r in rows:
-        od = order_dict(r)
-        od["pickup_label"] = r["pickup_label"]
-        od["pickup_addr"] = r["pickup_addr"]
-        od["plat"] = r["plat"] or 0
-        od["plng"] = r["plng"] or 0
-        out.append(od)
-    conn.close()
-    return out
-
-
-@app.post("/api/drivers/orders/{oid}/status")
-async def driver_set_status(oid: int, req: Request):
-    d = get_driver(req)
-    if not d:
-        raise HTTPException(401, "Not logged in")
-    body = await req.json()
-    status = body.get("status")
-    if status not in ("picked_up", "on_the_way", "delivered"):
-        raise HTTPException(400, "Bad status")
-    conn = db()
-    o = conn.execute("SELECT * FROM orders WHERE id=? AND driver_id=?",
-                     (oid, d["id"])).fetchone()
-    if not o:
-        conn.close()
-        raise HTTPException(404, "Order not found")
-    conn.execute("UPDATE orders SET status=?, updated_at=? WHERE id=?",
-                 (status, now_iso(), oid))
-    if status == "delivered":
-        conn.execute("UPDATE drivers SET deliveries=deliveries+1, on_time=on_time+1 WHERE id=?",
-                     (d["id"],))
-    conn.commit()
-    conn.close()
-    return {"ok": True}
-
-
 @app.post("/api/drivers/location")
 async def driver_location(req: Request):
     """A dropper's phone posts GPS — updates orders + detects speeding."""
@@ -2385,134 +1903,6 @@ async def driver_earnings(req: Request):
     conn.close()
     return {"deliveries": len(rows), "fees": fees, "tips": tips,
             "total": round(fees + tips, 2)}
-
-
-@app.post("/api/operator/orders/{oid}/assign")
-async def op_assign_order(oid: int, req: Request, x_pin: str = Header(default="")):
-    """Ken assigns an order to a driver (0 = Ken himself)."""
-    check_pin(x_pin)
-    body = await req.json()
-    driver_id = int(body.get("driver_id") or 0)
-    conn = db()
-    if driver_id:
-        dr = conn.execute("SELECT id, name FROM drivers WHERE id=? AND status='approved'",
-                          (driver_id,)).fetchone()
-        if not dr:
-            conn.close()
-            raise HTTPException(400, "Driver not found or not approved")
-    conn.execute("UPDATE orders SET driver_id=?, updated_at=? WHERE id=?",
-                 (driver_id, now_iso(), oid))
-    conn.commit()
-    conn.close()
-    audit("operator", "order_assigned", "order", oid, f"driver {driver_id}")
-    if driver_id:
-        o = db().execute("SELECT * FROM orders WHERE id=?", (oid,)).fetchone()
-        label = o["pickup_name"] if (o["kind"] or "food") == "courier" else "restaurant"
-        driver_inbox_add(driver_id, "info", "📦 New delivery assigned",
-            f"Order #{oid}: pick up from {o['pickup_name'] or label}, deliver to {o['address']}. "
-            f"Open your Dropper portal for details and navigation.")
-    return {"ok": True}
-
-
-# ---------------- DROP MORE financial engine ----------------
-# Pricing, profit protection, driver pay, payouts, financial dashboard.
-# Money movement to drivers is tracked here; actual transfers happen via
-# Stripe Connect once Ken completes onboarding (see /api/connect/* below),
-# or manually (Ken taps "marked paid").
-
-def haversine_miles(lat1, lng1, lat2, lng2):
-    """Straight-line distance (fallback only)."""
-    import math
-    R = 3959
-    p1, p2 = math.radians(lat1), math.radians(lat2)
-    dp = math.radians(lat2 - lat1)
-    dl = math.radians(lng2 - lng1)
-    a = math.sin(dp/2)**2 + math.cos(p1)*math.cos(p2)*math.sin(dl/2)**2
-    return round(2 * R * math.asin(math.sqrt(a)), 2)
-
-
-def driving_miles(lat1, lng1, lat2, lng2):
-    """Real driving distance via OSRM (free, no key). Falls back to haversine."""
-    try:
-        url = (f"https://router.project-osrm.org/route/v1/driving/"
-               f"{lng1},{lat1};{lng2},{lat2}?overview=false")
-        req = urllib.request.Request(url, headers={"User-Agent": "DropDelivery/1.0"})
-        data = json.load(urllib.request.urlopen(req, timeout=10))
-        if data.get("routes"):
-            meters = data["routes"][0]["distance"]
-            return round(meters / 1609.34, 2)
-    except Exception:
-        pass
-    return haversine_miles(lat1, lng1, lat2, lng2)
-
-
-def fin_setting(key, default):
-    v = get_setting(key)
-    if v is None or v == "":
-        return default
-    try:
-        return float(v)
-    except (TypeError, ValueError):
-        return default
-
-
-def calc_quote(pickup_lat, pickup_lng, cust_lat, cust_lng, kind="food"):
-    """Smart pricing: distance-based delivery fee + driver pay + profit check.
-    Returns {delivery_fee, driver_pay, distance_miles, stripe_fee_est,
-             contribution_profit, meets_min_profit, warnings}."""
-    base_fee = fin_setting("price_base_fee", 3.99)
-    per_mile = fin_setting("price_per_mile", 1.50)
-    driver_base = fin_setting("driver_base_pay", 3.00)
-    driver_per_mile = fin_setting("driver_per_mile", 1.00)
-    min_profit = fin_setting("min_profit_per_order", 1.00)
-    miles = driving_miles(pickup_lat, pickup_lng, cust_lat, cust_lng)
-    # courier orders (bigger items, more handling) get a bump
-    complexity = 1.25 if kind == "courier" else 1.0
-    delivery_fee = round((base_fee + miles * per_mile) * complexity, 2)
-    driver_pay = round(driver_base + miles * driver_per_mile, 2)
-    # Stripe takes ~2.9% + $0.30 on the delivery fee portion
-    stripe_fee = round(delivery_fee * 0.029 + 0.30, 2)
-    contribution = round(delivery_fee - driver_pay - stripe_fee, 2)
-    warnings = []
-    if miles == 0:
-        warnings.append("Distance unknown — using base fee. Verify addresses.")
-    if contribution < min_profit:
-        warnings.append(
-            f"Below minimum profit (${min_profit:.2f}). "
-            f"Consider raising the fee or declining this delivery.")
-    return {"delivery_fee": delivery_fee, "driver_pay": driver_pay,
-            "distance_miles": miles, "stripe_fee_est": stripe_fee,
-            "contribution_profit": contribution,
-            "meets_min_profit": contribution >= min_profit,
-            "warnings": warnings}
-
-
-def order_financials(o):
-    """Full money breakdown for one order. Tips are NEVER company profit."""
-    fee = o["delivery_fee"] or 0
-    tip = o["tip"] or 0
-    total = o["total"] or 0
-    driver_pay = o["driver_pay"] or 0
-    # Stripe fee on the whole charge
-    stripe_fee = round(total * 0.029 + 0.30, 2) if total > 0 else 0
-    # Company keeps: delivery fee minus driver pay minus Stripe's cut of the fee portion
-    # Tips pass through 100% to driver — never counted as profit.
-    company = round(fee - driver_pay - (fee * 0.029 + 0.30 if fee else 0), 2)
-    return {"delivery_fee": fee, "tip": tip, "total": total,
-            "driver_pay": driver_pay, "driver_total": round(driver_pay + tip, 2),
-            "stripe_fee_est": stripe_fee,
-            "company_profit": company}
-
-
-# ---------------- Stripe Connect (driver payouts) ----------------
-# STATUS: code-ready, needs Ken's activation.
-# Ken must: (1) enable Connect in Stripe Dashboard -> Settings -> Connect,
-# (2) complete onboarding (identity + bank account), (3) set CONNECT_ENABLED=1.
-# Until then, payouts are tracked here and Ken sends them manually.
-
-CONNECT_ENABLED = os.environ.get("CONNECT_ENABLED", "") == "1"
-
-
 @app.get("/api/operator/connect/status")
 def connect_status(x_pin: str = Header(default="")):
     check_pin(x_pin)
@@ -6257,62 +5647,6 @@ async def driver_available(req: Request):
     out = [dict(r) for r in rows]
     conn.close()
     return out
-
-
-@app.post("/api/drivers/orders/{oid}/accept")
-async def driver_accept(oid: int, req: Request):
-    """Driver accepts an available delivery."""
-    me = get_driver(req)
-    if not me:
-        raise HTTPException(401, "Log in first")
-    conn = db()
-    o = conn.execute("SELECT id, driver_id, status FROM orders WHERE id=?", (oid,)).fetchone()
-    if not o or o["driver_id"]:
-        conn.close()
-        raise HTTPException(400, "Already taken")
-    if o["status"] not in ("placed", "confirmed", "scheduled"):
-        conn.close()
-        raise HTTPException(400, "Not available")
-    conn.execute("UPDATE orders SET driver_id=? WHERE id=?", (me["id"], oid))
-    conn.execute("UPDATE drivers SET accepted=accepted+1 WHERE id=?", (me["id"],))
-    conn.commit()
-    conn.close()
-    log_event("driver", f"🚗 Driver {me['name']} accepted order #{oid}", "")
-    # notify Ken
-    try:
-        import urllib.request, urllib.parse, threading
-        topic = get_setting("ntfy_topic").strip()
-        if topic:
-            msg = f"🚗 {me['name']} accepted order #{oid}"
-            rq = urllib.request.Request(
-                f"https://ntfy.sh/{urllib.parse.quote(topic)}",
-                data=msg.encode(), headers={"Title": "Driver accepted"}, method="POST")
-            threading.Thread(target=lambda: urllib.request.urlopen(rq, timeout=5).read(),
-                             daemon=True).start()
-    except Exception:
-        pass
-    return {"ok": True}
-
-
-@app.post("/api/drivers/orders/{oid}/decline")
-async def driver_decline(oid: int, req: Request):
-    """Driver declines — hurts acceptance rate."""
-    me = get_driver(req)
-    if not me:
-        raise HTTPException(401, "Log in first")
-    conn = db()
-    conn.execute("UPDATE drivers SET declined=declined+1 WHERE id=?", (me["id"],))
-    # track which orders they declined (so it doesn't show again)
-    conn.execute("""CREATE TABLE IF NOT EXISTS driver_declines (
-        driver_id INTEGER, order_id INTEGER, created_at TEXT,
-        PRIMARY KEY(driver_id, order_id))""")
-    conn.execute("INSERT OR IGNORE INTO driver_declines VALUES(?,?,?)",
-                 (me["id"], oid, now_iso()))
-    conn.commit()
-    conn.close()
-    return {"ok": True}
-
-
 @app.post("/api/drivers/status")
 async def driver_status(req: Request):
     """Driver toggles online/offline."""
@@ -6431,47 +5765,6 @@ async def referral_apply(req: Request):
 
 
 # ---------------- Scheduled orders ----------------
-@app.post("/api/orders/schedule")
-async def schedule_order(req: Request):
-    """Schedule an order for later — validates the time, then creates as scheduled."""
-    body = await req.json()
-    sched = (body.get("scheduled_for") or "").strip()
-    if not sched:
-        raise HTTPException(400, "Pick a date and time")
-    # validate it's in the future
-    try:
-        from datetime import datetime
-        dt = datetime.fromisoformat(sched.replace("Z", "+00:00"))
-        if dt < datetime.now(dt.tzinfo):
-            raise HTTPException(400, "Pick a future time")
-    except HTTPException:
-        raise
-    except Exception:
-        raise HTTPException(400, "Invalid date format")
-    # Temporarily stash scheduled_for, create the order, then mark it scheduled.
-    # We do this by inserting directly (mirrors create_order's essential fields).
-    # Simplest reliable path: call create_order with a fresh Request.
-    # Instead, we validate here and let the frontend call /api/orders then
-    # /api/orders/{id}/schedule. This endpoint just validates the time.
-    return {"ok": True, "scheduled_for": sched}
-
-
-@app.post("/api/orders/{oid}/schedule")
-async def mark_scheduled(oid: int, req: Request):
-    """Mark an existing placed order as scheduled for later."""
-    body = await req.json()
-    sched = (body.get("scheduled_for") or "").strip()
-    if not sched:
-        raise HTTPException(400, "Time required")
-    conn = db()
-    conn.execute("UPDATE orders SET scheduled_for=?, status='scheduled' WHERE id=?",
-                 (sched, oid))
-    conn.commit()
-    conn.close()
-    log_event("schedule", f"📅 Order #{oid} scheduled for {sched}", "")
-    return {"ok": True}
-
-
 @app.get("/api/operator/scheduled")
 def op_scheduled(x_pin: str = Header(default="")):
     check_pin(x_pin)
@@ -6633,9 +5926,6 @@ def op_financials(x_pin: str = Header(default="")):
     """Owner money dashboard: revenue, costs, profit per order, alerts."""
     check_pin(x_pin)
     conn = db()
-    orders = conn.execute(
-        """SELECT * FROM orders WHERE stripe_status='paid'
-           AND status NOT IN ('cancelled') ORDER BY id DESC""").fetchall()
     total_rev = 0.0
     total_driver_pay = 0.0
     total_tips = 0.0
@@ -6644,29 +5934,6 @@ def op_financials(x_pin: str = Header(default="")):
     per_order = []
     alerts = []
     min_profit = fin_setting("min_profit_per_order", 1.00)
-    for o in orders:
-        od = dict(o)
-        # ensure driver pay is computed
-        if not od["driver_pay"]:
-            conn.close()
-            ensure_driver_pay(od["id"])
-            conn = db()
-            od = dict(conn.execute("SELECT * FROM orders WHERE id=?", (od["id"],)).fetchone())
-        f = order_financials(od)
-        total_rev += f["total"]
-        total_driver_pay += f["driver_pay"]
-        total_tips += f["tip"]
-        total_stripe += f["stripe_fee_est"]
-        total_profit += f["company_profit"]
-        per_order.append({"id": od["id"], "kind": od["kind"] or "food",
-                          "total": f["total"], "driver_pay": f["driver_pay"],
-                          "tip": f["tip"], "stripe_fee": f["stripe_fee_est"],
-                          "profit": f["company_profit"],
-                          "below_min": f["company_profit"] < min_profit,
-                          "created_at": od["created_at"]})
-        if f["company_profit"] < min_profit:
-            alerts.append(f"Order #{od['id']}: profit ${f['company_profit']:.2f} "
-                          f"is below your ${min_profit:.2f} minimum.")
     # --- rideshare rides (paid) ---
     paid_rides = conn.execute(
         """SELECT * FROM rides WHERE payment_status='paid'
@@ -6795,20 +6062,10 @@ async def driver_wallet(req: Request):
     if not d:
         raise HTTPException(401, "Not logged in")
     conn = db()
-    # pending: assigned but not delivered (food orders)
-    pend = conn.execute(
-        """SELECT id, driver_pay, tip, status FROM orders
-           WHERE driver_id=? AND status NOT IN ('delivered','cancelled')""",
-        (d["id"],)).fetchall()
     # pending: assigned but not completed (rides)
     pend_rides = conn.execute(
         """SELECT id, driver_pay, tip, status FROM rides
            WHERE driver_id=? AND status NOT IN ('completed','cancelled')""",
-        (d["id"],)).fetchall()
-    # delivered: ensure pay computed, then split by payout status
-    done = conn.execute(
-        """SELECT id, driver_pay, tip FROM orders
-           WHERE driver_id=? AND status='delivered' AND stripe_status='paid'""",
         (d["id"],)).fetchall()
     # completed rides (paid)
     done_rides = conn.execute(
@@ -6816,23 +6073,9 @@ async def driver_wallet(req: Request):
            WHERE driver_id=? AND status='completed' AND payment_status='paid'""",
         (d["id"],)).fetchall()
     conn.close()
-    # ensure driver pay on delivered orders
     avail = 0.0
     history = []
-    for o in done:
-        if not o["driver_pay"]:
-            ensure_driver_pay(o["id"])
-            conn = db()
-            o2 = conn.execute("SELECT driver_pay, tip FROM orders WHERE id=?",
-                              (o["id"],)).fetchone()
-            conn.close()
-            dp, tp = (o2["driver_pay"] or 0), (o2["tip"] or 0)
-        else:
-            dp, tp = (o["driver_pay"] or 0), (o["tip"] or 0)
-        earn = round(dp + tp, 2)
-        history.append({"order_id": o["id"], "kind": "order", "base": dp, "tip": tp, "total": earn})
-        avail += earn
-    # completed rides add to available earnings too
+    # completed rides add to available earnings
     for r in done_rides:
         dp, tp = (r["driver_pay"] or 0), (r["tip"] or 0)
         earn = round(dp + tp, 2)
@@ -6851,8 +6094,7 @@ async def driver_wallet(req: Request):
         (d["id"],)).fetchall()
     conn.close()
     available = round(max(0, avail - paid_out - requested), 2)
-    pending = round(sum((r["driver_pay"] or 0) + (r["tip"] or 0) for r in pend)
-                    + sum((r["driver_pay"] or 0) + (r["tip"] or 0) for r in pend_rides), 2)
+    pending = round(sum((r["driver_pay"] or 0) + (r["tip"] or 0) for r in pend_rides), 2)
     return {
         "pending": pending,
         "available": available,
@@ -7011,25 +6253,6 @@ def op_del_investor_lead(lid: int, x_pin: str = Header(default="")):
     conn.commit()
     conn.close()
     return {"ok": True}
-
-
-@app.post("/api/operator/restaurants")
-async def op_add_restaurant(req: Request, x_pin: str = Header(default="")):
-    check_pin(x_pin)
-    body = await req.json()
-    name = (body.get("name") or "").strip()
-    if not name:
-        raise HTTPException(400, "Name required")
-    conn = db()
-    cur = conn.execute(
-        "INSERT INTO restaurants(name, cuisine, emoji, open, sample) VALUES(?,?,?,1,0)",
-        (name, (body.get("cuisine") or "").strip(), (body.get("emoji") or "🍽️").strip()))
-    rid = cur.lastrowid
-    conn.commit()
-    conn.close()
-    return {"id": rid}
-
-
 @app.put("/api/operator/restaurants/{rid}")
 async def op_edit_restaurant(rid: int, req: Request, x_pin: str = Header(default="")):
     check_pin(x_pin)
@@ -7082,27 +6305,6 @@ def op_del_restaurant(rid: int, x_pin: str = Header(default="")):
     conn.commit()
     conn.close()
     return {"ok": True}
-
-
-@app.post("/api/operator/menu-items")
-async def op_add_item(req: Request, x_pin: str = Header(default="")):
-    check_pin(x_pin)
-    body = await req.json()
-    name = (body.get("name") or "").strip()
-    price = float(body.get("price", 0))
-    if not name or price <= 0:
-        raise HTTPException(400, "Name and positive price required")
-    conn = db()
-    cur = conn.execute(
-        "INSERT INTO menu_items(restaurant_id, name, description, price, available)"
-        " VALUES(?,?,?,?,1)",
-        (body.get("restaurant_id"), name, (body.get("description") or "").strip(), price))
-    mid = cur.lastrowid
-    conn.commit()
-    conn.close()
-    return {"id": mid}
-
-
 @app.put("/api/operator/menu-items/{mid}")
 async def op_edit_item(mid: int, req: Request, x_pin: str = Header(default="")):
     check_pin(x_pin)
@@ -7187,14 +6389,6 @@ def watchpage():
 def investorspage():
     with open(os.path.join(BASE, "static", "investors.html")) as f:
         return f.read()
-
-
-@app.get("/restaurant.html", response_class=HTMLResponse)
-def rpage():
-    with open(os.path.join(BASE, "static", "restaurant.html")) as f:
-        return f.read()
-
-
 @app.get("/checkout.html", response_class=HTMLResponse)
 def cpage():
     with open(os.path.join(BASE, "static", "checkout.html")) as f:

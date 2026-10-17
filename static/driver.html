@@ -31,24 +31,20 @@
   <div class="card"><div class="row" style="gap:12px">
     <div style="flex:1;text-align:center"><b id="st-acc" style="font-size:1.3rem">–</b><br><span class="small">Acceptance</span></div>
     <div style="flex:1;text-align:center"><b id="st-today" style="font-size:1.3rem">–</b><br><span class="small">Today</span></div>
-    <div style="flex:1;text-align:center"><b id="st-del" style="font-size:1.3rem">–</b><br><span class="small">Deliveries today</span></div>
+    <div style="flex:1;text-align:center"><b id="st-del" style="font-size:1.3rem">–</b><br><span class="small">Rides today</span></div>
   </div>
   <p class="small" style="opacity:.7">Declining pickups lowers your acceptance rate. Low rates may limit future offers.</p></div>
 
   <div class="tabs">
-    <button class="on" data-t="avail">Available</button>
     <button data-t="sched">📅 Scheduled</button>
-    <button data-t="myrides">🚗 My Rides</button>
-    <button data-t="del">My deliveries</button>
+    <button class="on" data-t="myrides">🚗 My Rides</button>
     <button data-t="msg">Inbox <span id="msgbadge"></span></button>
     <button data-t="earn">Earnings</button>
     <button data-t="me">Profile</button>
   </div>
 
-  <div class="tab on" id="t-avail"><div id="alist"><p class="small">Go online to see available pickups.</p></div></div>
   <div class="tab" id="t-sched"><div id="schedlist"><p class="small">Loading scheduled rides…</p></div></div>
-  <div class="tab" id="t-myrides"><div id="myrideslist"><p class="small">Loading your rides…</p></div></div>
-  <div class="tab" id="t-del"><div id="olist"><p class="small">Loading…</p></div></div>
+  <div class="tab on" id="t-myrides"><div id="myrideslist"><p class="small">Loading your rides…</p></div></div>
 
   <div class="tab" id="t-msg">
     <div class="card"><h3>📬 Messages</h3><div id="msglist"><p class="small">Loading…</p></div></div>
@@ -67,12 +63,12 @@
         <div class="stat"><b id="w-paid">$0.00</b><span class="small">Paid out</span></div>
         <div class="stat"><b id="w-req">$0.00</b><span class="small">Requested</span></div>
       </div>
-      <p class="small">Pending = deliveries not finished yet. Only <b>available</b> money can be cashed out.</p>
+      <p class="small">Pending = rides not finished yet. Only <b>available</b> money can be cashed out.</p>
       <div class="row"><input id="w-amt" inputmode="decimal" placeholder="Amount $" style="flex:1;margin-right:6px">
       <button class="btn small" id="w-cashout" style="width:auto">💸 Cash out</button></div>
       <p class="small" id="w-msg"></p>
       <div id="connect-box" style="margin-top:10px"></div></div>
-    <h3>Per-delivery earnings</h3>
+    <h3>Per-ride earnings</h3>
     <div id="whist"></div>
     <h3>Payout history</h3>
     <div id="wpay"></div>
@@ -98,7 +94,7 @@ document.querySelectorAll('.tabs button').forEach(b=>b.onclick=()=>{
   document.querySelectorAll('.tab').forEach(x=>x.classList.remove('on'));
   b.classList.add('on'); $('t-'+b.dataset.t).classList.add('on');
   if(b.dataset.t==='earn') loadEarn(); if(b.dataset.t==='me') loadMe();
-  if(b.dataset.t==='msg') loadMsgs(); if(b.dataset.t==='avail') loadAvail();
+  if(b.dataset.t==='msg') loadMsgs(); 
   if(b.dataset.t==='sched') loadSched(); if(b.dataset.t==='myrides') loadMyRides();
 });
 
@@ -111,7 +107,7 @@ $('onlineToggle').onclick=async()=>{
   isOnline=j.online;
   $('online-lbl').textContent=isOnline?'🟢 Online':'⚪ Offline';
   $('onlineToggle').textContent=isOnline?'Go offline':'Go online';
-  if(isOnline)loadAvail();
+  
 };
 async function loadStats(){
   const s=await (await fetch('/api/drivers/stats')).json();
@@ -122,24 +118,7 @@ async function loadStats(){
   $('st-acc').style.color=s.acceptance_rate>=80?'#4ade80':s.acceptance_rate>=50?'#fbbf24':'#f66';
   $('st-today').textContent='$'+s.today_earned.toFixed(2);
   $('st-del').textContent=s.today_deliveries;
-  if(isOnline)loadAvail();
-}
-async function loadAvail(){
-  if(!isOnline){$('alist').innerHTML='<p class="small">Go online to see available pickups.</p>';return;}
-  const a=await (await fetch('/api/drivers/available')).json();
-  $('alist').innerHTML='<h2>Available pickups ('+a.length+')</h2>'+(a.map(o=>`
-    <div class="card order">
-      <div class="row"><b>#${o.id} · ${o.kind==='courier'?'📦 Pickup':'🍔 Food'}</b>
-        <b>$${((o.delivery_fee||0)+(o.tip||0)).toFixed(2)}</b></div>
-      <p><b>Pick up:</b> ${o.kind==='courier'?(o.pickup_name||''):o.restaurant_name||''}<br>
-        <span class="small">📍 ${o.kind==='courier'?(o.pickup_address||''):''}</span></p>
-      <p><b>Drop at:</b> ${o.customer_name}<br><span class="small">🏠 ${o.address||''}</span></p>
-      <p class="small">Fee $${(o.delivery_fee||0).toFixed(2)} + tip $${(o.tip||0).toFixed(2)}</p>
-      <div style="display:flex;gap:8px">
-        <button class="btn small" style="flex:1" onclick="acceptOrder(${o.id})">✅ Accept</button>
-        <button class="btn small ghost" style="flex:1" onclick="declineOrder(${o.id})">❌ Decline</button>
-      </div>
-    </div>`).join('')||'<p class="small">No pickups available right now. Stay online!</p>');
+  
 }
 async function loadSched(){
   try{
@@ -226,31 +205,6 @@ async function rateRider(rideId, stars){
   else alert('❌ '+(r.detail||'Could not rate'));
 }
 setInterval(()=>{ if($('t-myrides').classList.contains('on')) loadMyRides(); }, 10000);
-async function acceptOrder(id){
-  const r=await fetch('/api/drivers/orders/'+id+'/accept',{method:'POST'});
-  if(r.ok){loadAvail();loadOrders();loadStats();}
-  else alert('Someone else grabbed it!');
-}
-async function declineOrder(id){
-  if(!confirm('Decline this pickup? It will lower your acceptance rate.'))return;
-  await fetch('/api/drivers/orders/'+id+'/decline',{method:'POST'});
-  loadAvail();loadStats();
-}
-
-$('gobtn').onclick=async()=>{
-  const r=await fetch('/api/drivers/login',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({phone:$('phone').value,password:$('pass').value})});
-  const j=await r.json();
-  if(!r.ok){$('loginmsg').textContent=j.detail||'Login failed.';return;}
-  $('login').style.display='none';$('app').style.display='block';
-  $('dname').textContent='· '+j.name;
-  loadStats(); loadOrders();
-};
-$('logout').onclick=async()=>{
-  await fetch('/api/drivers/logout',{method:'POST'});
-  location.reload();
-};
-
 async function loadOrders(){
   const r=await fetch('/api/drivers/orders');
   if(r.status===401){location.reload();return;}
