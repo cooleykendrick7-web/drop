@@ -5706,12 +5706,12 @@ async def driver_stats(req: Request):
     conn = db()
     d = conn.execute("SELECT accepted, declined, is_online, deliveries, on_time_rate"
                      " FROM drivers WHERE id=?", (me["id"],)).fetchone()
-    # today's earnings
+    # today's earnings (rides)
     today = now_iso()[:10]
     earn = conn.execute(
         """SELECT COALESCE(SUM(driver_pay),0) as pay, COALESCE(SUM(tip),0) as tips,
-                  COUNT(*) as n FROM orders
-           WHERE driver_id=? AND status='delivered'
+                  COUNT(*) as n FROM rides
+           WHERE driver_id=? AND status='completed'
            AND substr(updated_at,1,10)=?""", (me["id"], today)).fetchone()
     conn.close()
     total = (d["accepted"] or 0) + (d["declined"] or 0)
