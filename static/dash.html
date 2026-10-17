@@ -848,7 +848,7 @@ async function loadMoney(){
   // per-order table
   $('finorders').innerHTML=f.per_order.map(o=>`
     <div class="card" style="${o.below_min?'border-color:#f66':''}">
-      <div class="row"><b>#${o.id} ${o.kind==='courier'?'📦':'🍔'}</b>
+      <div class="row"><b>#${o.id} ${o.kind==='courier'?'📦':o.kind==='ride'?'🚗':o.kind==='scheduled_ride'?'📅':'🍔'}</b>
         <b style="color:${o.profit>=0?'#4ade80':'#f66'}">$${o.profit.toFixed(2)} profit</b></div>
       <p class="small">Total $${o.total.toFixed(2)} · driver $${o.driver_pay.toFixed(2)} + tip $${o.tip.toFixed(2)} · Stripe ~$${o.stripe_fee.toFixed(2)}</p>
     </div>`).join('')||'<p class="small">No paid orders yet.</p>';
