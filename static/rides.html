@@ -336,15 +336,13 @@ $('b-go').onclick=async()=>{
   }
   $('b-go').disabled=true; $('b-go').textContent='Sending…';
   try{
-    const r=await(await fetch('/api/rides/request',{method:'POST',
+    const c=await(await fetch('/api/rides/checkout',{method:'POST',
       headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
-    if(!r.ok&&r.order_id===undefined){throw new Error(r.detail||'Failed');}
-    const c=await(await fetch('/api/checkout',{method:'POST',
-      headers:{'Content-Type':'application/json'},body:JSON.stringify({order_id:r.order_id})})).json();
     if(c.url){location.href=c.url;}
     else if(c.dev){location.href=c.pay_url;}
     else if(c.track_url){location.href=c.track_url;}
-    else{location.href='/track.html?id='+r.order_id;}
+    else if(c.ride_id){location.href='/track-ride.html?id='+c.ride_id;}
+    else{throw new Error(c.detail||'Failed');}
   }catch(e){
     $('b-msg').textContent='Error: '+(e.message||'network error');
     $('b-go').disabled=false; $('b-go').textContent='Pay & Request Ride →';
