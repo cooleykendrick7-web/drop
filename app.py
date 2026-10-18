@@ -70,6 +70,16 @@ def init_db():
         message TEXT NOT NULL,
         status TEXT NOT NULL DEFAULT 'open',
         created_at TEXT NOT NULL)""")
+    # AI bot chat (restored 2026-10-18 after 2026-10-12 route wipe)
+    c.execute("""CREATE TABLE IF NOT EXISTS bot_chats (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        role TEXT NOT NULL DEFAULT 'ken',
+        message TEXT NOT NULL, created_at TEXT NOT NULL)""")
+    c.execute("""CREATE TABLE IF NOT EXISTS ai_ideas (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
+        why_beats TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'pending',
+        created_at TEXT NOT NULL)""")
     # migration: tips (added 2026-10-08)
     cols = [r[1] for r in c.execute("PRAGMA table_info(orders)").fetchall()]
     if "tip" not in cols:
@@ -6442,3 +6452,118 @@ def dpage():
 def termspage():
     with open(os.path.join(BASE, "static", "terms.html")) as f:
         return f.read()
+
+
+# ---------------- AI bot chat (restored 2026-10-18 after 2026-10-12 route wipe) ----------------
+@app.get("/api/operator/bot/history")
+def op_bot_history(x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    conn = db()
+    rows = conn.execute(
+        "SELECT id, role, message, created_at FROM bot_chats ORDER BY id DESC LIMIT 50").fetchall()
+    conn.close()
+    return [dict(r) for r in reversed(rows)]
+
+
+@app.post("/api/operator/bot/send")
+async def op_bot_send(req: Request, x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    body = await req.json()
+    msg = (body.get("message") or "").strip()
+    if not msg:
+        raise HTTPException(400, "Empty message")
+    conn = db()
+    conn.execute("INSERT INTO bot_chats(role, message, created_at) VALUES('ken', ?, ?)",
+                 (msg[:2000], now_iso()))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.post("/api/operator/bot/reply")
+async def op_bot_reply(req: Request, x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    body = await req.json()
+    msg = (body.get("message") or "").strip()
+    if not msg:
+        raise HTTPException(400, "Empty message")
+    conn = db()
+    conn.execute("INSERT INTO bot_chats(role, message, created_at) VALUES('milli', ?, ?)",
+                 (msg[:2000], now_iso()))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+# ---------------- AI improvement ideas ----------------
+@app.get("/api/operator/ideas")
+def op_ideas(x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    conn = db()
+    rows = conn.execute(
+        "SELECT id, title, description, why_beats, status, created_at FROM ai_ideas ORDER BY id DESC LIMIT 30").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+@app.post("/api/operator/ideas")
+async def op_ideas_add(req: Request, x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    body = await req.json()
+    title = (body.get("title") or "").strip()
+    if not title:
+        raise HTTPException(400, "Title required")
+    conn = db()
+    dup = conn.execute("SELECT id FROM ai_ideas WHERE title=? AND status IN ('pending','approved')",
+                       (title,)).fetchone()
+    if dup:
+        conn.close()
+        return {"ok": True, "duplicate": True}
+    conn.execute("INSERT INTO ai_ideas(title, description, why_beats, created_at) VALUES(?,?,?,?)",
+                 (title[:120], (body.get("description") or "")[:1000],
+                  (body.get("why_beats") or "")[:500], now_iso()))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.post("/api/operator/ideas/{iid}/{action}")
+def op_ideas_action(iid: int, action: str, x_pin: str = Header(default="")):
+    check_pin(x_pin)
+    if action not in ("approve", "reject"):
+        raise HTTPException(400, "Bad action")
+    conn = db()
+    conn.execute("UPDATE ai_ideas SET status=? WHERE id=?",
+                 ("approved" if action == "approve" else "rejected", iid))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+# ---------------- Command dashboard (rideshare-aware rebuild) ----------------
+@app.get("/api/operator/command-stats")
+def op_command_stats(x_pin: str = Header(default="")):
+    """Everything the command dashboard needs, in one call."""
+    check_pin(x_pin)
+    conn = db()
+    today = now_iso()[:10]
+    rides_today = conn.execute(
+        "SELECT COUNT(*) FROM rides WHERE created_at LIKE ?", (today + "%",)).fetchone()[0]
+    rev_today = conn.execute(
+        "SELECT COALESCE(SUM(company_profit),0) FROM rides WHERE created_at LIKE ? AND stripe_status='paid'",
+        (today + "%",)).fetchone()[0]
+    active = conn.execute(
+        "SELECT COUNT(*) FROM rides WHERE status IN ('requested','assigned','confirmed','picked_up','on_the_way','scheduled','claimed')").fetchone()[0]
+    drivers_approved = conn.execute(
+        "SELECT COUNT(*) FROM drivers WHERE status='approved'").fetchone()[0]
+    pending_drivers = conn.execute(
+        "SELECT COUNT(*) FROM drivers WHERE status='pending'").fetchone()[0]
+    pending_outreach = conn.execute(
+        "SELECT COUNT(*) FROM outreach_emails WHERE status='draft'").fetchone()[0]
+    auto = get_setting("auto_outreach") or "0"
+    paused = get_setting("paused") or "0"
+    conn.close()
+    return {"rides_today": rides_today, "revenue_today": round(rev_today or 0, 2),
+            "active_rides": active, "drivers_approved": drivers_approved,
+            "pending_drivers": pending_drivers, "pending_outreach": pending_outreach,
+            "auto_outreach": auto == "1", "paused": paused == "1"}
