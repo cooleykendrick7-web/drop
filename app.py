@@ -3522,6 +3522,77 @@ def operator_sos(req: Request, x_pin: str = Header(default="")):
     return {"alerts": [dict(a) for a in alerts]}
 
 
+# --- Address autocomplete (type-ahead for ride booking forms) ---
+_AC_CACHE = {}  # query -> (expires_ts, suggestions)
+
+
+@app.get("/api/places/autocomplete")
+def places_autocomplete(q: str = ""):
+    """Address suggestions for the booking form's type-ahead dropdown.
+    Frontend (static/autocomplete.js) expects {"suggestions": [{label, lat, lng}]}.
+    Primary: Nominatim (free OSM). Fallback: Photon (free, no key) — same
+    pairing as geocode(). Results cached in-process for 1h. Never raises."""
+    q = (q or "").strip()
+    if len(q) < 3:
+        return {"suggestions": []}
+    key = q.lower()
+    now = time.time()
+    hit = _AC_CACHE.get(key)
+    if hit and hit[0] > now:
+        return {"suggestions": hit[1]}
+    suggestions = []
+    try:
+        qs = urllib.parse.urlencode(
+            {"q": q, "format": "json", "limit": "6", "addressdetails": "1"})
+        data = _geocode_fetch(
+            f"https://nominatim.openstreetmap.org/search?{qs}", 6)
+        for row in data or []:
+            try:
+                label = (row.get("display_name") or "").strip()
+                if label:
+                    suggestions.append({
+                        "label": label,
+                        "lat": float(row["lat"]),
+                        "lng": float(row["lon"]),
+                    })
+            except Exception:
+                continue
+    except Exception:
+        pass
+    if not suggestions:
+        try:
+            qs = urllib.parse.urlencode({"q": q, "limit": "6"})
+            pdata = _geocode_fetch(f"https://photon.komoot.io/api/?{qs}", 6)
+            for feat in (pdata or {}).get("features") or []:
+                props = feat.get("properties") or {}
+                parts = [props.get("name"), props.get("street"),
+                         props.get("city"), props.get("state"),
+                         props.get("postcode"), props.get("country")]
+                label = ", ".join(str(p) for p in parts if p)
+                coords = (feat.get("geometry") or {}).get("coordinates") or []
+                if label and len(coords) == 2:
+                    suggestions.append({
+                        "label": label,
+                        "lat": float(coords[1]),
+                        "lng": float(coords[0]),
+                    })
+        except Exception:
+            pass
+    # dedupe by label, cap at 6
+    seen = set()
+    out = []
+    for s in suggestions:
+        if s["label"] not in seen:
+            seen.add(s["label"])
+            out.append(s)
+        if len(out) >= 6:
+            break
+    _AC_CACHE[key] = (now + 3600, out)
+    if len(_AC_CACHE) > 500:  # bound memory; cache is just a speedup
+        _AC_CACHE.clear()
+    return {"suggestions": out}
+
+
 # --- Saved places ---
 @app.get("/api/places/mine")
 def my_places(req: Request, phone: str = ""):
