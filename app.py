@@ -38,6 +38,12 @@ if STRIPE_LIVE:
     import stripe
     stripe.api_key = STRIPE_SECRET_KEY
 
+# Stripe Connect (automatic driver payouts) stays OFF until Ken activates
+# Connect in the Stripe Dashboard and flips this on in Render's env.
+# Referenced by the Connect status/onboarding endpoints and the operator
+# payout path — it must always be defined, or those endpoints 500.
+CONNECT_ENABLED = os.environ.get("CONNECT_ENABLED", "").strip().lower() in ("1", "true", "yes")
+
 STATUSES = ["placed", "confirmed", "picked_up", "on_the_way", "delivered", "cancelled"]
 STATUS_LABELS = {
     "placed": "Order placed",
