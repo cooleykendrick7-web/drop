@@ -877,6 +877,57 @@ def _fulfill_checkout_session(sess):
     return "unknown"
 
 
+def _reconcile_pending_payments(limit=25):
+    """Backup auto-reconcile (Fix #1): ask Stripe about rides/scheduled rides
+    still stuck at payment_status='pending' that have a stored checkout
+    session id, and fulfill via _fulfill_checkout_session when Stripe says
+    the session is actually paid. This is the safety net for a paid rider
+    whose webhook never fired and who closed the tab before /pay/success.
+    Safety: never marks anything paid without Stripe proof (the session's
+    own payment_status must be 'paid'); _fulfill_checkout_session is
+    idempotent (it re-checks payment_status before updating), so a session
+    can never be fulfilled twice; no-op entirely when Stripe is not live
+    (dev mode). Returns a small summary dict for the tick response/logs."""
+    out = {"checked": 0, "fulfilled": [], "still_pending": 0}
+    if not STRIPE_LIVE:
+        return out
+    candidates = []  # (kind, id, session_id)
+    conn = db()
+    for r in conn.execute(
+            """SELECT id, stripe_payment_id FROM rides
+               WHERE payment_status='pending'
+                 AND COALESCE(stripe_payment_id,'') != ''
+               ORDER BY id ASC LIMIT ?""", (limit,)).fetchall():
+        candidates.append(("ride", r["id"], r["stripe_payment_id"]))
+    for r in conn.execute(
+            """SELECT id, stripe_payment_id FROM scheduled_rides
+               WHERE payment_status='pending'
+                 AND COALESCE(stripe_payment_id,'') != ''
+               ORDER BY id ASC LIMIT ?""", (limit,)).fetchall():
+        candidates.append(("scheduled", r["id"], r["stripe_payment_id"]))
+    conn.close()
+    for kind, rid_, sid_ in candidates:
+        out["checked"] += 1
+        try:
+            session = stripe.checkout.Session.retrieve(sid_)
+            sess = session.to_dict() if hasattr(session, "to_dict") else session
+        except Exception as e:
+            out["still_pending"] += 1
+            log_event("stripe",
+                      f"⚠️ Reconcile: Stripe check failed for {kind} #{rid_}",
+                      str(e)[:200])
+            continue
+        if (sess.get("payment_status") or "") != "paid":
+            out["still_pending"] += 1
+            continue
+        label = _fulfill_checkout_session(sess)
+        if label != "not-paid":
+            out["fulfilled"].append(label)
+            log_event("stripe",
+                      f"🔁 Reconcile fulfilled {kind} #{rid_} ({label})", "")
+    return out
+
+
 @app.post("/api/stripe/webhook")
 async def stripe_webhook(req: Request):
     """Stripe calls this on every checkout.session.completed. Verifies the
@@ -2999,6 +3050,47 @@ def migrate_rides_payment():
 migrate_rides_payment()
 
 
+def migrate_refund_fields():
+    """Fix #9: record refunds where they are issued. refund_status is
+    '' (none recorded / unknown), 'full', 'partial', or 'failed' (a refund
+    was attempted but Stripe errored). refunded_amount is dollars returned
+    to the rider. NOTE: '' does NOT mean "not refunded" for old rows —
+    e.g. ride #16's refund status is unknown and must never be assumed;
+    a cancelled-but-paid ride with no recorded refund keeps counting in
+    financials exactly as before (Ken's Oct 17 'paid is paid' rule)."""
+    conn = db()
+    existing = {r[0] for r in conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+    for table in ("rides", "scheduled_rides"):
+        if table not in existing:
+            continue  # not created yet in this boot order; its CREATE TABLE
+            # (which includes these columns) runs later in module init
+        cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+        for col, ddl in (
+            ("refund_status", "TEXT DEFAULT ''"),
+            ("refunded_amount", "REAL DEFAULT 0"),
+        ):
+            if col not in cols:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
+    conn.commit()
+    conn.close()
+
+migrate_refund_fields()
+
+
+def migrate_no_driver_flag():
+    """Fix #3c: rides.no_driver_warned dedupes the no-driver timeout flag
+    so Ken is alerted once per stuck ride, not on every tick."""
+    conn = db()
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(rides)").fetchall()]
+    if cols and "no_driver_warned" not in cols:
+        conn.execute("ALTER TABLE rides ADD COLUMN no_driver_warned INTEGER DEFAULT 0")
+    conn.commit()
+    conn.close()
+
+migrate_no_driver_flag()
+
+
 def migrate_driver_fields():
     conn = db()
     cols = [r[1] for r in conn.execute("PRAGMA table_info(drivers)").fetchall()]
@@ -3384,6 +3476,91 @@ async def rides_checkout(req: Request):
     conn.commit()
     conn.close()
     return {"url": session.url, "ride_id": rid}
+
+
+def _refund_instant_ride(r):
+    """Full Stripe refund for a paid instant ride, via its stored checkout
+    session id (rides keep the session id, not the payment intent — same
+    lookup pattern as refund_order). Returns (refund_status,
+    refunded_amount): ('full', total) on success, ('failed', 0.0) when
+    Stripe could not refund (caller must flag it, never pretend),
+    ('', 0.0) when there is nothing to refund. Dev mode: a paid ride's
+    payment was simulated, so the refund is recorded as simulated too."""
+    total = r["total"] or 0
+    if r["payment_status"] != "paid" or total <= 0:
+        return "", 0.0
+    if not STRIPE_LIVE:
+        return "full", round(total, 2)
+    sid_ = (r["stripe_payment_id"] or "").strip()
+    if not sid_:
+        log_event("ride",
+                  f"⚠️ No checkout session on file to refund ride #{r['id']} — refund manually in Stripe", "")
+        return "failed", 0.0
+    try:
+        session = stripe.checkout.Session.retrieve(sid_)
+        sess = session.to_dict() if hasattr(session, "to_dict") else session
+        pi = sess.get("payment_intent")
+        if not pi:
+            log_event("ride",
+                      f"⚠️ Checkout session for ride #{r['id']} has no payment intent — refund manually in Stripe", "")
+            return "failed", 0.0
+        stripe.Refund.create(payment_intent=pi)
+        return "full", round(total, 2)
+    except Exception as e:
+        log_event("ride", f"⚠️ Refund failed for ride #{r['id']}: {e}", "")
+        return "failed", 0.0
+
+
+@app.post("/api/rides/{ride_id}/cancel")
+async def cancel_instant_ride(ride_id: int, req: Request):
+    """Fix #3a: rider cancels an instant ride that is still waiting for a
+    driver (status 'requested', nobody assigned). terms.html already
+    promises this: cancel before your driver arrives = automatic full
+    refund. The refund is recorded (Fix #9) so it stops counting."""
+    body = {}
+    try:
+        body = await req.json()
+    except Exception:
+        pass
+    phone = (body.get("phone") or "").strip()
+    me = get_session_user(req)
+    if me:
+        phone = me.get("phone", "") or phone
+    conn = db()
+    r = conn.execute("SELECT * FROM rides WHERE id=?", (ride_id,)).fetchone()
+    if not r:
+        conn.close()
+        raise HTTPException(404, "Ride not found")
+    if not phone or phone != r["rider_phone"]:
+        conn.close()
+        raise HTTPException(403, "Phone number doesn't match this ride")
+    if r["status"] != "requested" or (r["driver_id"] or 0):
+        conn.close()
+        raise HTTPException(400, "This ride already has a driver and can't be cancelled here")
+    refund_status, refunded = "", 0.0
+    if r["payment_status"] == "paid":
+        refund_status, refunded = _refund_instant_ride(dict(r))
+    conn.execute(
+        """UPDATE rides SET status='cancelled', refund_status=?,
+           refunded_amount=?, updated_at=? WHERE id=?""",
+        (refund_status, refunded, now_iso(), ride_id))
+    conn.commit()
+    conn.close()
+    log_event("ride",
+              f"🚕 Ride #{ride_id} cancelled by rider before pickup"
+              + (f" — full refund ${refunded:.2f}" if refund_status == "full"
+                 else " — REFUND FAILED, refund manually in Stripe" if refund_status == "failed"
+                 else " (unpaid)"), "")
+    if refund_status == "failed":
+        try:
+            topic = get_setting("ntfy_topic").strip()
+            if topic:
+                send_ntfy(topic, f"⚠️ Refund FAILED for ride #{ride_id}",
+                          "Rider cancelled but the automatic refund failed. "
+                          "Refund manually in Stripe.")
+        except Exception:
+            pass
+    return {"ok": True, "refunded": refunded, "refund_status": refund_status}
 
 
 @app.post("/api/rides/dev-pay/{rid}")
@@ -3849,6 +4026,47 @@ async def cancel_recurring(rid: int, req: Request):
     return {"ok": True}
 
 
+NO_DRIVER_FLAG_MIN = 15  # instant ride paid + driverless this long = flag Ken
+
+
+def _flag_no_driver_instant(conn, now):
+    """Fix #3c: an instant ride that is PAID, still 'requested', and has no
+    driver 15+ minutes after booking means a rider is standing waiting.
+    Flag Ken loudly — once per ride (no_driver_warned) — via log + ntfy,
+    the same pattern as _warn_no_driver. Deliberately NO automatic refund
+    here: the money moves when the rider cancels or Ken declines, both of
+    which now refund in full (Fix #3a/#3b)."""
+    cutoff = (now - timedelta(minutes=NO_DRIVER_FLAG_MIN)).isoformat()
+    rows = conn.execute(
+        """SELECT * FROM rides
+           WHERE payment_status='paid' AND status='requested'
+             AND COALESCE(driver_id,0)=0 AND COALESCE(no_driver_warned,0)=0
+             AND created_at != '' AND created_at <= ?
+           ORDER BY id ASC""", (cutoff,)).fetchall()
+    flagged = []
+    for r in rows:
+        r = dict(r)
+        conn.execute("UPDATE rides SET no_driver_warned=1 WHERE id=?",
+                     (r["id"],))
+        flagged.append(r["id"])
+        log_event("ride",
+                  f"🚨 No driver for PAID ride #{r['id']} after "
+                  f"{NO_DRIVER_FLAG_MIN}+ min — rider is waiting",
+                  f"{r['rider_name']}: {r['pickup_address']} → {r['dropoff_address']} (${r['total']:.2f})")
+        try:
+            topic = get_setting("ntfy_topic").strip()
+            if topic:
+                send_ntfy(topic, f"🚨 Ride #{r['id']} has NO DRIVER",
+                          f"Paid ${r['total']:.2f} and waiting "
+                          f"{NO_DRIVER_FLAG_MIN}+ min with no driver assigned.\n"
+                          f"{r['pickup_address']} → {r['dropoff_address']}\n"
+                          f"Assign a driver, or decline the ride to refund the rider.")
+        except Exception:
+            pass
+    conn.commit()
+    return flagged
+
+
 # --- No-driver early warning (called from tick) ---
 def _warn_no_driver(conn, now):
     """2h before a paid scheduled ride: if no drivers online, alert Ken."""
@@ -3911,6 +4129,7 @@ def init_scheduled_rides_table():
         payment_status TEXT DEFAULT 'pending',
         stripe_payment_id TEXT DEFAULT '',
         stripe_payment_intent TEXT DEFAULT '',
+        refund_status TEXT DEFAULT '', refunded_amount REAL DEFAULT 0,
         reminded_1h INTEGER DEFAULT 0,
         reminded_15m INTEGER DEFAULT 0,
         warned_no_driver INTEGER DEFAULT 0,
@@ -4135,7 +4354,22 @@ def scheduled_tick():
     now = datetime.now(timezone.utc)
     now_s = now.isoformat()
     conn = db()
-    out = {"activated": [], "reminded": [], "warned": [], "recurring": 0}
+    out = {"activated": [], "reminded": [], "warned": [], "recurring": 0,
+           "reconciled": {"checked": 0, "fulfilled": [], "still_pending": 0},
+           "no_driver_flagged": []}
+
+    # 0a) backup payment reconcile: fulfill any pending ride/scheduled ride
+    # whose Stripe checkout session is actually paid (webhook missed it).
+    try:
+        out["reconciled"] = _reconcile_pending_payments()
+    except Exception as e:
+        log_event("stripe", f"⚠️ Reconcile pass failed: {e}", "")
+
+    # 0a2) flag paid instant rides stuck without a driver (Fix #3c)
+    try:
+        out["no_driver_flagged"] = _flag_no_driver_instant(conn, now)
+    except Exception as e:
+        log_event("ride", f"⚠️ No-driver flag pass failed: {e}", "")
 
     # 0) generate upcoming rides from recurring templates
     try:
@@ -4280,6 +4514,8 @@ async def cancel_scheduled_ride(sid: int, req: Request):
     now_s = now_iso()
     refund_cents = 0
     fee = 0.0
+    refund_status = (r["refund_status"] or "") if "refund_status" in r.keys() else ""
+    refunded_amount = (r["refunded_amount"] or 0) if "refunded_amount" in r.keys() else 0
 
     if r["payment_status"] == "paid":
         total_cents = int(round(r["total"] * 100))
@@ -4289,15 +4525,33 @@ async def cancel_scheduled_ride(sid: int, req: Request):
             # late cancel: rider gets 50% back, 50% cancellation fee
             refund_cents = total_cents // 2
             fee = round(r["total"] - refund_cents / 100, 2)
-        # Stripe refund
-        if refund_cents > 0 and STRIPE_LIVE and r["stripe_payment_intent"]:
-            try:
-                stripe.Refund.create(
-                    payment_intent=r["stripe_payment_intent"],
-                    amount=refund_cents)
-            except Exception as e:
+        # Stripe refund — and RECORD it (Fix #9) so financials stop counting
+        # money that went back to the rider.
+        if refund_cents > 0:
+            if STRIPE_LIVE and r["stripe_payment_intent"]:
+                try:
+                    stripe.Refund.create(
+                        payment_intent=r["stripe_payment_intent"],
+                        amount=refund_cents)
+                    refund_status = "full" if refund_cents >= total_cents else "partial"
+                    refunded_amount = round(refund_cents / 100, 2)
+                except Exception as e:
+                    refund_status = "failed"
+                    refunded_amount = 0.0
+                    log_event("ride",
+                              f"⚠️ Refund failed for scheduled ride #{sid}: {e}", "")
+            elif not STRIPE_LIVE:
+                # dev mode: the payment was simulated, so is the refund
+                refund_status = "full" if refund_cents >= total_cents else "partial"
+                refunded_amount = round(refund_cents / 100, 2)
+            else:
+                # paid + Stripe live but no payment intent on file: the
+                # refund cannot be issued from here — record that honestly
+                # instead of pretending the rider got money back.
+                refund_status = "failed"
+                refunded_amount = 0.0
                 log_event("ride",
-                          f"⚠️ Refund failed for scheduled ride #{sid}: {e}", "")
+                          f"⚠️ No payment intent to refund for scheduled ride #{sid} — refund manually in Stripe", "")
         # cancellation fee → claimed driver, else company keeps it
         if fee > 0:
             if r["driver_id"]:
@@ -4307,8 +4561,9 @@ async def cancel_scheduled_ride(sid: int, req: Request):
 
     conn.execute(
         """UPDATE scheduled_rides
-           SET status='cancelled', cancel_fee=?, updated_at=? WHERE id=?""",
-        (fee, now_s, sid))
+           SET status='cancelled', cancel_fee=?, refund_status=?, refunded_amount=?,
+               updated_at=? WHERE id=?""",
+        (fee, refund_status, refunded_amount, now_s, sid))
     conn.commit()
     conn.close()
     log_event("ride",
@@ -4690,6 +4945,7 @@ def init_rides_table():
         driver_id INTEGER DEFAULT 0, driver_name TEXT DEFAULT '',
         status TEXT NOT NULL DEFAULT 'requested',
         rider_rating INTEGER DEFAULT 0, rider_review TEXT DEFAULT '',
+        refund_status TEXT DEFAULT '', refunded_amount REAL DEFAULT 0,
         stripe_payment_id TEXT DEFAULT '', stripe_status TEXT DEFAULT 'pending',
         notes TEXT DEFAULT '',
         created_at TEXT NOT NULL, updated_at TEXT NOT NULL)""")
@@ -5328,6 +5584,8 @@ def operator_rides(req: Request, x_pin: str = Header(default="")):
             "notes": d.get("notes") or "",
             "status": dst,
             "payment_status": d.get("payment_status") or "pending",
+            "refund_status": d.get("refund_status") or "",
+            "refunded_amount": d.get("refunded_amount") or 0,
             "stripe_payment_id": d.get("stripe_payment_id") or "",
             "driver_name": d.get("driver_name") or "",
             "driver_id": d.get("driver_id") or 0,
@@ -5351,6 +5609,7 @@ async def ride_decision(ride_id: int, req: Request, x_pin: str = Header(default=
         conn.close()
         raise HTTPException(404, "Ride not found")
     now = now_iso()
+    resp_extra = {}
     if action == "accept":
         if driver_id:
             drv = conn.execute("SELECT * FROM drivers WHERE id=?", (driver_id,)).fetchone()
@@ -5374,15 +5633,30 @@ async def ride_decision(ride_id: int, req: Request, x_pin: str = Header(default=
                          " status='assigned', updated_at=? WHERE id=?", (now, ride_id))
             log_event("ride", f"✅ Ride #{ride_id} accepted — Ken driving", "")
     elif action == "decline":
-        conn.execute("UPDATE rides SET status='cancelled', updated_at=? WHERE id=?",
-                     (now, ride_id))
-        log_event("ride", f"❌ Ride #{ride_id} declined by operator", "")
+        # Fix #3b: declining a PAID ride that never got a driver must give
+        # the money back (terms.html: 'If we have to cancel your ride, you
+        # also get an automatic full refund') — not silently keep it.
+        # The refund is recorded (Fix #9) so it stops counting.
+        refund_status = (r["refund_status"] or "") if "refund_status" in r.keys() else ""
+        refunded = (r["refunded_amount"] or 0) if "refunded_amount" in r.keys() else 0
+        if r["payment_status"] == "paid" and not (r["driver_id"] or 0) and not refund_status:
+            refund_status, refunded = _refund_instant_ride(dict(r))
+        conn.execute(
+            """UPDATE rides SET status='cancelled', refund_status=?,
+               refunded_amount=?, updated_at=? WHERE id=?""",
+            (refund_status, refunded, now, ride_id))
+        log_event("ride",
+                  f"❌ Ride #{ride_id} declined by operator"
+                  + (f" — full refund ${refunded:.2f} issued" if refund_status == "full"
+                     else " — REFUND FAILED, refund manually in Stripe" if refund_status == "failed"
+                     else ""), "")
+        resp_extra = {"refund_status": refund_status, "refunded": refunded}
     else:
         conn.close()
         raise HTTPException(400, "action must be 'accept' or 'decline'")
     conn.commit()
     conn.close()
-    return {"ok": True}
+    return {"ok": True, **resp_extra}
 
 
 @app.post("/api/operator/rides/{ride_id}/assign")
@@ -6025,32 +6299,67 @@ def op_financials(x_pin: str = Header(default="")):
     per_order = []
     alerts = []
     min_profit = fin_setting("min_profit_per_order", 1.00)
-    # --- rideshare rides (paid) ---
+    # --- rideshare rides + scheduled rides (paid) ---
     # NOTE: cancelled rides still show if payment went through — Ken got paid, he needs to see it
+    # (Ken's Oct 17 rule: 'paid is paid, even when a ride is cancelled' — a
+    # cancelled ride with NO recorded refund counts exactly as before.)
+    # Fix #9: a ride with a recorded refund counts only what Drop KEPT.
+    # A FULL refund counts $0 in gross / driver pay / profit but stays
+    # listed; a PARTIAL refund counts the kept portion, with driver pay
+    # and tip scaled to the same kept share (flagged via refund_status).
+    def _fin_entry(rd, kind, label):
+        """Append one paid ride to the totals/per-order list, refund-aware.
+        Returns the profit figure used (for below-minimum alerts)."""
+        nonlocal total_rev, total_driver_pay, total_tips, total_stripe, total_profit
+        full_total = rd.get("total") or 0
+        r_pay = rd.get("driver_pay") or 0
+        r_tip = rd.get("tip") or 0
+        r_status = rd.get("status") or ""
+        r_refund_status = rd.get("refund_status") or ""
+        r_refunded = rd.get("refunded_amount") or 0
+        if r_refund_status == "full" or (full_total and r_refunded >= full_total):
+            kept, k_pay, k_tip, k_profit = 0.0, 0.0, 0.0, 0.0
+        elif r_refund_status == "partial" and r_refunded > 0 and full_total:
+            share = max(0.0, (full_total - r_refunded) / full_total)
+            kept = round(full_total - r_refunded, 2)
+            k_pay = round(r_pay * share, 2)
+            k_tip = round(r_tip * share, 2)
+            k_profit = None  # recomputed below on the kept amounts
+        else:
+            kept, k_pay, k_tip = full_total, r_pay, r_tip
+            k_profit = rd.get("company_profit")
+        r_fee = round(kept * 0.029 + 0.30, 2) if kept else 0.0
+        if k_profit is None:
+            k_profit = round(kept - k_pay - r_fee, 2)
+        total_rev += kept
+        total_driver_pay += k_pay
+        total_tips += k_tip
+        total_stripe += r_fee
+        total_profit += k_profit
+        per_order.append({"id": rd["id"], "kind": kind,
+                          "total": kept, "original_total": full_total,
+                          "driver_pay": k_pay,
+                          "tip": k_tip, "stripe_fee": r_fee,
+                          "profit": round(k_profit, 2),
+                          "status": r_status,
+                          "payment_status": rd.get("payment_status") or "",
+                          "refund_status": r_refund_status,
+                          "refunded_amount": r_refunded,
+                          "below_min": k_profit < min_profit and kept > 0,
+                          "created_at": rd.get("created_at")})
+        if r_refund_status == "failed":
+            alerts.append(f"{label} #{rd['id']}: a refund was attempted but "
+                          f"FAILED in Stripe — the rider may still be owed "
+                          f"${full_total:.2f}. Check Stripe and refund manually.")
+        return k_profit
+
     paid_rides = conn.execute(
         """SELECT * FROM rides WHERE payment_status='paid'
            ORDER BY id DESC""").fetchall()
     for r in paid_rides:
         rd = dict(r)
-        r_total = rd.get("total") or 0
-        r_pay = rd.get("driver_pay") or 0
-        r_tip = rd.get("tip") or 0
-        r_fee = round(r_total * 0.029 + 0.30, 2)
-        r_profit = rd.get("company_profit")
-        if r_profit is None:
-            r_profit = round(r_total - r_pay - r_fee, 2)
-        total_rev += r_total
-        total_driver_pay += r_pay
-        total_tips += r_tip
-        total_stripe += r_fee
-        total_profit += r_profit
-        per_order.append({"id": rd["id"], "kind": "ride",
-                          "total": r_total, "driver_pay": r_pay,
-                          "tip": r_tip, "stripe_fee": r_fee,
-                          "profit": round(r_profit, 2),
-                          "below_min": r_profit < min_profit,
-                          "created_at": rd.get("created_at")})
-        if r_profit < min_profit:
+        r_profit = _fin_entry(rd, "ride", "Ride")
+        if r_profit < min_profit and (rd.get("total") or 0) and not (rd.get("refund_status") or ""):
             alerts.append(f"Ride #{rd['id']}: profit ${r_profit:.2f} "
                           f"is below your ${min_profit:.2f} minimum.")
     # --- scheduled rides (paid) ---
@@ -6058,25 +6367,7 @@ def op_financials(x_pin: str = Header(default="")):
         """SELECT * FROM scheduled_rides WHERE payment_status='paid'
            ORDER BY id DESC""").fetchall()
     for r in paid_sched:
-        rd = dict(r)
-        r_total = rd.get("total") or 0
-        r_pay = rd.get("driver_pay") or 0
-        r_tip = rd.get("tip") or 0
-        r_fee = round(r_total * 0.029 + 0.30, 2)
-        r_profit = rd.get("company_profit")
-        if r_profit is None:
-            r_profit = round(r_total - r_pay - r_fee, 2)
-        total_rev += r_total
-        total_driver_pay += r_pay
-        total_tips += r_tip
-        total_stripe += r_fee
-        total_profit += r_profit
-        per_order.append({"id": rd["id"], "kind": "scheduled_ride",
-                          "total": r_total, "driver_pay": r_pay,
-                          "tip": r_tip, "stripe_fee": r_fee,
-                          "profit": round(r_profit, 2),
-                          "below_min": r_profit < min_profit,
-                          "created_at": rd.get("created_at")})
+        _fin_entry(dict(r), "scheduled_ride", "Scheduled ride")
     # money owed to drivers (delivered, paid, assigned to a driver)
     # (payouts are tracked separately in the payouts table)
     pending_payouts = conn.execute(
