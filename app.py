@@ -86,6 +86,32 @@ def init_db():
         title TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
         why_beats TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'pending',
         created_at TEXT NOT NULL)""")
+    # legacy core tables (added 2026-11-08, fresh-DB boot fix): orders,
+    # restaurants and menu_items were created by a long-gone early version
+    # and exist only in the production disk DB; app.py never created them,
+    # so the ALTERs below crashed any from-scratch boot. Base columns only
+    # here -- the migration blocks that follow add the rest, as on prod.
+    c.execute("""CREATE TABLE IF NOT EXISTS orders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        restaurant_id INTEGER DEFAULT 0, kind TEXT DEFAULT 'food',
+        customer_name TEXT DEFAULT '', customer_phone TEXT DEFAULT '',
+        customer_email TEXT DEFAULT '', address TEXT DEFAULT '',
+        items TEXT DEFAULT '[]', subtotal REAL DEFAULT 0,
+        delivery_fee REAL DEFAULT 0, total REAL DEFAULT 0,
+        status TEXT DEFAULT 'placed',
+        stripe_status TEXT DEFAULT 'pending', stripe_payment_id TEXT DEFAULT '',
+        driver_id INTEGER DEFAULT 0, notes TEXT DEFAULT '',
+        created_at TEXT DEFAULT '', updated_at TEXT DEFAULT '')""")
+    c.execute("""CREATE TABLE IF NOT EXISTS restaurants (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL, cuisine TEXT DEFAULT '', emoji TEXT DEFAULT '',
+        open INTEGER DEFAULT 1, sample INTEGER DEFAULT 0,
+        phone TEXT DEFAULT '', created_at TEXT DEFAULT '')""")
+    c.execute("""CREATE TABLE IF NOT EXISTS menu_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        restaurant_id INTEGER DEFAULT 0, name TEXT DEFAULT '',
+        description TEXT DEFAULT '', price REAL DEFAULT 0,
+        available INTEGER DEFAULT 1)""")
     # migration: tips (added 2026-10-08)
     cols = [r[1] for r in c.execute("PRAGMA table_info(orders)").fetchall()]
     if "tip" not in cols:
@@ -1825,6 +1851,12 @@ async def driver_apply(req: Request):
          (body.get("availability") or "").strip()[:200],
          1, (body.get("experience") or "").strip()[:500], now_iso()))
     did = cur.lastrowid
+    # Link documents uploaded with this phone (the application form
+    # uploads them by phone, before/without a driver id) to the new
+    # driver record, so Ken's document view and AI review can find them.
+    digits = re.sub(r"\D", "", phone or "")
+    conn.execute("UPDATE driver_docs SET driver_id=? WHERE driver_id=0"
+                 " AND (phone=? OR phone=?)", (did, digits, digits[-10:]))
     conn.commit()
     conn.close()
     # notify Ken
@@ -3047,7 +3079,6 @@ def migrate_rides_payment():
     conn.commit()
     conn.close()
 
-migrate_rides_payment()
 
 
 def migrate_refund_fields():
@@ -3088,7 +3119,6 @@ def migrate_no_driver_flag():
     conn.commit()
     conn.close()
 
-migrate_no_driver_flag()
 
 
 def migrate_driver_fields():
@@ -3187,83 +3217,6 @@ def ai_review_driver(driver_id):
     return approved, score, "; ".join(notes)
 
 
-@app.post("/api/drivers/apply")
-async def driver_apply(req: Request):
-    """Submit driver application. AI reviews immediately; may auto-approve."""
-    body = await req.json()
-    # validate required fields
-    required = {
-        "name": "Full name", "phone": "Phone", "password": "Password",
-        "license_number": "License number", "license_state": "License state",
-        "license_plate": "License plate", "vin": "VIN",
-        "vehicle_make": "Vehicle make", "vehicle_model": "Vehicle model",
-    }
-    for field, label in required.items():
-        if not (body.get(field) or "").strip():
-            raise HTTPException(400, f"{label} is required")
-
-    # check documents were uploaded
-    phone = body["phone"].strip()
-    conn = db()
-    docs = conn.execute(
-        "SELECT doc_type FROM driver_docs WHERE phone=?", (phone,)).fetchall()
-    doc_types = {r[0] for r in docs}
-    required_docs = {"id_front", "id_back", "insurance", "selfie", "car"}
-    missing = required_docs - doc_types
-    if missing:
-        conn.close()
-        raise HTTPException(400,
-            f"Missing required documents: {', '.join(sorted(missing))}. "
-            f"Upload all 5 before submitting.")
-
-    # create driver record
-    import hashlib
-    pw_hash = hashlib.sha256(body["password"].encode()).hexdigest()
-    now = datetime.now(timezone.utc).isoformat()
-    cur = conn.execute(
-        """INSERT INTO drivers (name, phone, email, password_hash, license_number,
-           license_state, insurance, vehicle_make, vehicle_model, vehicle_year,
-           vehicle_color, license_plate, vin, availability, background_consent,
-           experience, status, created_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (body["name"].strip(), phone, body.get("email", "").strip(), pw_hash,
-         body["license_number"].strip(), body["license_state"].strip().upper(),
-         body.get("insurance", "").strip(), body["vehicle_make"].strip(),
-         body["vehicle_model"].strip(), body.get("vehicle_year", "").strip(),
-         body.get("vehicle_color", "").strip(), body["license_plate"].strip().upper(),
-         body["vin"].strip().upper(), body.get("availability", "").strip(),
-         1 if body.get("background_consent") else 0,
-         body.get("experience", "").strip(), "pending", now))
-    driver_id = cur.lastrowid
-    # link uploaded docs to this driver
-    conn.execute("UPDATE driver_docs SET driver_id=? WHERE phone=?",
-                 (driver_id, phone))
-    conn.commit()
-    conn.close()
-
-    # AI review (may auto-approve)
-    approved, score, notes = ai_review_driver(driver_id)
-
-    # notify Ken
-    try:
-        topic = get_setting("ntfy_topic").strip()
-        if topic:
-            status = "✅ AUTO-APPROVED" if approved else "📋 Needs your review"
-            send_ntfy(topic, f"New driver application {status}",
-                      f"{body['name']} — AI score: {score}/100\n{notes}")
-    except Exception:
-        pass
-
-    return {
-        "ok": True,
-        "driver_id": driver_id,
-        "ai_approved": approved,
-        "ai_score": score,
-        "message": ("🎉 You're approved! Check your driver portal." if approved
-                    else "Application received! We'll review it shortly."),
-    }
-
-
 @app.get("/api/operator/drivers/pending-ai")
 def pending_ai_drivers(req: Request, x_pin: str = Header(default="")):
     """Drivers reviewed by AI but not auto-approved — need Ken's decision."""
@@ -3345,6 +3298,50 @@ def auto_assign_driver(ride_id):
 def trackridepage():
     with open(os.path.join(BASE, "static", "track-ride.html")) as f:
         return f.read()
+
+
+def _driver_selfie_filename(conn, driver):
+    """Fix #8: find the driver's uploaded selfie in driver_docs.
+    Application-time uploads are keyed by phone (driver_id=0); logged-in
+    uploads by driver_id. Match either, newest first."""
+    digits = re.sub(r"\D", "", driver["phone"] or "")
+    variants = [digits, digits[-10:]] if digits else ["", ""]
+    rows = conn.execute(
+        "SELECT filename FROM driver_docs WHERE doc_type='selfie'"
+        " AND (driver_id=? OR phone=? OR phone=?) ORDER BY id DESC",
+        (driver["id"], variants[0], variants[-1])).fetchall()
+    for row in rows:
+        if row["filename"]:
+            return row["filename"]
+    return ""
+
+
+@app.get("/api/rides/{ride_id}/driver-photo")
+def ride_driver_photo(ride_id: int):
+    """Fix #8: stream the assigned driver's selfie to this ride's
+    tracking page. Selfies live in the operator-only document store and
+    are NOT publicly servable; this exposes only the selfie of the
+    driver assigned to this ride -- the same ride-id trust level as the
+    existing /car and /driver-loc endpoints."""
+    conn = db()
+    r = conn.execute("SELECT driver_id FROM rides WHERE id=?", (ride_id,)).fetchone()
+    if not r or not r["driver_id"]:
+        conn.close()
+        raise HTTPException(404, "No driver assigned")
+    d = conn.execute("SELECT * FROM drivers WHERE id=?", (r["driver_id"],)).fetchone()
+    if not d:
+        conn.close()
+        raise HTTPException(404, "Driver not found")
+    filename = _driver_selfie_filename(conn, d)
+    conn.close()
+    if not filename:
+        raise HTTPException(404, "No driver photo on file")
+    safe = _os.path.basename(filename)
+    path = _os.path.join(DOCS_DIR, safe)
+    if not _os.path.isfile(path):
+        raise HTTPException(404, "No driver photo on file")
+    from fastapi.responses import FileResponse
+    return FileResponse(path)
 
 
 @app.get("/api/rides/{ride_id}/driver-loc")
@@ -3638,17 +3635,22 @@ def ride_car_info(ride_id: int):
         conn.close()
         return {"car": None}
     d = conn.execute(
-        """SELECT name, vehicle_make, vehicle_model, vehicle_year, vehicle_color,
-                  license_plate FROM drivers WHERE id=?""",
+        """SELECT id, phone, name, vehicle_make, vehicle_model, vehicle_year,
+                  vehicle_color, license_plate FROM drivers WHERE id=?""",
         (r["driver_id"],)).fetchone()
-    conn.close()
     if not d:
+        conn.close()
         return {"car": None}
+    # Fix #8: rider gets the driver's photo (served via the ride-scoped
+    # endpoint above) so they can recognize their driver on arrival.
+    photo = f"/api/rides/{ride_id}/driver-photo" if _driver_selfie_filename(conn, d) else ""
+    conn.close()
     return {"car": {
         "driver_name": d["name"],
         "make": d["vehicle_make"] or "", "model": d["vehicle_model"] or "",
         "year": d["vehicle_year"] or "", "color": d["vehicle_color"] or "",
         "plate": d["license_plate"] or "",
+        "driver_photo": photo,
     }}
 
 
@@ -4830,7 +4832,6 @@ def migrate_rides_growth():
     conn.close()
 
 
-migrate_rides_growth()
 
 
 def compute_ride_fare(p_lat, p_lng, d_lat, d_lng, miles, tip=0, priority=False,
@@ -4952,7 +4953,30 @@ def init_rides_table():
     conn.commit()
     conn.close()
 
+
+def migrate_ride_arrival():
+    """Fix #7: driver arrival + wait-clock columns on rides."""
+    conn = db()
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(rides)").fetchall()]
+    for col, ddl in (("driver_arrived_at", "TEXT DEFAULT ''"),
+                     ("wait_minutes", "REAL DEFAULT 0"),
+                     ("wait_fee", "REAL DEFAULT 0")):
+        if col not in cols:
+            conn.execute(f"ALTER TABLE rides ADD COLUMN {col} {ddl}")
+    conn.commit()
+    conn.close()
+
 init_rides_table()
+migrate_ride_arrival()
+# Rides migrations run AFTER the rides table exists (fresh-DB boot fix:
+# migrate_rides_payment / migrate_no_driver_flag / migrate_rides_growth
+# used to be called earlier in module init, where they ALTERed a rides
+# table that had not been created yet and crashed a from-scratch boot.
+# All three are PRAGMA-guarded and idempotent, so on the production DB
+# this reorder changes nothing.)
+migrate_rides_payment()
+migrate_no_driver_flag()
+migrate_rides_growth()
 
 
 @app.post("/api/rides/request")
@@ -5066,6 +5090,36 @@ def driver_rides(driver_id: int, req: Request):
     }
 
 
+def _ride_wait(r):
+    """Fix #7 wait clock. Policy comes from the operator settings the
+    dashboard already exposes: ride_wait_free_min free minutes (default
+    5), then ride_wait_per_min dollars per minute (default 0.50).
+    While status is 'arrived' the values are live; after the rider gets
+    in, wait_minutes/wait_fee hold the recorded billable minutes/fee."""
+    free_min = fin_setting("ride_wait_free_min", 5)
+    per_min = fin_setting("ride_wait_per_min", 0.5)
+    out = {"free_min": free_min, "per_min": per_min, "waited_min": 0.0,
+           "billable_min": 0.0, "fee": round(float(r.get("wait_fee") or 0), 2),
+           "running": False}
+    arrived = r.get("driver_arrived_at") or ""
+    if not arrived:
+        return out
+    if r.get("status") == "arrived":
+        try:
+            start = datetime.fromisoformat(arrived)
+            waited = max(0.0, (datetime.now(timezone.utc) - start).total_seconds() / 60.0)
+            out["waited_min"] = round(waited, 1)
+            out["billable_min"] = round(max(0.0, waited - free_min), 1)
+            out["fee"] = round(out["billable_min"] * per_min, 2)
+            out["running"] = True
+        except Exception:
+            pass
+    elif out["fee"] or r.get("wait_minutes"):
+        out["billable_min"] = round(float(r.get("wait_minutes") or 0), 1)
+        out["waited_min"] = round(out["billable_min"] + free_min, 1) if out["billable_min"] else 0.0
+    return out
+
+
 @app.get("/api/rides/{ride_id}")
 def get_ride(ride_id: int):
     """Get ride details (for tracking page)."""
@@ -5074,7 +5128,38 @@ def get_ride(ride_id: int):
     conn.close()
     if not r:
         raise HTTPException(404, "Ride not found")
-    return dict(r)
+    d = dict(r)
+    d["wait"] = _ride_wait(d)
+    return d
+
+
+@app.post("/api/rides/{ride_id}/arrived")
+async def driver_arrived(ride_id: int, req: Request, x_pin: str = Header(default="")):
+    """Fix #7: the assigned driver taps 'I've arrived' -- records the
+    arrival time and starts the wait clock (see _ride_wait)."""
+    conn = db()
+    r = conn.execute("SELECT * FROM rides WHERE id=?", (ride_id,)).fetchone()
+    if not r:
+        conn.close()
+        raise HTTPException(404, "Ride not found")
+    me = get_driver(req)
+    is_owner = (x_pin == get_setting("pin"))
+    is_driver = (me and me["id"] == (r["driver_id"] or 0))
+    if not (is_owner or is_driver):
+        conn.close()
+        raise HTTPException(401, "Not authorized")
+    if r["status"] != "assigned":
+        conn.close()
+        raise HTTPException(400, f"Ride is '{r['status']}' -- only an assigned ride can be marked arrived")
+    now = now_iso()
+    conn.execute("UPDATE rides SET status='arrived', driver_arrived_at=?,"
+                 " updated_at=? WHERE id=?", (now, now, ride_id))
+    conn.commit()
+    conn.close()
+    log_event("ride", f"\U0001F4CD Driver arrived for ride #{ride_id} -- wait clock started", "")
+    return {"ok": True, "status": "arrived", "arrived_at": now,
+            "wait_free_min": fin_setting("ride_wait_free_min", 5),
+            "wait_per_min": fin_setting("ride_wait_per_min", 0.5)}
 
 
 @app.post("/api/rides/{ride_id}/rider-in-car")
@@ -5086,6 +5171,13 @@ async def rider_in_car(ride_id: int, req: Request):
         conn.close()
         raise HTTPException(404, "Ride not found")
     now = datetime.now(timezone.utc).isoformat()
+    # Fix #7: if the driver had arrived, record the final wait (billable
+    # minutes + fee) on the ride. The fee is recorded for the operator --
+    # it does not change the prepaid total the rider already paid.
+    if r["status"] == "arrived" and (r["driver_arrived_at"] or ""):
+        w = _ride_wait(dict(r))
+        conn.execute("UPDATE rides SET wait_minutes=?, wait_fee=? WHERE id=?",
+                     (w["billable_min"], w["fee"], ride_id))
     conn.execute("UPDATE rides SET status='in_progress', updated_at=? WHERE id=?",
                  (now, ride_id))
     conn.commit()
@@ -5567,7 +5659,7 @@ def operator_rides(req: Request, x_pin: str = Header(default="")):
         total = d.get("total") or 0
         # dashboard status model: new = needs your decision, accepted = driver on it
         st = d.get("status") or "requested"
-        dst = {"requested": "new", "assigned": "accepted"}.get(st, st)
+        dst = {"requested": "new", "assigned": "accepted", "arrived": "accepted"}.get(st, st)
         out.append({
             "id": d["id"],
             "customer_name": d.get("rider_name") or "",
@@ -5996,8 +6088,15 @@ def op_driver_docs(did: int, x_pin: str = Header(default="")):
     """Ken views a driver's uploaded documents."""
     check_pin(x_pin)
     conn = db()
+    # Documents uploaded around application time are keyed by phone
+    # (driver_id=0 until linked at apply); fall back to the driver's
+    # phone so Ken sees them either way.
+    d = conn.execute("SELECT phone FROM drivers WHERE id=?", (did,)).fetchone()
+    digits = re.sub(r"\D", "", (d["phone"] if d else "") or "")
     rows = conn.execute("SELECT doc_type, filename, uploaded_at FROM driver_docs"
-                        " WHERE driver_id=? ORDER BY doc_type", (did,)).fetchall()
+                        " WHERE driver_id=? OR phone=? OR phone=?"
+                        " ORDER BY doc_type",
+                        (did, digits, digits[-10:] if digits else "")).fetchall()
     conn.close()
     docs = [{"type": r["doc_type"], "label": ALLOWED_DOCS.get(r["doc_type"], r["doc_type"]),
              "url": f"/api/operator/drivers/docs/{r['filename']}",
@@ -6461,8 +6560,11 @@ async def driver_wallet(req: Request):
     # completed rides add to available earnings
     for r in done_rides:
         dp, tp = (r["driver_pay"] or 0), (r["tip"] or 0)
-        earn = round(dp + tp, 2)
-        history.append({"order_id": r["id"], "kind": "ride", "base": dp, "tip": tp, "total": earn})
+        # driver_pay is ALL-IN for rides: every creation path computes it
+        # as 70% of fare + 100% of tip, and rate() adds extra tips into
+        # it. Adding tip again here double-counted tips in the wallet.
+        earn = round(dp, 2)
+        history.append({"order_id": r["id"], "kind": "ride", "base": round(dp - tp, 2), "tip": tp, "total": earn})
         avail += earn
     # subtract already-paid payouts
     conn = db()
@@ -6477,7 +6579,7 @@ async def driver_wallet(req: Request):
         (d["id"],)).fetchall()
     conn.close()
     available = round(max(0, avail - paid_out - requested), 2)
-    pending = round(sum((r["driver_pay"] or 0) + (r["tip"] or 0) for r in pend_rides), 2)
+    pending = round(sum((r["driver_pay"] or 0) for r in pend_rides), 2)
     return {
         "pending": pending,
         "available": available,
