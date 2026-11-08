@@ -153,13 +153,19 @@ async function loadMyRides(){
     const rides=(j.rides||[]).filter(r=>!['cancelled'].includes(r.status));
     if(!rides.length){$('myrideslist').innerHTML='<p class="small">No rides assigned to you yet. Go online to get matched!</p>';return;}
     $('myrideslist').innerHTML='<h2>🚗 My Rides ('+rides.length+')</h2>'+rides.map(r=>{
-      const active=['assigned','in_progress'].includes(r.status);
+      const active=['assigned','arrived','in_progress'].includes(r.status);
       const done=r.status==='completed';
       return `<div class="card" style="border-color:var(--acc);margin:10px 0">
         <div class="row"><b>Ride #${r.id} · ${r.status.replace(/_/g,' ')}</b>
           <b style="color:#4ade80">$${((r.driver_pay||0)+(r.tip||0)).toFixed(2)}</b></div>
         <p><b>Rider:</b> ${(r.rider_name||'').replace(/</g,'&lt;')}<br>
         <span class="small">📍 ${(r.pickup_address||'').replace(/</g,'&lt;')}<br>🏠 ${(r.dropoff_address||'').replace(/</g,'&lt;')}</span></p>
+        ${r.status==='assigned'?`<div style="display:flex;gap:8px;margin:8px 0">
+          <a class="btn small" href="https://www.google.com/maps/dir/?api=1&destination=${r.pickup_lat?`${r.pickup_lat},${r.pickup_lng}`:encodeURIComponent(r.pickup_address||'')}" target="_blank" style="flex:1;text-decoration:none;text-align:center">🧭 To pickup</a>
+          <button class="btn small" style="flex:1" onclick="arriveMyRide(${r.id})">📍 I've arrived</button></div>`:''}
+        ${r.status==='arrived'?`<p class="small" style="color:#fbbf24">📍 You arrived -- the wait clock is running (first 5 min free, then $0.50/min).<br>
+          <a href="https://www.google.com/maps/dir/?api=1&destination=${r.dropoff_lat?`${r.dropoff_lat},${r.dropoff_lng}`:encodeURIComponent(r.dropoff_address||'')}" target="_blank" style="color:#fbbf24">🧭 Navigate to dropoff</a></p>`:''}
+        ${r.status==='in_progress'?`<p class="small"><a href="https://www.google.com/maps/dir/?api=1&destination=${r.dropoff_lat?`${r.dropoff_lat},${r.dropoff_lng}`:encodeURIComponent(r.dropoff_address||'')}" target="_blank">🧭 Navigate to dropoff</a></p>`:''}
         ${active?`<div id="dchat-${r.id}" style="max-height:180px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;margin:8px 0"></div>
         <div class="row"><input id="dchat-in-${r.id}" placeholder="Message rider…" maxlength="500" style="flex:1;margin-right:6px">
         <button class="btn small" style="width:auto" onclick="sendDriverChat(${r.id})">Send</button></div>
@@ -170,7 +176,7 @@ async function loadMyRides(){
       </div>`;
     }).join('');
     // load chat for active rides
-    rides.filter(r=>['assigned','in_progress'].includes(r.status)).forEach(r=>loadDriverChat(r.id));
+    rides.filter(r=>['assigned','arrived','in_progress'].includes(r.status)).forEach(r=>loadDriverChat(r.id));
   }catch(e){$('myrideslist').innerHTML='<p class="small">Could not load rides. Log in first.</p>';}
 }
 async function loadDriverChat(rideId){
@@ -191,6 +197,11 @@ async function sendDriverChat(rideId){
   await fetch(`/api/rides/${rideId}/messages`,{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({sender:'driver',message:text})});
   loadDriverChat(rideId);
+}
+async function arriveMyRide(rideId){
+  const r=await (await fetch('/api/rides/'+rideId+'/arrived',{method:'POST'})).json();
+  if(r.ok){loadMyRides();}
+  else alert('\u274C '+(r.detail||'Could not mark arrived'));
 }
 async function completeMyRide(rideId){
   if(!confirm('Mark ride #'+rideId+' complete?'))return;
