@@ -48,6 +48,11 @@
       <div class="row"><b style="color:#d4af37">🚗 Drop Rides</b><span id="ride-launch" class="small"></span></div>
       <p class="small">Customers request rides, you accept or decline. Drivers need your separate rides approval (photo of them + photo of their car + waiver).</p>
     </div>
+    <div class="card" id="launchcard">
+      <h3 style="margin-top:0">🚀 Launch checklist — before you pitch Drop as live</h3>
+      <div id="launchlist"><p class="small">Loading live checks…</p></div>
+      <p class="small" style="opacity:.65">✅ = Drop verified it just now from a live endpoint. ⬜ = a manual step only you can do or confirm — Drop will never fake-check these.</p>
+    </div>
     <h3>🚨 Ride requests <span id="ridepend"></span></h3>
     <div id="ridelist"></div>
     <h3>🛣️ Active rides</h3>
@@ -592,12 +597,30 @@ async function loadRides(){
       <p class="small">📍 ${esc(x.pickup_address)} → 🏁 ${esc(x.address)}<br>
       👤 Driver: ${esc(x.driver_name||('Me' ))} · 💵 $${(x.total||0).toFixed(2)}
       ${x.wait_fee?`<br>⏳ Wait: ${x.wait_minutes} min = <b>$${x.wait_fee.toFixed(2)}</b>`:''}</p>
-      ${x.wait_fee?`<button class="btn small" onclick="rideWaitCharge(${x.id})">💳 Create wait-fee payment link ($${x.wait_fee.toFixed(2)})</button>`:''}
     </div>`).join('')||'<p class="small">No active rides.</p>';
   // pricing
   const s=await (await fetch('/api/operator/settings',{headers:H()})).json();
   $('rbase').value=s.ride_base_fare||4.99; $('rmile').value=s.ride_per_mile||2;
   $('rwaitfree').value=s.ride_wait_free_min||5; $('rwaitmin').value=s.ride_wait_per_min||0.5; $('rmaxmi').value=s.ride_max_miles||150;
+  loadLaunchChecklist();
+}
+async function loadLaunchChecklist(){
+  const el=$('launchlist'); if(!el) return;
+  const rows=[];
+  try{ const h=await (await fetch('/api/health')).json();
+    rows.push(`${h.stripe_live?'✅':'⬜'} <b>Stripe payments live</b> — riders can pay by card`); }catch(e){}
+  try{ const c=await (await fetch('/api/operator/connect/status',{headers:H()})).json();
+    rows.push(`${c.enabled?'✅':'⬜'} <b>Stripe Connect active</b> — automatic driver payouts`);
+    (c.steps||[]).forEach(st=>rows.push(`&nbsp;&nbsp;&nbsp;${st.done?'✅':'⬜'} ${st.label}`)); }catch(e){}
+  try{ const dd=await (await fetch('/api/operator/drivers?status=approved',{headers:H()})).json();
+    const n=(dd||[]).filter(d=>d.rides_approved).length;
+    rows.push(`${n>0?'✅':'⬜'} <b>First drivers approved</b> — ${n} approved for rides right now`); }catch(e){}
+  rows.push(`⬜ <b>Stripe webhook registered</b> — webhook URL + STRIPE_WEBHOOK_SECRET on Render (manual; can't be checked from inside Drop — the Phase 2 backup auto-check covers missed payments meanwhile)`);
+  rows.push(`⬜ <b>Payouts unpaused</b> — Drop's Stripe balance is not negative (check in the Stripe dashboard)`);
+  rows.push(`⬜ <b>Rideshare insurance endorsement</b> — Drop's own coverage for paid passenger rides is in place`);
+  rows.push(`⬜ <b>City/state permit check</b> — rideshare rules for the launch city checked`);
+  rows.push(`⬜ <b>Real ride test passed</b> — one full ride on two phones with a real card, end to end`);
+  el.innerHTML=rows.map(r=>`<p class="small" style="margin:5px 0">${r}</p>`).join('');
 }
 async function rideDecide(id,action){
   const driverId=action==='accept'?(document.getElementById('rd-'+id)||{}).value||0:0;
@@ -606,12 +629,6 @@ async function rideDecide(id,action){
     headers:{...H(),'Content-Type':'application/json'},body:JSON.stringify({action,driver_id:+driverId})});
   const j=await r.json();
   if(!r.ok)alert('Error: '+(j.detail||'failed')); else loadRides();
-}
-async function rideWaitCharge(id){
-  const r=await fetch(`/api/operator/rides/${id}/wait-charge`,{method:'POST',headers:H()});
-  const j=await r.json();
-  if(r.ok){ prompt('Send this payment link to the customer for the wait fee:', j.url); }
-  else alert('Error: '+(j.detail||'failed'));
 }
 document.addEventListener('click',e=>{
   if(e.target&&e.target.id==='rsave'){
