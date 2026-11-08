@@ -44,6 +44,7 @@ let map, markers={};
 const FLOW=[
   ['requested','📋 Ride booked','Looking for your driver…'],
   ['assigned','👨‍✈️ Driver assigned','Your driver is on the way to you'],
+  ['arrived','📍 Driver arrived','Your driver is here — meet them at the pickup spot'],
   ['in_progress','🚗 On the way','You\'re headed to your destination'],
   ['completed','✅ Arrived','Thanks for riding with Drop!'],
 ];
@@ -54,7 +55,7 @@ async function load(){
     if(r.detail){document.body.innerHTML='<p style="padding:20px">Ride not found.</p>';return;}
     riderPhone=r.rider_phone||'';
     // show chat once a driver is assigned
-    if(r.driver_id && ['assigned','in_progress'].includes(r.status)){
+    if(r.driver_id && ['assigned','arrived','in_progress'].includes(r.status)){
       $('chatcard').style.display='block';
       loadChat();
     }
@@ -63,7 +64,7 @@ async function load(){
     if(r.driver_id){
       try{
         const d=await(await fetch('/api/rides/'+rid+'/driver-loc')).json();
-        if(d.lat) updateDriverLoc(d.lat, d.lng, r);
+        if(d.lat) updateDriverLoc(d.lat, d.lng, r, d.updated);
       }catch(e){}
     }
   }catch(e){}
@@ -73,10 +74,11 @@ function render(r){
   // status
   const idx=FLOW.findIndex(s=>s[0]===r.status);
   $('status').innerHTML=`
-    <div style="font-size:2.5rem">${FLOW[Math.max(0,idx)][0]==='completed'?'✅':FLOW[Math.max(0,idx)][0]==='in_progress'?'🚗':FLOW[Math.max(0,idx)][0]==='assigned'?'👨‍✈️':'📋'}</div>
+    <div style="font-size:2.5rem">${FLOW[Math.max(0,idx)][0]==='completed'?'✅':FLOW[Math.max(0,idx)][0]==='in_progress'?'🚗':FLOW[Math.max(0,idx)][0]==='assigned'?'👨‍✈️':FLOW[Math.max(0,idx)][0]==='arrived'?'📍':'📋'}</div>
     <div class="big">${FLOW[Math.max(0,idx)][1]}</div>
     <div class="small">${FLOW[Math.max(0,idx)][2]}</div>
-    <div class="small" style="margin-top:8px;opacity:.7">$${r.total.toFixed(2)} · ${r.miles.toFixed(1)} miles</div>`;
+    <div class="small" style="margin-top:8px;opacity:.7">$${r.total.toFixed(2)} · ${r.miles.toFixed(1)} miles</div>
+    ${(r.wait&&(r.status==='arrived'||r.wait.fee>0))?`<div class="small" style="margin-top:6px;color:#fbbf24">⏳ Wait: ${r.wait.waited_min} min${r.wait.running?' so far':''} (first ${r.wait.free_min} free)${r.wait.fee>0?` · wait fee $${r.wait.fee.toFixed(2)}`:''}</div>`:''}`;
 
   // map
   if(!map){
@@ -99,13 +101,18 @@ function render(r){
   if(r.driver_name){
     $('driver').style.display='block';
     $('driver').innerHTML=`
-      <b>👨‍✈️ Your driver: ${r.driver_name}</b><br>
-      <span class="small" id="eta">Calculating ETA…</span>
+      <div style="display:flex;gap:12px;align-items:center">
+        <img id="driverphoto" alt="Your driver" style="display:none;width:64px;height:64px;border-radius:50%;object-fit:cover;border:2px solid var(--acc)">
+        <div><b>👨‍✈️ Your driver: ${r.driver_name}</b><br>
+        <span class="small" id="eta">Calculating ETA…</span><br>
+        <span class="small" id="gpsfresh" style="opacity:.65"></span></div>
+      </div>
       <div class="small" id="carinfo" style="margin-top:6px">Loading car info…</div>`;
     // car details so rider spots the right vehicle
     fetch('/api/rides/'+rid+'/car').then(x=>x.json()).then(c=>{
       const el=$('carinfo');
       if(!el)return;
+      if(c.car&&c.car.driver_photo){const im=$('driverphoto');if(im){im.onerror=()=>{im.style.display='none'};im.src=c.car.driver_photo;im.style.display='block';}}
       if(c.car&&(c.car.make||c.car.plate)){
         el.innerHTML=`🚗 <b>${c.car.color} ${c.car.year} ${c.car.make} ${c.car.model}</b>`+
           (c.car.plate?`<br>🔢 Plate: <b>${c.car.plate}</b>`:'');
@@ -116,12 +123,12 @@ function render(r){
   // steps
   $('steps').innerHTML='<div class="card"><h3 style="margin-top:0">Your trip</h3>'+FLOW.map((s,i)=>{
     const done=i<=idx;
-    return `<div class="step ${done?'done':''}"><div class="dot">${done?'✓':['📋','👨‍✈️','🚗','✅'][i]}</div><div><div class="lbl">${s[1]}</div><div class="sub">${s[2]}</div></div></div>`;
+    return `<div class="step ${done?'done':''}"><div class="dot">${done?'✓':['📋','👨‍✈️','📍','🚗','✅'][i]}</div><div><div class="lbl">${s[1]}</div><div class="sub">${s[2]}</div></div></div>`;
   }).join('')+'</div>';
 
   // actions
   let html='';
-  if(r.status==='assigned'){
+  if(['assigned','arrived'].includes(r.status)){
     html+=`<button class="btn" id="incar" style="width:100%">✅ I'm in the car</button>
       <p class="small" style="text-align:center">Tap when your driver picks you up</p>`;
   }
@@ -174,7 +181,18 @@ function render(r){
   };
 }
 
-function updateDriverLoc(lat,lng,r){
+function updateDriverLoc(lat,lng,r,updated){
+  // GPS freshness: tell the rider how old the driver's last fix is
+  const gf=$('gpsfresh');
+  if(gf){
+    const t=updated?new Date(updated).getTime():NaN;
+    if(isNaN(t)){gf.textContent='';}
+    else{
+      const ageSec=Math.max(0,Math.round((Date.now()-t)/1000));
+      if(ageSec<=60){gf.textContent='📡 Location updated '+ageSec+'s ago';gf.style.color='';gf.style.opacity=.65;}
+      else{const m=Math.floor(ageSec/60);gf.textContent='⚠️ Location may be stale — updated '+(m>=1?(m+'m '+(ageSec%60)+'s'):ageSec+'s')+' ago';gf.style.color='#f66';gf.style.opacity=1;}
+    }
+  }
   if(!map) return;
   if(markers.driver){
     markers.driver.setLatLng([lat,lng]);
